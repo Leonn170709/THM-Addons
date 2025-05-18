@@ -12,6 +12,7 @@ import meteordevelopment.meteorclient.systems.hud.HudGroup;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import org.slf4j.Logger;
+import xyz.omegaware.addon.modules.TSRKitBotModule;
 
 public class OmegawareAddons extends MeteorAddon {
     public static final Logger LOG = LogUtils.getLogger();
@@ -31,6 +32,7 @@ public class OmegawareAddons extends MeteorAddon {
         Modules.get().add(new TPAAutomationModule());
         Modules.get().add(new BeaconRangeModule());
         Modules.get().add(new ChatFilterModule());
+        Modules.get().add(new TSRKitBotModule());
     }
 
     @Override
