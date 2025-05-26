@@ -25,13 +25,6 @@ public class BeaconRangeModule extends Module {
 
     private final SettingGroup sgRender = settings.createGroup("Render");
 
-    private final Setting<Boolean> throughWalls = sgRender.add(new BoolSetting.Builder()
-        .name("through-blocks")
-        .description("Render through blocks.")
-        .defaultValue(false)
-        .build()
-    );
-
     private final Setting<Boolean> cullOverlapping = sgRender.add(new BoolSetting.Builder()
         .name("cull-overlapping")
         .description("Cull overlapping boxes.")
@@ -206,29 +199,17 @@ public class BeaconRangeModule extends Module {
                                 case 0: // X
                                     fx = isMin ? box.minX : box.maxX;
                                     fxE = isMin ? fx + epsilon : fx - epsilon;
-                                    if (throughWalls.get()) {
-                                        event.renderer.box(fx, r.y1, r.x1, fxE, r.y2, r.x2, sideColor.get(), lineColor.get(), shapeMode.get(), 0);
-                                    } else {
-                                        event.depthRenderer.box(fx, r.y1, r.x1, fxE, r.y2, r.x2, sideColor.get(), lineColor.get(), shapeMode.get(), 0);
-                                    }
+                                    event.renderer.box(fx, r.y1, r.x1, fxE, r.y2, r.x2, sideColor.get(), lineColor.get(), shapeMode.get(), 0);
                                     break;
                                 case 1: // Y
                                     fx = isMin ? box.minY : box.maxY;
                                     fxE = isMin ? fx + epsilon : fx - epsilon;
-                                    if (throughWalls.get()) {
-                                        event.renderer.box(r.x1, fx, r.y1, r.x2, fxE, r.y2, sideColor.get(), lineColor.get(), shapeMode.get(), 0);
-                                    } else {
-                                        event.depthRenderer.box(r.x1, fx, r.y1, r.x2, fxE, r.y2, sideColor.get(), lineColor.get(), shapeMode.get(), 0);
-                                    }
+                                    event.renderer.box(r.x1, fx, r.y1, r.x2, fxE, r.y2, sideColor.get(), lineColor.get(), shapeMode.get(), 0);
                                     break;
                                 case 2: // Z
                                     fx = isMin ? box.minZ : box.maxZ;
                                     fxE = isMin ? fx + epsilon : fx - epsilon;
-                                    if (throughWalls.get()) {
-                                        event.renderer.box(r.x1, r.y1, fx, r.x2, r.y2, fxE, sideColor.get(), lineColor.get(), shapeMode.get(), 0);
-                                    } else {
-                                        event.depthRenderer.box(r.x1, r.y1, fx, r.x2, r.y2, fxE, sideColor.get(), lineColor.get(), shapeMode.get(), 0);
-                                    }
+                                    event.renderer.box(r.x1, r.y1, fx, r.x2, r.y2, fxE, sideColor.get(), lineColor.get(), shapeMode.get(), 0);
                                     break;
                             }
                         }
