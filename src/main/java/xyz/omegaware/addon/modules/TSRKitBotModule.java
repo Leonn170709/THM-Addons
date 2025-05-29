@@ -269,6 +269,10 @@ public class TSRKitBotModule extends Module {
 
             for (JsonElement order : orders) {
                 JsonObject orderObj = order.getAsJsonObject();
+                if (!orderObj.has("order_id") || !orderObj.has("status") || !orderObj.has("request_type") || !orderObj.has("quantity")) {
+                    continue; // Skip if any required field is missing
+                }
+
                 String orderId = orderObj.get("order_id").getAsString();
                 String status = orderObj.get("status").getAsString();
                 String requestType = orderObj.get("request_type").getAsString();
