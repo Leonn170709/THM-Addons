@@ -1,10 +1,12 @@
 package xyz.omegaware.addon;
 
+import meteordevelopment.meteorclient.commands.Command;
 import meteordevelopment.meteorclient.commands.Commands;
 import meteordevelopment.meteorclient.pathing.BaritoneUtils;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import xyz.omegaware.addon.commands.LinkCommand;
+import xyz.omegaware.addon.commands.ShulkerQueueCommand;
 import xyz.omegaware.addon.modules.BeaconRangeModule;
 import xyz.omegaware.addon.modules.ChatFilterModule;
 import xyz.omegaware.addon.modules.TPAAutomationModule;
@@ -44,6 +46,7 @@ public class OmegawareAddons extends MeteorAddon {
         }
 
         Commands.add(new LinkCommand());
+        Commands.add(new ShulkerQueueCommand());
 
         TSRKitBotModule.apiKey = LinkCommand.loadApiKey();
         ChatFilterModule.loadFilteredCount();

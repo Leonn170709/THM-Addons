@@ -1,16 +1,19 @@
 package xyz.omegaware.addon.modules;
 
+import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.decoration.ItemFrameEntity;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.util.Hand;
@@ -20,6 +23,7 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
+import org.jetbrains.annotations.NotNull;
 import xyz.omegaware.addon.OmegawareAddons;
 
 import java.util.ArrayList;
@@ -81,9 +85,25 @@ public class ItemFrameDupeModule extends Module {
         .build()
     );
 
-    private final Setting<Boolean> dropInvIfFull = sgGeneral.add(new BoolSetting.Builder()
-        .name("drop-inventory-if-full")
+    private final Setting<Boolean> dropShulkers = sgGeneral.add(new BoolSetting.Builder()
+        .name("drop-shulkers")
         .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Integer> maxShulkersOfTypeInInventory = sgGeneral.add(new IntSetting.Builder()
+        .name("max-shulkers-of-type-in-inventory")
+        .description("Maximum number of shulker boxes of the same type allowed in the inventory.")
+        .defaultValue(5)
+        .min(1)
+        .sliderMax(27)
+        .build()
+    );
+
+    private final Setting<Boolean> smartShulkerQueue = sgGeneral.add(new BoolSetting.Builder()
+        .name("smart-shulker-queue")
+        .description("Uses a queue to cycle through shulker boxes.")
+        .defaultValue(false)
         .build()
     );
 
@@ -95,6 +115,9 @@ public class ItemFrameDupeModule extends Module {
     @EventHandler
     private void onTickPost(TickEvent.Post event) {
         if (!isActive()) return;
+
+        // if interacting with an item skip the tick
+        if (mc.player != null && (mc.player.isUsingItem())) return;
 
         if (forceDelay != 0) {
             forceDelay--;
@@ -116,23 +139,44 @@ public class ItemFrameDupeModule extends Module {
             return;
         }
 
-        if (dropInvIfFull.get()) {
-            FindItemResult res = InvUtils.findEmpty();
-            if (!res.found()) {
-                mc.player.setPitch(90.0f);
-                for (int i = 9; i < mc.player.getInventory().size(); i++) {
-                    InvUtils.drop().slot(i);
+        if (dropShulkers.get()) {
+            if (smartShulkerQueue.get() && !shulkerQueue.isEmpty()) {
+                for (ItemStack queuedShulker : shulkerQueue) {
+                    int count = 0;
+                    List<Integer> indices = new ArrayList<>();
+                    for (int i = 0; i < mc.player.getInventory().size(); i++) {
+                        ItemStack invStack = mc.player.getInventory().getStack(i);
+                        if (!invStack.isEmpty() &&
+                            invStack.toHoverableText().equals(queuedShulker.toHoverableText()) &&
+                            invStack.getItem() == queuedShulker.getItem() &&
+                            isShulkerBox(invStack.getItem())) {
+                            count++;
+                            indices.add(i);
+                        }
+                    }
+
+
+                    // If count exceeds the maximum allowed, drop the extras.
+                    if (count > maxShulkersOfTypeInInventory.get()) {
+                        int dropCount = count - maxShulkersOfTypeInInventory.get();
+                        for (int index : indices) {
+                            if (dropCount <= 0) break;
+                            int containerIndex = (index < 9) ? index + 36 : index;
+                            if (!isShulkerBox(mc.player.getInventory().getStack(containerIndex).getItem())) continue;
+
+                            InvUtils.drop().slot(containerIndex);
+                            dropCount--;
+                        }
+                    }
                 }
             }
         }
 
         ItemFrameEntity frame = (ItemFrameEntity)entitiesAbovePlayer.getFirst();
         if (frame.getHeldItemStack().isEmpty()) {
-            ItemStack itemStack = mc.player.getMainHandStack();
-            if (!itemStack.isEmpty()) {
-                interactItemFrame(frame);
-                forceDelay = insertToRotateDelay.get();
-            }
+            if (!getShulker()) return;
+            interactItemFrame(frame);
+            forceDelay = insertToRotateDelay.get();
         } else if (currentRotationCount >= rotationCount.get()) {
             attackItemFrame(frame);
             forceDelay = breakToPlaceDelay.get();
@@ -195,5 +239,99 @@ public class ItemFrameDupeModule extends Module {
 
         mc.interactionManager.attackEntity(mc.player, frame);
         mc.player.swingHand(Hand.MAIN_HAND);
+    }
+
+    private boolean getShulker() {
+        if (mc.player == null) return false;
+
+        if (smartShulkerQueue.get()) {
+            if (shulkerQueue.isEmpty()) return false;
+            if (shulkerQueueIndex >= shulkerQueue.size()) {
+                shulkerQueueIndex = 0;
+            }
+
+            ItemStack shulkerStack = shulkerQueue.get(shulkerQueueIndex);
+            shulkerQueueIndex++;
+            if (shulkerStack.isEmpty()) return false;
+
+            FindItemResult hotbarRes = InvUtils.findInHotbar(itemStack -> {
+                Item item = itemStack.getItem();
+                return isShulkerBox(item) && itemStack.getCount() > 0 && itemStack.isOf(shulkerStack.getItem());
+            });
+
+            if (hotbarRes.count() > 0) {
+                ItemStack itemStack = mc.player.getInventory().getStack(hotbarRes.slot());
+                if (itemStack.isEmpty()) return false;
+
+                if (itemStack.toHoverableText().equals(shulkerStack.toHoverableText()) && itemStack.getItem() == shulkerStack.getItem()) {
+                    mc.player.getInventory().setSelectedSlot(hotbarRes.slot());
+                    return true;
+                }
+                return false;
+            }
+
+            FindItemResult invRes = InvUtils.find(itemStack -> {
+                Item item = itemStack.getItem();
+                return isShulkerBox(item) && itemStack.getCount() > 0 && itemStack.isOf(shulkerStack.getItem());
+            });
+
+            if (invRes.count() > 0) {
+                for (int i = 0; i < invRes.count(); i++) {
+                    ItemStack itemStack = mc.player.getInventory().getStack(invRes.slot());
+                    if (itemStack.toHoverableText().equals(shulkerStack.toHoverableText()) && itemStack.getItem() == shulkerStack.getItem()) {
+                        InvUtils.move().fromId(invRes.slot()).to(mc.player.getInventory().selectedSlot);
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        FindItemResult invRes = InvUtils.find(itemStack -> {
+            Item item = itemStack.getItem();
+            return isShulkerBox(item) && itemStack.getCount() > 0;
+        });
+
+        FindItemResult hotbarRes = InvUtils.findInHotbar(itemStack -> {
+            Item item = itemStack.getItem();
+            return isShulkerBox(item) && itemStack.getCount() > 0;
+        });
+
+        if (invRes.count() <= 0 && hotbarRes.count() <= 0) return false;
+
+        if (hotbarRes.count() > 0) {
+            mc.player.getInventory().setSelectedSlot(hotbarRes.slot());
+            return true;
+        }
+
+        mc.player.getInventory().getStack(invRes.slot()).getCustomName();
+
+        InvUtils.move().fromId(invRes.slot()).to(mc.player.getInventory().selectedSlot);
+        return true;
+    }
+
+    private boolean isShulkerBox(Item item) {
+        List<@NotNull Item> SHULKERS = List.of(
+            Items.SHULKER_BOX,
+            Items.WHITE_SHULKER_BOX,
+            Items.ORANGE_SHULKER_BOX,
+            Items.MAGENTA_SHULKER_BOX,
+            Items.LIGHT_BLUE_SHULKER_BOX,
+            Items.YELLOW_SHULKER_BOX,
+            Items.LIME_SHULKER_BOX,
+            Items.PINK_SHULKER_BOX,
+            Items.GRAY_SHULKER_BOX,
+            Items.LIGHT_GRAY_SHULKER_BOX,
+            Items.CYAN_SHULKER_BOX,
+            Items.PURPLE_SHULKER_BOX,
+            Items.BLUE_SHULKER_BOX,
+            Items.BROWN_SHULKER_BOX,
+            Items.GREEN_SHULKER_BOX,
+            Items.RED_SHULKER_BOX,
+            Items.BLACK_SHULKER_BOX
+        );
+
+        return SHULKERS.contains(item);
     }
 }
