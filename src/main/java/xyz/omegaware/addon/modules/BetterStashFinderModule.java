@@ -150,7 +150,7 @@ public class BetterStashFinderModule extends Module {
                     autoReconnect.toggle();
                 }
 
-                MutableText text = Text.literal(String.format("%s[%s%s%s] %s", Formatting.GRAY, Formatting.BLUE, OmegawareAddons.PREFIX.getString(), Formatting.GRAY, Formatting.RED) + String.format("Found stash at %s, %s.", chunk.x, chunk.z)).append("\n");
+                MutableText text = Text.literal(String.format("%s%s%s%s %s", Formatting.GRAY, Formatting.BLUE, OmegawareAddons.PREFIX.getString().substring(0, prefix.length() - 1), Formatting.GRAY, Formatting.RED) + String.format("Found stash at %s, %s.", chunk.x, chunk.z)).append("\n");
 
                 disconnectOnStashFound.set(false); // Disable the setting to prevent infinite disconnects
 
