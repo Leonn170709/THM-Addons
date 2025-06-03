@@ -1,7 +1,9 @@
 package xyz.omegaware.addon;
 
+import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.commands.Commands;
 import meteordevelopment.meteorclient.pathing.BaritoneUtils;
+import meteordevelopment.meteorclient.utils.Utils;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import xyz.omegaware.addon.commands.LinkCommand;
@@ -15,10 +17,17 @@ import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import org.slf4j.Logger;
 
+import java.io.File;
+
 public class OmegawareAddons extends MeteorAddon {
     public static final Logger LOG = LogUtils.getLogger();
     public static final Category CATEGORY = new Category("OmegaWare");
+    @SuppressWarnings("unused")
     public static final HudGroup HUD_GROUP = new HudGroup("OmegaWare");
+
+    public static File GetConfigFile(String key, String filename) {
+        return new File(new File(new File(new File(MeteorClient.FOLDER, "omegaware"), key), Utils.getFileWorldName()), filename);
+    }
 
     public static final Text PREFIX = Text.empty()
         .append(Text.literal("[").formatted(Formatting.WHITE))
@@ -37,17 +46,12 @@ public class OmegawareAddons extends MeteorAddon {
         Modules.get().add(new ItemFrameDupeModule());
         Modules.get().add(new BetterStashFinderModule());
 
-        /*
-        if(BaritoneUtils.IS_AVAILABLE) {
-            Modules.get().add(new BaritoneShit());
+        if (BaritoneUtils.IS_AVAILABLE) {
+            Modules.get().add(new TestModule());
         }
-        */
 
         Commands.add(new LinkCommand());
         Commands.add(new ShulkerQueueCommand());
-
-        TSRKitBotModule.apiKey = LinkCommand.loadApiKey();
-        ChatFilterModule.loadFilteredCount();
     }
 
     @Override

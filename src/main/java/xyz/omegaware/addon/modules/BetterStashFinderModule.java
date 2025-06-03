@@ -4,7 +4,6 @@ package xyz.omegaware.addon.modules;
 import com.google.common.reflect.TypeToken;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.world.ChunkDataEvent;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.WindowScreen;
@@ -19,7 +18,6 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.misc.AutoReconnect;
 import meteordevelopment.meteorclient.systems.modules.world.StashFinder;
-import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.render.MeteorToast;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.entity.*;
@@ -114,6 +112,7 @@ public class BetterStashFinderModule extends Module {
         for (BlockEntity blockEntity : event.chunk().getBlockEntities().values()) {
             if (!storageBlocks.get().contains(blockEntity.getType())) continue;
 
+            //noinspection IfCanBeSwitch
             if (blockEntity instanceof ChestBlockEntity) chunk.chests++;
             else if (blockEntity instanceof BarrelBlockEntity) chunk.barrels++;
             else if (blockEntity instanceof ShulkerBoxBlockEntity) chunk.shulkers++;
@@ -150,7 +149,8 @@ public class BetterStashFinderModule extends Module {
                     autoReconnect.toggle();
                 }
 
-                MutableText text = Text.literal(String.format("%s%s%s%s %s", Formatting.GRAY, Formatting.BLUE, OmegawareAddons.PREFIX.getString().substring(0, prefix.length() - 1), Formatting.GRAY, Formatting.RED) + String.format("Found stash at %s, %s.", chunk.x, chunk.z)).append("\n");
+                String prefix = OmegawareAddons.PREFIX.getString();
+                MutableText text = Text.literal(String.format("%s%s%s%s %s", Formatting.GRAY, Formatting.BLUE, prefix.substring(0, prefix.length() - 1), Formatting.GRAY, Formatting.RED) + String.format("Found stash at %s, %s.", chunk.x, chunk.z)).append("\n");
 
                 disconnectOnStashFound.set(false); // Disable the setting to prevent infinite disconnects
 
@@ -212,11 +212,40 @@ public class BetterStashFinderModule extends Module {
         }
     }
 
+    private void saveCsv() {
+        try {
+            File file = OmegawareAddons.GetConfigFile("better-stash-finder", "stashes.csv");
+            //noinspection ResultOfMethodCallIgnored
+            file.getParentFile().mkdirs();
+            Writer writer = new FileWriter(file);
+
+            writer.write("X,Z,Chests,Barrels,Shulkers,EnderChests,Furnaces,DispensersDroppers,Hoppers\n");
+            for (StashFinder.Chunk chunk : chunks) chunk.write(writer);
+
+            writer.close();
+        } catch (IOException e) {
+            OmegawareAddons.LOG.info("Failed to save stashes to CSV: {}", e.getMessage());
+        }
+    }
+
+    private void saveJson() {
+        try {
+            File file = OmegawareAddons.GetConfigFile("better-stash-finder", "stashes.json");
+            //noinspection ResultOfMethodCallIgnored
+            file.getParentFile().mkdirs();
+            Writer writer = new FileWriter(file);
+            GSON.toJson(chunks, writer);
+            writer.close();
+        } catch (IOException e) {
+            OmegawareAddons.LOG.info("Failed to save stashes to JSON: {}", e.getMessage());
+        }
+    }
+
     private void load() {
         boolean loaded = false;
 
         // Try to load json
-        File file = getJsonFile();
+        File file = OmegawareAddons.GetConfigFile("better-stash-finder", "stashes.json");
         if (file.exists()) {
             try {
                 FileReader reader = new FileReader(file);
@@ -232,7 +261,7 @@ public class BetterStashFinderModule extends Module {
         }
 
         // Try to load csv
-        file = getCsvFile();
+        file = OmegawareAddons.GetConfigFile("better-stash-finder", "stashes.csv");
         if (!loaded && file.exists()) {
             try {
                 BufferedReader reader = new BufferedReader(new FileReader(file));
@@ -258,41 +287,6 @@ public class BetterStashFinderModule extends Module {
                 if (chunks == null) chunks = new ArrayList<>();
             }
         }
-    }
-
-    private void saveCsv() {
-        try {
-            File file = getCsvFile();
-            file.getParentFile().mkdirs();
-            Writer writer = new FileWriter(file);
-
-            writer.write("X,Z,Chests,Barrels,Shulkers,EnderChests,Furnaces,DispensersDroppers,Hoppers\n");
-            for (StashFinder.Chunk chunk : chunks) chunk.write(writer);
-
-            writer.close();
-        } catch (IOException e) {
-            OmegawareAddons.LOG.info("Failed to save stashes to CSV: {}", e.getMessage());
-        }
-    }
-
-    private void saveJson() {
-        try {
-            File file = getJsonFile();
-            file.getParentFile().mkdirs();
-            Writer writer = new FileWriter(file);
-            GSON.toJson(chunks, writer);
-            writer.close();
-        } catch (IOException e) {
-            OmegawareAddons.LOG.info("Failed to save stashes to JSON: {}", e.getMessage());
-        }
-    }
-
-    private File getJsonFile() {
-        return new File(new File(new File(MeteorClient.FOLDER, "stashes"), Utils.getFileWorldName()), "omegaware-stashes.json");
-    }
-
-    private File getCsvFile() {
-        return new File(new File(new File(MeteorClient.FOLDER, "stashes"), Utils.getFileWorldName()), "omegaware-stashes.csv");
     }
 
     @Override
