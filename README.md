@@ -21,6 +21,9 @@
   - List your active, pending, completed, and failed orders.
   - Cancel orders.
   - Send tokens to other users.
+- **6B6T Item Frame Dupe**
+  - Shamelessly taken from https://github.com/kybe236/rusher-auto-item-frame-dupe/
+  - With some slight bug fixes and improvements
 - **Better Stash Finder**
   - It is practically an exact copy of meteors stash finder
   - Added disconnect on stash found which will also disable auto reconnect if it triggers
