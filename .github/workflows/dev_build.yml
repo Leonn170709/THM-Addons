@@ -33,7 +33,7 @@ jobs:
         uses: marvinpinto/action-automatic-releases@latest
         with:
           repo_token: '${{ secrets.PAT_TOKEN }}'
-          automatic_release_tag: snapshot-${{ steps.get_versions.outputs.mod_version }}
+          automatic_release_tag: snapshot-v${{ steps.get_version.outputs.mod_version }}
           prerelease: true
           title: Dev Build
           files: |
