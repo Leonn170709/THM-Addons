@@ -393,7 +393,7 @@ public class BetterBaritoneBuild extends Module {
         if (msg == null || msg.isEmpty()) return;
         msg = msg.toLowerCase().trim();
 
-        if (!msg.contains("[baritone]")) return;
+        if (!msg.contains("[baritone]") || msg.contains("omegaware")) return;
         int index = msg.indexOf("[baritone]");
 
         msg = msg.substring(index+10).trim(); // Remove the "[Baritone]" part
@@ -423,6 +423,15 @@ public class BetterBaritoneBuild extends Module {
                 return;
             }
 
+            if (itemsToFetch.stream().anyMatch(storageItem -> storageItem.item == item)) {
+                if (debugMode.get()) {
+                    ChatUtils.sendMsg(OmegawareAddons.PREFIX.copy()
+                        .append(Text.literal("Item already in queue: ").formatted(Formatting.YELLOW))
+                        .append(Text.literal(item.getName().getString()).formatted(Formatting.WHITE)));
+                }
+                return;
+            }
+
             pathToItemLocation(item, stacks+extraStacks.get());
             return;
         }
@@ -447,7 +456,6 @@ public class BetterBaritoneBuild extends Module {
                     networkHandler.getConnection().disconnect(text);
                 }
             }
-            event.cancel();
             return;
         }
 
@@ -459,7 +467,6 @@ public class BetterBaritoneBuild extends Module {
                     .append(Text.literal("Build command captured: ").formatted(Formatting.GREEN))
                     .append(Text.literal(buildCommand).formatted(Formatting.WHITE)));
             }
-            event.cancel();
             return;
         }
 
@@ -467,7 +474,9 @@ public class BetterBaritoneBuild extends Module {
             buildCommand = "";
             eventQueue.clear();
             itemsToFetch.clear();
-            event.cancel();
+
+            ChatUtils.sendMsg(OmegawareAddons.PREFIX.copy()
+                    .append(Text.literal("Stop received.").formatted(Formatting.GREEN)));
         }
     }
 
@@ -500,11 +509,25 @@ public class BetterBaritoneBuild extends Module {
         }
 
         if (lastBlockInteractPos == null) return;
+        BlockEntity blockEntity = mc.world.getBlockEntity(lastBlockInteractPos);
+        if (blockEntity == null) return;
+
+        for (LinkedStorage linkedStorage : linkedStorages) {
+            if (linkedStorage.blockPos.equals(lastBlockInteractPos)) {
+                lastBlockInteractPos = null;
+                linkedStorages.remove(linkedStorage);
+
+                LinkedStorage newStorage = indexStorage(mc.player.currentScreenHandler, blockEntity.getPos());
+                if (newStorage != null) {
+                    linkedStorages.add(newStorage);
+                    saveLinkedStorages();
+                }
+
+                return;
+            }
+        }
 
         if (storageLinkMode.get()) {
-            BlockEntity blockEntity = mc.world.getBlockEntity(lastBlockInteractPos);
-            if (blockEntity == null) return;
-
             if (blockEntity instanceof ShulkerBoxBlockEntity || blockEntity instanceof ChestBlockEntity || blockEntity instanceof BarrelBlockEntity || blockEntity instanceof EnderChestBlockEntity) {
                 for (LinkedStorage linkedStorage : linkedStorages) {
                     if (linkedStorage.blockPos.equals(lastBlockInteractPos)) {
@@ -684,16 +707,6 @@ public class BetterBaritoneBuild extends Module {
         return null;
     }
 
-    private static class FindResult {
-        public boolean found;
-        public LinkedStorage linkedStorage;
-
-        public FindResult(boolean found, LinkedStorage linkedStorage) {
-            this.found = found;
-            this.linkedStorage = linkedStorage;
-        }
-    }
-
     private void pathToItemLocation(Item item, @Nullable Integer stacks) {
         if (mc.player == null || mc.interactionManager == null) return;
 
@@ -776,23 +789,35 @@ public class BetterBaritoneBuild extends Module {
 
             grabbedItems.add(item);
 
-            count++;
-            InvUtils.shiftClick().slotId(i);
-
             LinkedStorage linkedStorage = storageItem.linkedStorage;
             linkedStorages.remove(linkedStorage);
-            linkedStorage.inventory.remove(handler.getSlot(i).getStack());
+            int finalI = i;
+            linkedStorage.inventory.removeIf(itemStack -> itemStack.equals(handler.getSlot(finalI).getStack()));
             linkedStorages.add(linkedStorage);
             saveLinkedStorages();
+
+            count++;
+            InvUtils.shiftClick().slotId(i);
 
             if (count >= storageItem.stacks) {
                 break;
             }
         }
 
-        itemsToFetch.removeIf(element -> grabbedItems.contains(element.item));
+        itemsToFetch.remove(storageItem);
 
-        if (!buildCommand.isEmpty()) {
+        storageItem.stacks = storageItem.stacks - count;
+        itemsToFetch.add(storageItem);
+
+        int finalCount = count;
+        itemsToFetch.removeIf(element -> grabbedItems.contains(element.item) && finalCount >= element.stacks);
+
+        if (!itemsToFetch.isEmpty()) {
+            eventQueue.clear();
+            itemsToFetch.forEach(element -> {
+                pathToItemLocation(element.item, element.stacks);
+            });
+        } else if (!buildCommand.isEmpty()) {
             eventQueue.add(new Event(true, () -> {
                 baritone.getCommandManager().execute(buildCommand);
             }));
