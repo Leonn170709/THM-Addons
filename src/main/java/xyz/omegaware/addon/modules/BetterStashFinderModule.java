@@ -1,6 +1,5 @@
 package xyz.omegaware.addon.modules;
 
-
 import com.google.common.reflect.TypeToken;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;

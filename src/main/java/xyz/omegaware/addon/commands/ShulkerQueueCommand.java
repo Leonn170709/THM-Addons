@@ -2,12 +2,9 @@ package xyz.omegaware.addon.commands;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import meteordevelopment.meteorclient.commands.Command;
-import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import net.minecraft.command.CommandSource;
 import net.minecraft.item.ItemStack;
-import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
-import xyz.omegaware.addon.OmegawareAddons;
 import xyz.omegaware.addon.modules.ItemFrameDupeModule;
 import xyz.omegaware.addon.utils.Logger;
 
