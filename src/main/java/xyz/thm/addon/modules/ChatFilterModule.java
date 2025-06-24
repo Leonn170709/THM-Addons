@@ -1,4 +1,4 @@
-package xyz.omegaware.addon.modules;
+package xyz.thm.addon.modules;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -8,13 +8,12 @@ import meteordevelopment.meteorclient.gui.widgets.containers.WHorizontalList;
 import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import meteordevelopment.meteorclient.settings.*;
-import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
-import xyz.omegaware.addon.OmegawareAddons;
+import xyz.thm.addon.THMAddon;
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import xyz.omegaware.addon.utils.Logger;
+import xyz.thm.addon.utils.Logger;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -23,11 +22,11 @@ import java.io.Writer;
 import java.nio.file.Files;
 import java.util.List;
 
-import static xyz.omegaware.addon.utils.ServerCheck.isNot6B6T;
+import static xyz.thm.addon.utils.ServerCheck.isNot6B6T;
 
 public class ChatFilterModule extends Module {
     public ChatFilterModule() {
-        super(OmegawareAddons.CATEGORY, "6B6T-chat-filter", "This module filters chat messages based on selected criteria.");
+        super(THMAddon.CATEGORY, "6B6T-chat-filter", "This module filters chat messages based on selected criteria.");
     }
 
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
@@ -103,7 +102,7 @@ public class ChatFilterModule extends Module {
     }
 
     private void saveFilteredCount() {
-        File configFile = OmegawareAddons.GetConfigFile("chat-filter", "filtered.count");
+        File configFile = THMAddon.GetConfigFile("chat-filter", "filtered.count");
 
         try {
             //noinspection ResultOfMethodCallIgnored
@@ -115,16 +114,16 @@ public class ChatFilterModule extends Module {
             writer.append(payload.toString());
             writer.close();
         } catch (Exception ignored) {
-            OmegawareAddons.LOG.info("Failed to save Filtered Message count to {}", configFile.toPath());
+            THMAddon.LOG.info("Failed to save Filtered Message count to {}", configFile.toPath());
         }
     }
 
     public void loadFilteredCount() {
         if (loaded) return;
 
-        File configFile = OmegawareAddons.GetConfigFile("chat-filter", "filtered.count");
+        File configFile = THMAddon.GetConfigFile("chat-filter", "filtered.count");
         if (!configFile.exists()) {
-            OmegawareAddons.LOG.warn("{} not found!", configFile.toPath());
+            THMAddon.LOG.warn("{} not found!", configFile.toPath());
             return;
         }
 
@@ -136,7 +135,7 @@ public class ChatFilterModule extends Module {
                 loaded = true;
             }
         } catch (IOException e) {
-            OmegawareAddons.LOG.error("Failed to load Filtered Message count from {}: {}", configFile.toPath(), e.getMessage());
+            THMAddon.LOG.error("Failed to load Filtered Message count from {}: {}", configFile.toPath(), e.getMessage());
         }
     }
 
@@ -207,16 +206,6 @@ public class ChatFilterModule extends Module {
             }
         }
 
-        // Little thing for me as the Developer :)
-        if (username.equals("LostEmotions") || username.equals("LostFriendships")) {
-            Text msg = Text.literal("[").formatted(Formatting.WHITE)
-                .append(Text.literal("OmegaWare").formatted(Formatting.AQUA))
-                .append(Text.literal("] "))
-                .append(username).formatted(Formatting.AQUA)
-                .append(Text.literal(" » ").formatted(Formatting.WHITE))
-                .append(Text.literal(message).formatted(Formatting.AQUA));
-            event.setMessage(msg);
-        }
     }
 
     @Override

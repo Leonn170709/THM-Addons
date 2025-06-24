@@ -1,4 +1,4 @@
-package xyz.omegaware.addon.utils;
+package xyz.thm.addon.utils;
 
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import net.minecraft.text.Text;

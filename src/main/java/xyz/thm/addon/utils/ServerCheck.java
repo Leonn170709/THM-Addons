@@ -1,4 +1,4 @@
-package xyz.omegaware.addon.utils;
+package xyz.thm.addon.utils;
 
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.network.ServerInfo;

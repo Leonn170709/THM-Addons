@@ -1,6 +1,6 @@
 {
   "required": true,
-  "package": "xyz.omegaware.addon.mixin",
+  "package": "xyz.thm.addon.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [],
   "injectors": {

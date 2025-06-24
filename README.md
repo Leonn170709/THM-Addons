@@ -1,4 +1,4 @@
-# OmegaWare Addons (For Meteor Client)
+# THM Addons (For Meteor Client)
 
 ## Features
 - **TPA Automations**:
@@ -11,29 +11,6 @@
   - Can filter out specific messages from chat based on the criteria you set.
   - Can filter out messages from specific users.
   - Can filter the chat to only show messages from users with a rank.
-- **Beacon Range**:
-  - Displays the range of powered beacons.
-  - The range box's color can be changed.
-  - There is a setting to cull overlapping sections of range boxes.
-- **TSR Clan KitBot API**: Disabled for now API not ready
-  - Check your token balance.
-  - Order kits
-  - List your active, pending, completed, and failed orders.
-  - Cancel orders.
-  - Send tokens to other users.
-- **6B6T Item Frame Dupe**
-  - Shamelessly taken from [rusher-auto-item-frame-dupe](https://github.com/kybe236/rusher-auto-item-frame-dupe/)
-  - With some slight bug fixes and improvements
-- **Better Stash Finder**
-  - It is practically an exact copy of meteors stash finder
-  - Added disconnect on stash found which will also disable auto reconnect if it triggers
-  - Changed default values and increased slider maximum values
-- **Better Baritone Build**
-  - Add some improvements to the baritone build command
-  - Can refill items from any storage block
-  - Please use [this fork of baritone](https://github.com/Omega172/baritone-staircase) which fixes staircase building and carpet issues
-  - I recommend to use this with [Litematica Printer](https://github.com/aleksilassila/litematica-printer) or [Meteor Litematica Printer](https://github.com/kkllffaa/meteor-litematica-printer)
-  - Vide tutorial on how to use it [here](https://youtu.be/mpK_ld8JH34)
 
 ## Building
 ### Local Build
@@ -58,3 +35,5 @@ Contributions are welcome! Please review the [Contributing Guidelines](CONTRIBUT
 
 ## License
 [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html) - This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
+ 
+Addon taken from [Omegaware](https://github.com/Omega172/OmegaWare-Addons) and modified

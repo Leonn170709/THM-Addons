@@ -1,24 +1,24 @@
 {
   "schemaVersion": 1,
-  "id": "omegaware-addons",
+  "id": "thm-addons",
   "version": "${version}",
-  "name": "OmegaWare Addons",
-  "description": "Addons for Meteor Client",
+  "name": "THM Addon",
+  "description": "Addon for Meteor Client",
   "authors": [
-    "Omega172"
+    "Leonn170709"
   ],
   "contact": {
-    "repo": "https://github.com/Omega172/OmegaWare-Addons"
+    "repo": "https://github.com/Leonn170709/THM-Addons"
   },
   "icon": "assets/icon/icon.png",
   "environment": "client",
   "entrypoints": {
     "meteor": [
-      "xyz.omegaware.addon.OmegawareAddons"
+      "xyz.thm.addon.THMAddon"
     ]
   },
   "mixins": [
-    "omegaware-addons.mixins.json"
+    "thm-addon.mixins.json"
   ],
   "custom": {
     "meteor-client:color": "0,255,255",

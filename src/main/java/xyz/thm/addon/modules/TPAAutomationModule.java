@@ -1,25 +1,26 @@
-package xyz.omegaware.addon.modules;
+package xyz.thm.addon.modules;
 
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.friends.Friends;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import net.minecraft.util.Formatting;
-import xyz.omegaware.addon.OmegawareAddons;
+import xyz.thm.addon.THMAddon;
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import xyz.omegaware.addon.utils.Logger;
+
+import xyz.thm.addon.utils.Logger;
 
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static xyz.omegaware.addon.utils.ServerCheck.isNot6B6T;
+import static xyz.thm.addon.utils.ServerCheck.isNot6B6T;
 
 public class TPAAutomationModule extends Module {
     public TPAAutomationModule() {
-        super(OmegawareAddons.CATEGORY, "TPA-automations", "A module that automatically accepts or denies teleport requests based on a list of approved players.");
+        super(THMAddon.CATEGORY, "TPA-automations", "A module that automatically accepts or denies teleport requests based on a list of approved players.");
     }
 
     private final SettingGroup sgApprovedUsers = this.settings.createGroup("Approved Users");
@@ -28,7 +29,7 @@ public class TPAAutomationModule extends Module {
     private final Setting<List<String>> approvedUsers = sgApprovedUsers.add(new StringListSetting.Builder()
         .name("approved-users-list")
         .description("A list of users to filter.")
-        .defaultValue(List.of("user1", "user2", "user3"))
+        .defaultValue(List.of("Steve", "Notch", "GommeHD"))
         .build()
     );
 
@@ -40,8 +41,8 @@ public class TPAAutomationModule extends Module {
     );
 
     private final Setting<Boolean> acceptTSRBots = sgGeneral.add(new BoolSetting.Builder()
-        .name("accept-tsr-bots")
-        .description("Automatically accept teleport requests that are from the TSR bot users.")
+        .name("accept-THM-bot")
+        .description("Automatically accept teleport requests that are from the THM bot.")
         .defaultValue(true)
         .build()
     );
@@ -87,13 +88,8 @@ public class TPAAutomationModule extends Module {
     private static final Pattern TPA_REQUEST_PATTERN = Pattern.compile("^([A-Za-z0-9_]{3,16}) wants to teleport to you\\.$");
 
     private static final Set<String> TSR_KIT_BOT_USERS = Set.of(
-            "royalburner",
-            "Poolyin",
-            "PoolyinHelper",
-            "RoyalHelper",
-            "TSRMANIA",
-            "WomenAreScary",
-            "ElectricCallboy"
+            "KitBot1"
+
     );
 
     @Override
