@@ -22,7 +22,7 @@
   ],
   "custom": {
     "meteor-client:color": "0,255,255",
-    "omegaware-addons:commit": "${commit}"
+    "thm-addon:commit": "${commit}"
   },
   "depends": {
     "java": ">=21",

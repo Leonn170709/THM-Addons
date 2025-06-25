@@ -3,7 +3,7 @@ name: Bug report
 about: Create a report to help us improve
 title: "[SHORT TITLE DESCRIBING THE BUG]"
 labels: bug
-assignees: Omega172
+assignees: Leonn170709
 
 ---
 

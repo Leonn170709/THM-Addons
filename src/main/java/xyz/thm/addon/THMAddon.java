@@ -27,7 +27,7 @@ public class THMAddon extends MeteorAddon {
 
     @Override
     public void onInitialize() {
-        LOG.info("Initializing OmegaWare Addons");
+        LOG.info("Initializing THM Addon");
 
         MOD_META = FabricLoader.getInstance().getModContainer(MOD_ID).orElseThrow().getMetadata();
 

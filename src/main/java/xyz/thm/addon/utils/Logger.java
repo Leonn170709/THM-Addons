@@ -8,7 +8,7 @@ public class Logger {
 
     public static final Text PREFIX = Text.empty()
         .append(Text.literal("[").formatted(Formatting.WHITE))
-        .append(Text.literal("OmegaWare").formatted(Formatting.AQUA))
+        .append(Text.literal("THMAddon").formatted(Formatting.AQUA))
         .append(Text.literal("] ").formatted(Formatting.WHITE));
 
     private static final Text WARN = Text.empty()
@@ -22,7 +22,7 @@ public class Logger {
         .append(Text.literal("] ").formatted(Formatting.WHITE));
 
     /**
-     * Sends a message to the chat with the given format string and arguments, prefixed with the OmegaWare prefix.
+     * Sends a message to the chat with the given format string and arguments, prefixed with the THM prefix.
      * <pre>
      * Example:
      * Logger.info("Found %d %sdiamonds!", 10, Formatting.AQUA);
@@ -33,7 +33,7 @@ public class Logger {
     }
 
     /**
-     * Sends a warning message to the chat with the given format string and arguments, prefixed with the OmegaWare prefix.
+     * Sends a warning message to the chat with the given format string and arguments, prefixed with the THM prefix.
      * The message will be yellow in color.
      * <pre>
      * Example:
@@ -45,7 +45,7 @@ public class Logger {
     }
 
     /**
-     * Sends an error message to the chat with the given format string and arguments, prefixed with the OmegaWare prefix.
+     * Sends an error message to the chat with the given format string and arguments, prefixed with the THM prefix.
      * The message will be red.
      * <pre>
      * Example:
