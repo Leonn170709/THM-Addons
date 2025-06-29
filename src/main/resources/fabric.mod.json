@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "thm-addons",
+  "id": "thm-addon",
   "version": "${version}",
   "name": "THM Addon",
   "description": "Addon for Meteor Client",
