@@ -1,15 +1,19 @@
 package xyz.thm.addon;
 
 import meteordevelopment.meteorclient.MeteorClient;
+import meteordevelopment.meteorclient.systems.hud.HudGroup;
 import meteordevelopment.meteorclient.utils.Utils;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.metadata.ModMetadata;
+import net.minecraft.item.Items;
 import xyz.thm.addon.modules.*;
 import com.mojang.logging.LogUtils;
+import meteordevelopment.meteorclient.systems.hud.Hud;
 import meteordevelopment.meteorclient.addons.GithubRepo;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Modules;
+import xyz.thm.addon.hud.OnlineFriendsList;
 import org.slf4j.Logger;
 
 import java.io.File;
@@ -19,7 +23,15 @@ public class THMAddon extends MeteorAddon {
     public static ModMetadata MOD_META;
     public static final Logger LOG = LogUtils.getLogger();
     public static final Category CATEGORY = new Category("THMAddon");
+    public static final ModMetadata METADATA;
+    public static final String VERSION;
+    public static final Category MAIN;
+    public static final HudGroup HUD_GROUP = new HudGroup("THM");
 
+    static {METADATA = FabricLoader.getInstance().getModContainer(MOD_ID).orElseThrow().getMetadata();
+        VERSION = METADATA.getVersion().getFriendlyString();
+
+        MAIN = new Category("THM Additions", Items.BEACON.getDefaultStack());}
 
     public static File GetConfigFile(String key, String filename) {
         return new File(new File(new File(new File(MeteorClient.FOLDER, "thm"), key), Utils.getFileWorldName()), filename);
@@ -34,6 +46,12 @@ public class THMAddon extends MeteorAddon {
         // Modules
         Modules.get().add(new TPAAutomationModule());
         Modules.get().add(new ChatFilterModule());
+        Modules.get().add(new AxisViewer());
+        Modules.get().add(new HighwayBuilderTHM());
+        Modules.get().add(new DiscordRPC());
+
+        //Hud
+        Hud.get().register(OnlineFriendsList.INFO);
 
     }
 
