@@ -5,10 +5,6 @@
 
 package xyz.thm.addon.modules;
 
-import meteordevelopment.meteorclient.systems.modules.movement.speed.Speed;
-import meteordevelopment.meteorclient.systems.modules.world.NoGhostBlocks;
-import xyz.thm.addon.THMAddon;
-import xyz.thm.addon.utils.THMUtils;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.render.Render2DEvent;
@@ -22,7 +18,10 @@ import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.combat.KillAura;
+import meteordevelopment.meteorclient.systems.modules.movement.speed.Speed;
 import meteordevelopment.meteorclient.systems.modules.player.*;
+import meteordevelopment.meteorclient.systems.modules.world.NoGhostBlocks;
+import meteordevelopment.meteorclient.systems.modules.world.Timer;
 import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.entity.SortPriority;
 import meteordevelopment.meteorclient.utils.entity.TargetUtils;
@@ -68,6 +67,8 @@ import net.minecraft.world.RaycastContext;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Range;
 import org.joml.Vector3d;
+import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.utils.THMUtils;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -465,8 +466,8 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Boolean> sendStatistics = sgStatistics.add(new BoolSetting.Builder()
-        .name("sends-statistics")
+    private final Setting<Boolean> sendStatisticsWebhhok = sgStatistics.add(new BoolSetting.Builder()
+        .name("sends-statistics(Webhook)")
         .description("sends statistics to a webhook when disabling Highway Builder.")
         .defaultValue(false)
         .visible(() -> printStatistics.get())
@@ -474,16 +475,36 @@ public class HighwayBuilderTHM extends Module {
     );
     private final Setting<String> decryptkey = sgStatistics.add(new StringSetting.Builder()
         .name("webhook-key")
-        .description("The encryption key (any length, will be converted to 256-bit via SHA-256)")
+        .description("The encryption key")
         .defaultValue("MySecureKeyHere123")
-        .visible(() -> printStatistics.get() && sendStatistics.get())
+        .visible(() -> printStatistics.get() && sendStatisticsWebhhok.get())
         .build()
     );
     private final Setting<String> encryptedWebhook = sgStatistics.add(new StringSetting.Builder()
         .name("encrypted-webhook")
-        .description("The encrypted webhook (AES-256 encrypted)")
+        .description("The encrypted webhook")
         .defaultValue("MyWebhhokInHere")
-        .visible(() -> printStatistics.get() && sendStatistics.get())
+        .visible(() -> printStatistics.get() && sendStatisticsWebhhok.get())
+        .build()
+    );
+    private final Setting<Boolean> sendStatisticsapi = sgStatistics.add(new BoolSetting.Builder()
+        .name("sends-statistics(API)")
+        .description("sends statistics to a webhook when disabling Highway Builder.")
+        .defaultValue(false)
+        .visible(() -> printStatistics.get())
+        .build()
+    );
+    private final Setting<String> api = sgStatistics.add(new StringSetting.Builder()
+        .name("API")
+        .description("The Api to send it to")
+        .defaultValue("MyCoolAPI")
+        .visible(() -> printStatistics.get() && sendStatisticsapi.get())
+        .build()
+    );
+    private final Setting<String> hash = sgStatistics.add(new StringSetting.Builder()
+        .name("Hash")
+        .description("The Hash that you got")
+        .visible(() -> printStatistics.get() && sendStatisticsapi.get())
         .build()
     );
 
@@ -600,8 +621,16 @@ public class HighwayBuilderTHM extends Module {
 
         if (blocksPerTick.get() > 1 && rotation.get().mine) warning("With rotations enabled, you can break at most 1 block per tick.");
         if (placementsPerTick.get() > 1 && rotation.get().place) warning("With rotations enabled, you can place at most 1 block per tick.");
+        f (blocksPerTick.get() > 1 && rotation.get().mine) warning("With rotations enabled, you can break at most 1 block per tick.");
+        if (placementsPerTick.get() > 1 && rotation.get().place) warning("With rotations enabled, you can place at most 1 block per tick.");
+        //all modules that may cause error now print errors/warnings
+        if (Modules.get().get(InstantRebreak.class).isActive()) warning("It's recommended to disable the Instant Rebreak module and instead use the 'instantly-rebreak-echests' setting to avoid errors.");
+        if (Modules.get().get(SpeedMine.class).isActive()) warning("It's recommended to disable the Speedmine module and instead use the 'fast-break' setting to avoid errors.");
+        if (Modules.get().get(Speed.class).isActive() && dir.diagonal) warning("It's recommended to disable the Speed module to avoid misalignment on diagonals.");
+        if (Modules.get().get(Timer.class).isActive() && dir.diagonal) warning("It's recommended to disable the Timer module to avoid misalignment on diagonals.");
+        //it could be tested to print different warnings depending on the amount of blocks being broken per tick but that would need much testing and wouldn't be reliable
+        if (Modules.get().get(NoGhostBlocks.class).isActive()) warning("It's recommended to disable the NoGhostBlocks module to avoid packet kicks and wrong statistics.");
 
-        if (Modules.get().get(InstantRebreak.class).isActive()) Modules.get().get(InstantRebreak.class).toggle();
     }
 
     @Override
@@ -618,8 +647,8 @@ public class HighwayBuilderTHM extends Module {
                 info("Blocks broken: (highlight)%d", blocksBroken);
                 info("Blocks placed: (highlight)%d", blocksPlaced);
             }
-
-            if (sendStatistics.get()) {
+//webhook send stats part
+            if (sendStatisticsWebhhok.get()) {
                 String webhookUrl = decryptWebhook(encryptedWebhook.get(), decryptkey.get());
                 if (webhookUrl != null) {
                     double distance = PlayerUtils.distanceTo(start);

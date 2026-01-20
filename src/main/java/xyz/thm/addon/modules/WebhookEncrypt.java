@@ -17,7 +17,7 @@ public class WebhookEncrypt extends Module {
     }
     private final Setting<String> decryptkey = sgGeneral.add(new StringSetting.Builder()
         .name("webhook-key")
-        .description("The encryption key (any length, will be converted to 256-bit via SHA-256)")
+        .description("The encryption key(anything)")
         .defaultValue("MySecureKeyHere123")
         .build()
     );

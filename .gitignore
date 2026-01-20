@@ -31,3 +31,5 @@ bin/
 # fabric
 
 run/
+src/main/java/xyz/thm/addon/modules/WebhookEncrypt.java
+src/main/java/xyz/thm/addon/modules/WebhookEncrypt.java
