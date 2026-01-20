@@ -32,6 +32,18 @@ public class TPAAutomationModule extends Module {
         .defaultValue(List.of("Steve", "Notch", "GommeHD"))
         .build()
     );
+    private final Setting<String> tpystring = sgGeneral.add(new StringSetting.Builder()
+        .name("TP Accept Command")
+        .description("The Command that accepts tps")
+        .defaultValue("/tpy")
+        .build()
+    );
+    private final Setting<String> tpnstring = sgGeneral.add(new StringSetting.Builder()
+        .name("TP Deny Command")
+        .description("TThe Command that denys tps")
+        .defaultValue("/tpn")
+        .build()
+    );
 
     private final Setting<Boolean> acceptFriends = sgGeneral.add(new BoolSetting.Builder()
         .name("accept-friends")
@@ -94,10 +106,6 @@ public class TPAAutomationModule extends Module {
 
     @Override
     public void onActivate() {
-        if (isNot6B6T()) {
-            Logger.error("%s is only intended for use on 6b6t.", name.replace("-", " "));
-            toggle();
-        }
     }
 
     @EventHandler
@@ -134,12 +142,12 @@ public class TPAAutomationModule extends Module {
         if (printTpaDetected.get()) Logger.info("%sTPA Detected:%s %s!", Formatting.RED, Formatting.WHITE, username);
 
         if (approvedUsers.get().contains(username) || (acceptFriends.get() && Friends.get().get(username) != null) || (acceptTSRBots.get() &&  TSR_KIT_BOT_USERS.contains(username))) {
-            ChatUtils.sendPlayerMsg("/tpy " + username);
+            ChatUtils.sendPlayerMsg(tpystring + username);
 
             if (printTpaAccepted.get()) Logger.info("%sAuto Accepted:%s %s!", Formatting.GREEN, Formatting.WHITE, username);
 
         } else if (autoDeny.get()){
-            ChatUtils.sendPlayerMsg("/tpn " + username);
+            ChatUtils.sendPlayerMsg(tpnstring + username);
 
             if (printTpaIgnored.get()) Logger.info("%sIgnored:%s %s!", Formatting.RED, Formatting.WHITE, username);
         }

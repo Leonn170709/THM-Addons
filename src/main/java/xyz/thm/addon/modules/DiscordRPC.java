@@ -110,7 +110,7 @@ public class DiscordRPC extends Module {
     }
 
     public DiscordRPC() {
-        super(THMAddon.CATEGORY, "discord-RPC", "Displays Watchmen (Additions) as an activity on discord.");
+        super(THMAddon.CATEGORY, "discord-RPC", "Displays the THM Addon as an activity on discord.");
 
         runInMainMenu = true;
     }

@@ -49,7 +49,6 @@ import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.decoration.EndCrystalEntity;
-import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.*;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
@@ -461,8 +460,30 @@ public class HighwayBuilderTHM extends Module {
 
     private final Setting<Boolean> printStatistics = sgStatistics.add(new BoolSetting.Builder()
         .name("print-statistics")
-        .description("Prints statistics in chat when disabling Highway Builder+.")
+        .description("Prints statistics in chat when disabling Highway Builder.")
         .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> sendStatistics = sgStatistics.add(new BoolSetting.Builder()
+        .name("sends-statistics")
+        .description("sends statistics to a webhook when disabling Highway Builder.")
+        .defaultValue(false)
+        .visible(() -> printStatistics.get())
+        .build()
+    );
+    private final Setting<String> decryptkey = sgStatistics.add(new StringSetting.Builder()
+        .name("webhook-key")
+        .description("The encryption key (any length, will be converted to 256-bit via SHA-256)")
+        .defaultValue("MySecureKeyHere123")
+        .visible(() -> printStatistics.get() && sendStatistics.get())
+        .build()
+    );
+    private final Setting<String> encryptedWebhook = sgStatistics.add(new StringSetting.Builder()
+        .name("encrypted-webhook")
+        .description("The encrypted webhook (AES-256 encrypted)")
+        .defaultValue("MyWebhhokInHere")
+        .visible(() -> printStatistics.get() && sendStatistics.get())
         .build()
     );
 
@@ -492,6 +513,66 @@ public class HighwayBuilderTHM extends Module {
         super(THMAddon.CATEGORY, "THMHighwayBuilder", "Automatically builds highways.");
         runInMainMenu = true;
     }
+
+// AES-256 encryption with SHA-256 key derivation
+        private String decryptWebhook(String encryptedWebhook, String password) {
+            try {
+                // Derive a 256-bit (32 byte) key from the password using SHA-256
+                java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+                byte[] keyBytes = digest.digest(password.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+                // Add proper Base64 padding for encrypted webhook if needed
+                String padded = encryptedWebhook;
+                int padding = padded.length() % 4;
+                if (padding > 0) {
+                    padded += "=".repeat(4 - padding);
+                }
+
+                byte[] encryptedBytes = java.util.Base64.getDecoder().decode(padded);
+
+                // Create AES-256 cipher
+                javax.crypto.spec.SecretKeySpec secretKey = new javax.crypto.spec.SecretKeySpec(keyBytes, 0, keyBytes.length, "AES");
+                javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES");
+                cipher.init(javax.crypto.Cipher.DECRYPT_MODE, secretKey);
+
+                byte[] decrypted = cipher.doFinal(encryptedBytes);
+                return new String(decrypted, java.nio.charset.StandardCharsets.UTF_8);
+            } catch (Exception e) {
+                warning("Failed to decrypt webhook: " + e.getMessage());
+                return null;
+            }
+        }
+
+        private void sendToWebhook(String webhookUrl, String message) {
+            new Thread(() -> {
+                try {
+                    java.net.URL url = new java.net.URL(webhookUrl);
+                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setRequestProperty("Content-Type", "application/json");
+                    conn.setDoOutput(true);
+
+                    // Create JSON payload for Discord webhook
+                    String json = "{\"content\": \"" + message.replace("\"", "\\\"") + "\"}";
+
+                    try (java.io.OutputStream os = conn.getOutputStream()) {
+                        byte[] input = json.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                        os.write(input, 0, input.length);
+                    }
+
+                    int responseCode = conn.getResponseCode();
+                    if (responseCode == 204 || responseCode == 200) {
+                        info("Successfully sent statistics to webhook!");
+                    } else {
+                        THMAddon.LOG.warn("Webhook response code: " + responseCode);
+                    }
+
+                    conn.disconnect();
+                } catch (Exception e) {
+                    THMAddon.LOG.warn("Failed to send to webhook: " + e.getMessage());
+                }
+            }).start();
+        }
 
     @Override
     public void onActivate() {
@@ -532,12 +613,30 @@ public class HighwayBuilderTHM extends Module {
         mc.player.setYaw(dir.yaw);
         mc.options.useKey.setPressed(false);
 
-        if (displayInfo && printStatistics.get()) {
-            info("Distance: (highlight)%.0f", PlayerUtils.distanceTo(start));
-            info("Blocks broken: (highlight)%d", blocksBroken);
-            info("Blocks placed: (highlight)%d", blocksPlaced);
+            if (displayInfo && printStatistics.get()) {
+                info("Distance: (highlight)%.0f", PlayerUtils.distanceTo(start));
+                info("Blocks broken: (highlight)%d", blocksBroken);
+                info("Blocks placed: (highlight)%d", blocksPlaced);
+            }
+
+            if (sendStatistics.get()) {
+                String webhookUrl = decryptWebhook(encryptedWebhook.get(), decryptkey.get());
+                if (webhookUrl != null) {
+                    double distance = PlayerUtils.distanceTo(start);
+
+                    // Don't send if distance its bigger than 30,000
+                    if (distance > 30000) {
+                        warning("Distance too large (highlight)%.0f(warning)) - statistics NOT sent to webhook!", distance);
+                        return;
+                    }
+
+                    String playerName = mc.player.getName().getLiteralString();
+                    String statsMessage = String.format("Player: %s , Distance: %.0f , Blocks broken: %d , Blocks placed: %d",
+                        playerName, distance, blocksBroken, blocksPlaced);
+                    sendToWebhook(webhookUrl, statsMessage);
+                }
+            }
         }
-    }
 
     @Override
     public void error(String message, Object... args) {
@@ -604,7 +703,7 @@ public class HighwayBuilderTHM extends Module {
 
 
 
-        if (pauseOnLag.get() && TickRate.INSTANCE.getTimeSinceLastTick() > 1.4f) {
+        if (pauseOnLag.get() && TickRate.INSTANCE.getTimeSinceLastTick() > 1.5f) {
             if (!sentLagMessage) {
                 error("Server isn't responding, pausing.");
                 input.stop();

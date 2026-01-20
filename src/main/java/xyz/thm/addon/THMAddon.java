@@ -50,6 +50,7 @@ public class THMAddon extends MeteorAddon {
         Modules.get().add(new HighwayBuilderTHM());
         Modules.get().add(new DiscordRPC());
         Modules.get().add(new BlockCounter());
+        Modules.get().add(new WebhookEncrypt());
 
         //Hud
         Hud.get().register(OnlineFriendsList.INFO);

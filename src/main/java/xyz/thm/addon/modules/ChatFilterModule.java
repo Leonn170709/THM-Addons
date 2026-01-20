@@ -26,7 +26,7 @@ import static xyz.thm.addon.utils.ServerCheck.isNot6B6T;
 
 public class ChatFilterModule extends Module {
     public ChatFilterModule() {
-        super(THMAddon.CATEGORY, "6B6T-chat-filter", "This module filters chat messages based on selected criteria.");
+        super(THMAddon.CATEGORY, "Chat-filter", "This module filters chat messages based on selected criteria.");
     }
 
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
@@ -141,11 +141,6 @@ public class ChatFilterModule extends Module {
 
     @Override
     public void onActivate() {
-        if (isNot6B6T()) {
-            Logger.error("%s is only intended for use on 6b6t.", name.replace("-", " "));
-            toggle();
-            return;
-        }
 
         loadFilteredCount();
     }
