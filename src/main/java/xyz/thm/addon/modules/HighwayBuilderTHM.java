@@ -621,7 +621,7 @@ public class HighwayBuilderTHM extends Module {
 
         if (blocksPerTick.get() > 1 && rotation.get().mine) warning("With rotations enabled, you can break at most 1 block per tick.");
         if (placementsPerTick.get() > 1 && rotation.get().place) warning("With rotations enabled, you can place at most 1 block per tick.");
-        f (blocksPerTick.get() > 1 && rotation.get().mine) warning("With rotations enabled, you can break at most 1 block per tick.");
+        if (blocksPerTick.get() > 1 && rotation.get().mine) warning("With rotations enabled, you can break at most 1 block per tick.");
         if (placementsPerTick.get() > 1 && rotation.get().place) warning("With rotations enabled, you can place at most 1 block per tick.");
         //all modules that may cause error now print errors/warnings
         if (Modules.get().get(InstantRebreak.class).isActive()) warning("It's recommended to disable the Instant Rebreak module and instead use the 'instantly-rebreak-echests' setting to avoid errors.");
