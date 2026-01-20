@@ -76,7 +76,7 @@ public class ScaffoldTHM extends Module {
     private boolean worked = false;
 
     public ScaffoldTHM() {
-        super(THMAddon.MAIN, "scaffold-THM", "Scaffolds blocks under you.");
+        super(THMAddon.CATEGORY, "scaffold-THM", "Scaffolds blocks under you.");
     }
 
     @EventHandler

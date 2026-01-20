@@ -87,7 +87,7 @@ public class OffhandManager extends Module {
     private boolean swapped;
 
     public OffhandManager() {
-        super(THMAddon.MAIN, "offhand-manager", "Automatically manages your offhand (optimized for highway work).");
+        super(THMAddon.CATEGORY, "offhand-manager", "Automatically manages your offhand (optimized for highway work).");
     }
 
     @Override

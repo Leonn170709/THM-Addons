@@ -49,6 +49,7 @@ public class THMAddon extends MeteorAddon {
         Modules.get().add(new AxisViewer());
         Modules.get().add(new HighwayBuilderTHM());
         Modules.get().add(new DiscordRPC());
+        Modules.get().add(new BlockCounter());
 
         //Hud
         Hud.get().register(OnlineFriendsList.INFO);

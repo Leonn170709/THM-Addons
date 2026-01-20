@@ -5,6 +5,8 @@
 
 package xyz.thm.addon.modules;
 
+import meteordevelopment.meteorclient.systems.modules.movement.speed.Speed;
+import meteordevelopment.meteorclient.systems.modules.world.NoGhostBlocks;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.THMUtils;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
@@ -487,7 +489,7 @@ public class HighwayBuilderTHM extends Module {
     private final MBlockPos posRender3 = new MBlockPos();
 
     public HighwayBuilderTHM() {
-        super(THMAddon.MAIN, "AutoHighWay", "Automatically builds highways.");
+        super(THMAddon.CATEGORY, "THMHighwayBuilder", "Automatically builds highways.");
         runInMainMenu = true;
     }
 
@@ -576,10 +578,31 @@ public class HighwayBuilderTHM extends Module {
             return;
         }
 
-        if (Modules.get().get(AutoEat.class).eating || Modules.get().get(AutoGap.class).isEating() || Modules.get().get(KillAura.class).attacking || Modules.get().get(OffhandManager.class).isEating()) {
+        if (
+            (Modules.get().get(AutoEat.class) != null && Modules.get().get(AutoEat.class).eating)
+                || (Modules.get().get(AutoGap.class) != null && Modules.get().get(AutoGap.class).isEating())
+                || (Modules.get().get(KillAura.class) != null && Modules.get().get(KillAura.class).attacking)
+                || (Modules.get().get(OffhandManager.class) != null && Modules.get().get(OffhandManager.class).isEating())
+        ) {
             input.stop();
             return;
         }
+        String activeModule = null;
+
+        if (Modules.get().get(SpeedMine.class) != null && Modules.get().get(SpeedMine.class).isActive())
+            activeModule = "SpeedMine";
+        else if (Modules.get().get(NoGhostBlocks.class) != null && Modules.get().get(NoGhostBlocks.class).isActive())
+            activeModule = "NoGhostBlocks";
+        else if (Modules.get().get(Speed.class) != null && Modules.get().get(Speed.class).isActive())
+            activeModule = "Speed";
+
+        if (activeModule != null) {
+            errorEarly(activeModule + " is active and breaks HighwayBuilder.");
+            return;
+        }
+
+
+
 
         if (pauseOnLag.get() && TickRate.INSTANCE.getTimeSinceLastTick() > 1.4f) {
             if (!sentLagMessage) {
