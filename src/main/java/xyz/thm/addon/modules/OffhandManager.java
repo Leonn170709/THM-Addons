@@ -1,6 +1,5 @@
 package xyz.thm.addon.modules;
 
-import xyz.thm.addon.THMAddon;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -23,6 +22,7 @@ import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.Direction;
+import xyz.thm.addon.THMAddon;
 
 public class OffhandManager extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();

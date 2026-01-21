@@ -1,6 +1,5 @@
 package xyz.thm.addon.modules;
 
-import xyz.thm.addon.THMAddon;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -9,6 +8,7 @@ import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.util.math.Vec3d;
+import xyz.thm.addon.THMAddon;
 
 public class AxisViewer extends Module {
     private final SettingGroup sgOverworld = settings.createGroup("Overworld");
