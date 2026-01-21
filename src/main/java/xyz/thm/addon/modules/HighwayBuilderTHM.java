@@ -559,8 +559,9 @@ public class HighwayBuilderTHM extends Module {
                 byte[] decrypted = cipher.doFinal(encryptedBytes);
                 return new String(decrypted, java.nio.charset.StandardCharsets.UTF_8);
             } catch (Exception e) {
-                warning("Failed to decrypt webhook: " + e.getMessage());
-                return null;
+                // If decryption fails, treat the webhook as unencrypted
+                THMAddon.LOG.warn("Failed to decrypt webhook, treating as unencrypted: " + e.getMessage());
+                return encryptedWebhook;
             }
         }
 
@@ -658,11 +659,11 @@ public class HighwayBuilderTHM extends Module {
                         warning("Distance too large (highlight)%.0f(warning)) - statistics NOT sent to webhook!", distance);
                         return;
                     }
+                        String playerName = mc.player.getName().getLiteralString();
+                        String statsMessage = String.format("Player: %s , Distance: %.0f , Blocks broken: %d , Blocks placed: %d",
+                            playerName, distance, blocksBroken, blocksPlaced);
+                        sendToWebhook(webhookUrl, statsMessage);
 
-                    String playerName = mc.player.getName().getLiteralString();
-                    String statsMessage = String.format("Player: %s , Distance: %.0f , Blocks broken: %d , Blocks placed: %d",
-                        playerName, distance, blocksBroken, blocksPlaced);
-                    sendToWebhook(webhookUrl, statsMessage);
                 }
             }
         }
