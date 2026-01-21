@@ -1,7 +1,5 @@
 package xyz.thm.addon.modules;
 
-import xyz.thm.addon.THMAddon;
-import xyz.thm.addon.utils.ListMode;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.mixininterface.IVec3d;
 import meteordevelopment.meteorclient.settings.*;
@@ -19,6 +17,8 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
+import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.utils.ListMode;
 
 import java.util.List;
 

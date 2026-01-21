@@ -1,22 +1,19 @@
 package xyz.thm.addon.modules;
 
+import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.friends.Friends;
+import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
+import meteordevelopment.orbit.EventHandler;
 import net.minecraft.util.Formatting;
 import xyz.thm.addon.THMAddon;
-import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
-import meteordevelopment.meteorclient.systems.modules.Module;
-import meteordevelopment.orbit.EventHandler;
-
 import xyz.thm.addon.utils.Logger;
 
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
-import static xyz.thm.addon.utils.ServerCheck.isNot6B6T;
 
 public class TPAAutomationModule extends Module {
     public TPAAutomationModule() {

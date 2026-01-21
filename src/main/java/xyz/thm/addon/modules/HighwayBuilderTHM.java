@@ -482,25 +482,19 @@ public class HighwayBuilderTHM extends Module {
     );
     private final Setting<String> encryptedWebhook = sgStatistics.add(new StringSetting.Builder()
         .name("encrypted-webhook")
-        .description("The encrypted webhook")
-        .defaultValue("MyWebhhokInHere")
+        .description("The encrypted webhook can also be a normal webhook")
+        .defaultValue("MyWebhookInHere")
         .visible(() -> printStatistics.get() && sendStatisticsWebhhok.get())
         .build()
     );
     private final Setting<Boolean> sendStatisticsapi = sgStatistics.add(new BoolSetting.Builder()
         .name("sends-statistics(API)")
-        .description("sends statistics to a webhook when disabling Highway Builder.")
+        .description("sends statistics to a Api when disabling Highway Builder.")
         .defaultValue(false)
         .visible(() -> printStatistics.get())
         .build()
     );
-    private final Setting<String> api = sgStatistics.add(new StringSetting.Builder()
-        .name("API")
-        .description("The Api to send it to")
-        .defaultValue("MyCoolAPI")
-        .visible(() -> printStatistics.get() && sendStatisticsapi.get())
-        .build()
-    );
+
     private final Setting<String> hash = sgStatistics.add(new StringSetting.Builder()
         .name("Hash")
         .description("The Hash that you got")
@@ -526,12 +520,12 @@ public class HighwayBuilderTHM extends Module {
     private final ArrayList<EndCrystalEntity> ignoreCrystals = new ArrayList<>();
     public boolean drawingBow;
     public DoubleMineBlock normalMining, packetMining;
-
+    public String api = "https://kitbot-api.onrender.com/";
     private final MBlockPos posRender2 = new MBlockPos();
     private final MBlockPos posRender3 = new MBlockPos();
 
     public HighwayBuilderTHM() {
-        super(THMAddon.CATEGORY, "THMHighwayBuilder", "Automatically builds highways.");
+        super(THMAddon.CATEGORY, "THM-HighwayBuilder", "Automatically builds highways according to THMs standards.");
         runInMainMenu = true;
     }
 
@@ -587,11 +581,43 @@ public class HighwayBuilderTHM extends Module {
                         info("Successfully sent statistics to webhook!");
                     } else {
                         THMAddon.LOG.warn("Webhook response code: " + responseCode);
+                        warning("Failed to send to Webhook");
                     }
 
                     conn.disconnect();
                 } catch (Exception e) {
                     THMAddon.LOG.warn("Failed to send to webhook: " + e.getMessage());
+                }
+            }).start();
+        }
+        private void sendToAPI(String api, String message) {
+            new Thread(() -> {
+                try {
+                    java.net.URL url = new java.net.URL(api);
+                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setRequestProperty("Content-Type", "application/json");
+                    conn.setDoOutput(true);
+
+                    // Create JSON payload for Discord webhook
+                    String json = "{\"content\": \"" + message.replace("\"", "\\\"") + "\"}";
+
+                    try (java.io.OutputStream os = conn.getOutputStream()) {
+                        byte[] input = json.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                        os.write(input, 0, input.length);
+                    }
+
+                    int responseCode = conn.getResponseCode();
+                    if (responseCode == 204 || responseCode == 200) {
+                        info("Successfully sent statistics to Api!");
+                    } else {
+                        THMAddon.LOG.warn("API response code: " + responseCode);
+                        warning("Failed to send to Api");
+                    }
+
+                    conn.disconnect();
+                } catch (Exception e) {
+                    THMAddon.LOG.warn("Failed to send to API: " + e.getMessage());
                 }
             }).start();
         }
@@ -654,7 +680,7 @@ public class HighwayBuilderTHM extends Module {
                 if (webhookUrl != null) {
                     double distance = PlayerUtils.distanceTo(start);
 
-                    // Don't send if distance its bigger than 30,000
+                    // Don't send if distance it's bigger than 30,000
                     if (distance > 30000) {
                         warning("Distance too large (highlight)%.0f(warning)) - statistics NOT sent to webhook!", distance);
                         return;
@@ -666,7 +692,15 @@ public class HighwayBuilderTHM extends Module {
 
                 }
             }
-        }
+            if (sendStatisticsapi.get()) {
+                    double distance = PlayerUtils.distanceTo(start);
+                        String playerName = mc.player.getName().getLiteralString();
+                        String statsMessageapi = String.format("Player: %s , Distance: %.0f , Blocks broken: %d , Blocks placed: %d, Hash: %s",
+                            playerName, distance, blocksBroken, blocksPlaced, hash);
+                        sendToAPI(api, statsMessageapi);
+
+                }
+            }
 
     @Override
     public void error(String message, Object... args) {
@@ -716,23 +750,6 @@ public class HighwayBuilderTHM extends Module {
             input.stop();
             return;
         }
-        String activeModule = null;
-
-        if (Modules.get().get(SpeedMine.class) != null && Modules.get().get(SpeedMine.class).isActive())
-            activeModule = "SpeedMine";
-        else if (Modules.get().get(NoGhostBlocks.class) != null && Modules.get().get(NoGhostBlocks.class).isActive())
-            activeModule = "NoGhostBlocks";
-        else if (Modules.get().get(Speed.class) != null && Modules.get().get(Speed.class).isActive())
-            activeModule = "Speed";
-
-        if (activeModule != null) {
-            errorEarly(activeModule + " is active and breaks HighwayBuilder.");
-            return;
-        }
-
-
-
-
         if (pauseOnLag.get() && TickRate.INSTANCE.getTimeSinceLastTick() > 1.5f) {
             if (!sentLagMessage) {
                 error("Server isn't responding, pausing.");

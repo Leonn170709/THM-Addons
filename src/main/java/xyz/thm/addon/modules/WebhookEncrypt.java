@@ -3,8 +3,9 @@ package xyz.thm.addon.modules;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.settings.StringSetting;
-import xyz.thm.addon.THMAddon;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import xyz.thm.addon.THMAddon;
+
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
 import java.security.MessageDigest;

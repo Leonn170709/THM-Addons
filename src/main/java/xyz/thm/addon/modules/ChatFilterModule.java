@@ -2,17 +2,20 @@ package xyz.thm.addon.modules;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.gui.widgets.containers.WHorizontalList;
 import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
-import meteordevelopment.meteorclient.settings.*;
-import net.minecraft.util.Formatting;
-import xyz.thm.addon.THMAddon;
-import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
+import meteordevelopment.meteorclient.settings.BoolSetting;
+import meteordevelopment.meteorclient.settings.Setting;
+import meteordevelopment.meteorclient.settings.SettingGroup;
+import meteordevelopment.meteorclient.settings.StringListSetting;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.util.Formatting;
+import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.Logger;
 
 import java.io.File;
@@ -21,8 +24,6 @@ import java.io.IOException;
 import java.io.Writer;
 import java.nio.file.Files;
 import java.util.List;
-
-import static xyz.thm.addon.utils.ServerCheck.isNot6B6T;
 
 public class ChatFilterModule extends Module {
     public ChatFilterModule() {
