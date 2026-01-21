@@ -48,10 +48,9 @@ public class THMAddon extends MeteorAddon {
         Modules.get().add(new ChatFilterModule());
         Modules.get().add(new AxisViewer());
         Modules.get().add(new HighwayBuilderTHM());
-        Modules.get().add(new DiscordRPC());
         Modules.get().add(new BlockCounter());
-        //gotta remove it on release
-        Modules.get().add(new WebhookEncrypt());
+        Modules.get().add(new DiscordNotifs());
+        //Modules.get().add(new WebhookEncrypt());
 
         //Hud
         Hud.get().register(OnlineFriendsList.INFO);

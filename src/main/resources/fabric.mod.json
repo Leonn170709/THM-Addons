@@ -3,7 +3,7 @@
   "id": "thm-addon",
   "version": "${version}",
   "name": "THM Addon",
-  "description": "Addon for Meteor Client",
+  "description": "THM Addon for Meteor Client",
   "authors": [
     "Leonn170709"
   ],

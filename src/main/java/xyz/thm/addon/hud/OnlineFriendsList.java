@@ -1,18 +1,19 @@
 package xyz.thm.addon.hud;
 
-import xyz.thm.addon.THMAddon;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.Setting;
+import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.settings.StringSetting;
 import meteordevelopment.meteorclient.systems.friends.Friends;
 import meteordevelopment.meteorclient.systems.hud.*;
-import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import net.minecraft.client.network.PlayerListEntry;
+import xyz.thm.addon.THMAddon;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 
 public class OnlineFriendsList extends HudElement {

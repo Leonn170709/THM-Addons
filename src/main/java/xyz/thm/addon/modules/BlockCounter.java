@@ -47,7 +47,7 @@ public class BlockCounter extends Module {
     public void onActivate() {
         if (mc.world == null || mc.player == null) return;
 
-        // Starte async scan um Spiel nicht einzufrieren
+        // starting async scan
         new Thread(() -> {
             int radius = radiusChunks.get() * 16; // Radius in Blöcken
             countBlocksOptimized(mc.world, mc.player.getBlockPos(), radius);
@@ -56,15 +56,12 @@ public class BlockCounter extends Module {
         toggle();
     }
 
-    /**
-     * Optimierte Version die das Spiel nicht einfriert
-     */
     public void countBlocksOptimized(World world, BlockPos center, int radius) {
         blockCounts.clear();
-        // Begrenze Y-Achse auf ±400 Blöcke (statt großen Radius)
+        // Limiting Y to 400 blocks
         int yRadius = Math.min(400, radius);
 
-        // Chunk-basierte Iteration statt einzelne Blöcke
+        // Chunk based instead of blocks
         int chunkRadiusX = (radius + 15) / 16;
         int chunkCenterX = center.getX() >> 4;
         int chunkCenterZ = center.getZ() >> 4;
@@ -74,14 +71,14 @@ public class BlockCounter extends Module {
 
         for (int chunkX = chunkCenterX - chunkRadiusX; chunkX <= chunkCenterX + chunkRadiusX; chunkX++) {
             for (int chunkZ = chunkCenterZ - chunkRadiusX; chunkZ <= chunkCenterZ + chunkRadiusX; chunkZ++) {
-                // Prüfe ob Chunk in Reichweite ist
+                // checking if chunk is in range
                 int chunkBlockX = chunkX * 16;
                 int chunkBlockZ = chunkZ * 16;
 
                 if (Math.abs(chunkBlockX - center.getX()) > radius && Math.abs(chunkBlockX + 15 - center.getX()) > radius) continue;
                 if (Math.abs(chunkBlockZ - center.getZ()) > radius && Math.abs(chunkBlockZ + 15 - center.getZ()) > radius) continue;
 
-                // Durchsuche Chunk
+                // Searching Chunk for blocks
                 for (int x = chunkBlockX; x < chunkBlockX + 16; x++) {
                     for (int z = chunkBlockZ; z < chunkBlockZ + 16; z++) {
                         for (int y = center.getY() - yRadius; y <= center.getY() + yRadius; y++) {
@@ -100,7 +97,7 @@ public class BlockCounter extends Module {
 
         long duration = System.currentTimeMillis() - startTime;
 
-        // Zeige Ergebnisse im Chat
+        // Showing results in chat
         if (!blockCounts.isEmpty()) {
             blockCounts.forEach((block, count) ->
                 ChatUtils.info(block.getName().getString() + ": (highlight)" + count)
@@ -108,7 +105,7 @@ public class BlockCounter extends Module {
             ChatUtils.info("Total: (highlight)" + getTotalCount() + " (highlight)| Scanned: " + blocksScanned + " blocks in " + duration + "ms");
             ChatUtils.info("Scanned: " + blocksScanned + " blocks in " + duration + "ms");
         } else {
-            ChatUtils.info("Keine ausgewählten Blöcke gefunden. (Scanned: " + blocksScanned + " blocks)");
+            ChatUtils.info("No selected blocks found. (Scanned: " + blocksScanned + " blocks)");
         }
     }
 

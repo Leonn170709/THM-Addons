@@ -468,28 +468,30 @@ public class HighwayBuilderTHM extends Module {
 
     private final Setting<Boolean> sendStatisticsWebhhok = sgStatistics.add(new BoolSetting.Builder()
         .name("sends-statistics(Webhook)")
-        .description("sends statistics to a webhook when disabling Highway Builder.")
+        .description("Sends Highway Builder statistics to a webhook when the module is disabled.")
         .defaultValue(false)
         .visible(() -> printStatistics.get())
         .build()
     );
     private final Setting<String> decryptkey = sgStatistics.add(new StringSetting.Builder()
         .name("webhook-key")
-        .description("The encryption key")
+        .description("Optional encryption/decryption key. Only required if the " +
+            "webhook URL is encrypted. Ignored for normal (plain) webhook URLs.")
         .defaultValue("MySecureKeyHere123")
         .visible(() -> printStatistics.get() && sendStatisticsWebhhok.get())
         .build()
     );
     private final Setting<String> encryptedWebhook = sgStatistics.add(new StringSetting.Builder()
         .name("encrypted-webhook")
-        .description("The encrypted webhook can also be a normal webhook")
+        .description("Webhook URL used to receive statistics. Can be either encrypted or plain text." +
+            " Encrypted webhooks will be decrypted using the provided key.")
         .defaultValue("MyWebhookInHere")
         .visible(() -> printStatistics.get() && sendStatisticsWebhhok.get())
         .build()
     );
     private final Setting<Boolean> sendStatisticsapi = sgStatistics.add(new BoolSetting.Builder()
         .name("sends-statistics(API)")
-        .description("sends statistics to a Api when disabling Highway Builder.")
+        .description("Sends statistics to a Api when disabling Highway Builder.")
         .defaultValue(false)
         .visible(() -> printStatistics.get())
         .build()
@@ -520,7 +522,7 @@ public class HighwayBuilderTHM extends Module {
     private final ArrayList<EndCrystalEntity> ignoreCrystals = new ArrayList<>();
     public boolean drawingBow;
     public DoubleMineBlock normalMining, packetMining;
-    public String api = "https://kitbot-api.onrender.com/";
+    public String api = "KITBOTAPI";
     private final MBlockPos posRender2 = new MBlockPos();
     private final MBlockPos posRender3 = new MBlockPos();
 
@@ -529,7 +531,7 @@ public class HighwayBuilderTHM extends Module {
         runInMainMenu = true;
     }
 
-// AES-256 encryption with SHA-256 key derivation
+        // AES-256 encryption with SHA-256 key derivation
         private String decryptWebhook(String encryptedWebhook, String password) {
             try {
                 // Derive a 256-bit (32 byte) key from the password using SHA-256
@@ -592,32 +594,44 @@ public class HighwayBuilderTHM extends Module {
         }
         private void sendToAPI(String api, String message) {
             new Thread(() -> {
+                java.net.HttpURLConnection conn = null;
                 try {
                     java.net.URL url = new java.net.URL(api);
-                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                    conn = (java.net.HttpURLConnection) url.openConnection();
                     conn.setRequestMethod("POST");
                     conn.setRequestProperty("Content-Type", "application/json");
                     conn.setDoOutput(true);
+                    conn.setConnectTimeout(10000); // 10 second timeout
+                    conn.setReadTimeout(10000);
 
-                    // Create JSON payload for Discord webhook
+                    // Create JSON payload for API
                     String json = "{\"content\": \"" + message.replace("\"", "\\\"") + "\"}";
 
                     try (java.io.OutputStream os = conn.getOutputStream()) {
                         byte[] input = json.getBytes(java.nio.charset.StandardCharsets.UTF_8);
                         os.write(input, 0, input.length);
+                        os.flush();
                     }
 
                     int responseCode = conn.getResponseCode();
+
+                    // Consume response body to prevent resource leak
+                    try (java.io.InputStream is = responseCode >= 400 ? conn.getErrorStream() : conn.getInputStream()) {
+                        if (is != null) {
+                            is.readAllBytes();
+                        }
+                    }
+
                     if (responseCode == 204 || responseCode == 200) {
                         info("Successfully sent statistics to Api!");
                     } else {
                         THMAddon.LOG.warn("API response code: " + responseCode);
                         warning("Failed to send to Api");
                     }
-
-                    conn.disconnect();
                 } catch (Exception e) {
-                    THMAddon.LOG.warn("Failed to send to API: " + e.getMessage());
+                    THMAddon.LOG.warn("Failed to send to API: " + e.getMessage(), e);
+                } finally {
+                    if (conn != null) conn.disconnect();
                 }
             }).start();
         }
@@ -681,25 +695,29 @@ public class HighwayBuilderTHM extends Module {
                     double distance = PlayerUtils.distanceTo(start);
 
                     // Don't send if distance it's bigger than 30,000
-                    if (distance > 30000) {
-                        warning("Distance too large (highlight)%.0f(warning)) - statistics NOT sent to webhook!", distance);
-                        return;
-                    }
+                    if (distance > 1) {
                         String playerName = mc.player.getName().getLiteralString();
                         String statsMessage = String.format("Player: %s , Distance: %.0f , Blocks broken: %d , Blocks placed: %d",
                             playerName, distance, blocksBroken, blocksPlaced);
                         sendToWebhook(webhookUrl, statsMessage);
 
+                    }else {
+                        warning("Distance too small: %.0f statistics NOT sent to webhook!", distance);
+                    }
                 }
             }
             if (sendStatisticsapi.get()) {
                     double distance = PlayerUtils.distanceTo(start);
-                        String playerName = mc.player.getName().getLiteralString();
-                        String statsMessageapi = String.format("Player: %s , Distance: %.0f , Blocks broken: %d , Blocks placed: %d, Hash: %s",
-                            playerName, distance, blocksBroken, blocksPlaced, hash);
-                        sendToAPI(api, statsMessageapi);
+                if (distance > 1) {
 
+                    String playerName = mc.player.getName().getLiteralString();
+                    String statsMessageapi = String.format("Player: %s , Distance: %.0f , Blocks broken: %d , Blocks placed: %d, Hash: %s",
+                        playerName, distance, blocksBroken, blocksPlaced, hash);
+                    sendToAPI(api, statsMessageapi);
+                } else {
+                    warning("Distance too small: %.0f statistics NOT sent to API!", distance);
                 }
+              }
             }
 
     @Override
