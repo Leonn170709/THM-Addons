@@ -159,7 +159,7 @@ public class DiscordNotifs extends Module
                     if (!playersInRange.contains(playerEntity.getGameProfile()))
                     {
                         playersInRange.add(playerEntity.getGameProfile());
-                        handleMessage(playerEntity.getGameProfile().getName() + " has entered visual range!", MessageType.PLAYER_RANGE);
+                        handleMessage(playerEntity.getGameProfile().name() + " has entered visual range!", MessageType.PLAYER_RANGE);
                     }
                 }
             }
@@ -168,10 +168,10 @@ public class DiscordNotifs extends Module
         // Check for players leaving range
         for (GameProfile profile : playersInRange)
         {
-            if (!uuidsCurrentlyInRange.contains(profile.getId()))
+            if (!uuidsCurrentlyInRange.contains(profile.id()))
             {
                 playersInRange.remove(profile);
-                handleMessage(profile.getName() + " has left visual range!", MessageType.PLAYER_RANGE);
+                handleMessage(profile.name() + " has left visual range!", MessageType.PLAYER_RANGE);
             }
         }
     }
@@ -283,7 +283,7 @@ public class DiscordNotifs extends Module
         // use threads so the game doesnt lag when sending a ton of webhooks
         new Thread(() -> {
             try {
-                java.net.URL url = new java.net.URL(webhookURL.get());
+                @SuppressWarnings("deprecation") java.net.URL url = new java.net.URL(webhookURL.get());
                 java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");

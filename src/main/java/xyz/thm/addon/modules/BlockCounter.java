@@ -53,7 +53,6 @@ public class BlockCounter extends Module {
             countBlocksOptimized(mc.world, mc.player.getBlockPos(), radius);
         }).start();
 
-        toggle();
     }
 
     public void countBlocksOptimized(World world, BlockPos center, int radius) {
@@ -103,10 +102,11 @@ public class BlockCounter extends Module {
                 ChatUtils.info(block.getName().getString() + ": (highlight)" + count)
             );
             ChatUtils.info("Total: (highlight)" + getTotalCount() + " (highlight)| Scanned: " + blocksScanned + " blocks in " + duration + "ms");
-            ChatUtils.info("Scanned: " + blocksScanned + " blocks in " + duration + "ms");
+            THMAddon.LOG.info("Scanned: " + blocksScanned + " blocks in " + duration + "ms");
         } else {
             ChatUtils.info("No selected blocks found. (Scanned: " + blocksScanned + " blocks)");
         }
+        toggle();
     }
 
     public Map<Block, Integer> getBlockCounts() {
