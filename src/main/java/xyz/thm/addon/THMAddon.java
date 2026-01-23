@@ -52,6 +52,8 @@ public class THMAddon extends MeteorAddon {
         Modules.get().add(new BlockCounter());
         Modules.get().add(new DiscordNotifs());
         //Modules.get().add(new WebhookEncrypt());
+        Modules.get().add(new ScaffoldTHM());
+        Modules.get().add(new OffhandManager());
 
 
 
