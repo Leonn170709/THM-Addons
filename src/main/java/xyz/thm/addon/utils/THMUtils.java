@@ -10,7 +10,7 @@ public class THMUtils {
 
     // Block Pos
 
-    public static boolean canPlaceWM(BlockPos blockPos) {
+    public static boolean canPlaceTHM(BlockPos blockPos) {
         return canPlace(blockPos, false);
     }
 

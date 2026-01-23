@@ -6,6 +6,7 @@ import meteordevelopment.meteorclient.utils.Utils;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.metadata.ModMetadata;
 import net.minecraft.item.Items;
+import xyz.thm.addon.hud.DubCounter;
 import xyz.thm.addon.modules.*;
 import com.mojang.logging.LogUtils;
 import meteordevelopment.meteorclient.systems.hud.Hud;
@@ -44,16 +45,19 @@ public class THMAddon extends MeteorAddon {
         MOD_META = FabricLoader.getInstance().getModContainer(MOD_ID).orElseThrow().getMetadata();
 
         // Modules
+        Modules.get().add(new HighwayBuilderTHM());
         Modules.get().add(new TPAAutomationModule());
         Modules.get().add(new ChatFilterModule());
         Modules.get().add(new AxisViewer());
-        Modules.get().add(new HighwayBuilderTHM());
         Modules.get().add(new BlockCounter());
         Modules.get().add(new DiscordNotifs());
         //Modules.get().add(new WebhookEncrypt());
 
+
+
         //Hud
         Hud.get().register(OnlineFriendsList.INFO);
+        Hud.get().register(DubCounter.INFO);
 
     }
 

@@ -18,8 +18,10 @@ import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.combat.KillAura;
+import meteordevelopment.meteorclient.systems.modules.movement.Velocity;
 import meteordevelopment.meteorclient.systems.modules.movement.speed.Speed;
 import meteordevelopment.meteorclient.systems.modules.player.*;
+import meteordevelopment.meteorclient.systems.modules.render.FreeLook;
 import meteordevelopment.meteorclient.systems.modules.world.NoGhostBlocks;
 import meteordevelopment.meteorclient.systems.modules.world.Timer;
 import meteordevelopment.meteorclient.utils.Utils;
@@ -43,6 +45,7 @@ import net.minecraft.client.gui.screen.ingame.ShulkerBoxScreen;
 import net.minecraft.client.input.Input;
 import net.minecraft.client.network.ClientPlayerInteractionManager;
 import net.minecraft.client.option.GameOptions;
+import net.minecraft.client.option.Perspective;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.Entity;
@@ -69,13 +72,14 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Range;
 import org.joml.Vector3d;
 import xyz.thm.addon.THMAddon;
-import xyz.thm.addon.utils.THMUtils;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.function.Predicate;
+
+import static xyz.thm.addon.utils.ServerCheck.isNot6B6T;
 
 @SuppressWarnings("ConstantConditions")
 public class HighwayBuilderTHM extends Module {
@@ -153,7 +157,7 @@ public class HighwayBuilderTHM extends Module {
     private final Setting<Boolean> cornerBlock = sgGeneral.add(new BoolSetting.Builder()
         .name("corner-support-block")
         .description("Places a support block underneath the railings, to prevent air placing.")
-        .defaultValue(true)
+        .defaultValue(false)
         .visible(railings::get)
         .build()
     );
@@ -504,7 +508,12 @@ public class HighwayBuilderTHM extends Module {
         .visible(() -> printStatistics.get() && sendStatisticsapi.get())
         .build()
     );
-
+    public final Setting<Boolean> togglePerspective = sgGeneral.add(new BoolSetting.Builder()
+        .name("toggle-perspective")
+        .description("Changes your perspective on toggle.")
+        .defaultValue(true)
+        .build()
+    );
     private HorizontalDirection dir, leftDir, rightDir;
 
     private Input prevInput;
@@ -627,14 +636,16 @@ public class HighwayBuilderTHM extends Module {
                         info("Successfully sent statistics to Api!");
                     } else {
                         THMAddon.LOG.warn("API response code: " + responseCode);
-                        warning("Failed to send to Api");
+                        warning("Failed to send to Api" + responseCode);
                     }
                 } catch (Exception e) {
                     THMAddon.LOG.warn("Failed to send to API: " + e.getMessage(), e);
+                    warning("Failed to send to API: " + e.getMessage(), e);
                 } finally {
                     if (conn != null) conn.disconnect();
                 }
             }).start();
+
         }
 
     @Override
@@ -661,20 +672,31 @@ public class HighwayBuilderTHM extends Module {
 
         restockTask.complete();
 
-        if (blocksPerTick.get() > 1 && rotation.get().mine) warning("With rotations enabled, you can break at most 1 block per tick.");
-        if (placementsPerTick.get() > 1 && rotation.get().place) warning("With rotations enabled, you can place at most 1 block per tick.");
-        if (blocksPerTick.get() > 1 && rotation.get().mine) warning("With rotations enabled, you can break at most 1 block per tick.");
-        if (placementsPerTick.get() > 1 && rotation.get().place) warning("With rotations enabled, you can place at most 1 block per tick.");
+        if (blocksPerTick.get() > 1 && rotation.get().mine)
+            warning("With rotations enabled, you can break at most 1 block per tick.");
+        if (placementsPerTick.get() > 1 && rotation.get().place)
+            warning("With rotations enabled, you can place at most 1 block per tick.");
         //all modules that may cause error now print errors/warnings
-        if (Modules.get().get(InstantRebreak.class).isActive()) warning("It's recommended to disable the Instant Rebreak module and instead use the 'instantly-rebreak-echests' setting to avoid errors.");
-        if (Modules.get().get(SpeedMine.class).isActive()) warning("It's recommended to disable the Speedmine module and instead use the 'fast-break' setting to avoid errors.");
-        if (Modules.get().get(Speed.class).isActive() && dir.diagonal) warning("It's recommended to disable the Speed module to avoid misalignment on diagonals.");
-        if (Modules.get().get(Timer.class).isActive() && dir.diagonal) warning("It's recommended to disable the Timer module to avoid misalignment on diagonals.");
+        if (Modules.get().get(InstantRebreak.class).isActive())
+            warning("It's recommended to disable the Instant Rebreak module and instead use the 'instantly-rebreak-echests' setting to avoid errors.");
+        if (Modules.get().get(SpeedMine.class).isActive())
+            warning("It's recommended to disable the Speedmine module and instead use the 'fast-break' setting to avoid errors.");
+        if (Modules.get().get(Speed.class).isActive() && dir.diagonal)
+            warning("It's recommended to disable the Speed module to avoid misalignment on diagonals.");
+        if (Modules.get().get(Timer.class).isActive() && dir.diagonal)
+            warning("It's recommended to disable the Timer module to avoid misalignment on diagonals.");
         //it could be tested to print different warnings depending on the amount of blocks being broken per tick but that would need much testing and wouldn't be reliable
-        if (Modules.get().get(NoGhostBlocks.class).isActive()) warning("It's recommended to disable the NoGhostBlocks module to avoid packet kicks and wrong statistics.");
+        if (Modules.get().get(NoGhostBlocks.class).isActive())
+            warning("It's recommended to disable the NoGhostBlocks module to avoid packet kicks and wrong statistics.");
+        if (!Modules.get().get(Velocity.class).isActive()) {
+            warning("It's recommended to enable the Velocity module to avoid misalignment.");}
+        if (Modules.get().get(FreeLook.class).mode.get() == FreeLook.Mode.Player) {Modules.get().get(FreeLook.class).mode.set(FreeLook.Mode.Camera);}
+        if (togglePerspective.get() == true) {Modules.get().get(FreeLook.class).togglePerspective.set(true);}
+        if (togglePerspective.get() == false) {Modules.get().get(FreeLook.class).togglePerspective.set(false);}
+        if (!Modules.get().get(FreeLook.class).isActive()) { Modules.get().get(FreeLook.class).toggle();}
+
 
     }
-
     @Override
     public void onDeactivate() {
         if (mc.player == null || mc.world == null) return;
@@ -683,13 +705,14 @@ public class HighwayBuilderTHM extends Module {
         mc.player.input = prevInput;
         mc.player.setYaw(dir.yaw);
         mc.options.useKey.setPressed(false);
+        if (Modules.get().get(FreeLook.class).isActive()) { Modules.get().get(FreeLook.class).toggle();}
 
             if (displayInfo && printStatistics.get()) {
                 info("Distance: (highlight)%.0f", PlayerUtils.distanceTo(start));
                 info("Blocks broken: (highlight)%d", blocksBroken);
                 info("Blocks placed: (highlight)%d", blocksPlaced);
             }
-//webhook send stats part
+                //webhook send stats part
             if (sendStatisticsWebhhok.get()) {
                 String webhookUrl = decryptWebhook(encryptedWebhook.get(), decryptkey.get());
                 if (webhookUrl != null) {
@@ -710,7 +733,10 @@ public class HighwayBuilderTHM extends Module {
             if (sendStatisticsapi.get()) {
                     double distance = PlayerUtils.distanceTo(start);
                 if (distance > 1) {
-
+                    if (isNot6B6T()) {
+                        warning("API not sent. You are not on 6B6T");
+                        return;
+                    }
                     String playerName = mc.player.getName().getLiteralString();
                     String statsMessageapi = String.format("Player: %s , Distance: %.0f , Blocks broken: %d , Blocks placed: %d, Hash: %s",
                         playerName, distance, blocksBroken, blocksPlaced, hash);
@@ -719,8 +745,8 @@ public class HighwayBuilderTHM extends Module {
                     warning("Statistics NOT sent to Api! Distance too small: (highlight)%.0f", distance);
                 }
               }
-            }
 
+    }
     @Override
     public void error(String message, Object... args) {
         super.error(message, args);
@@ -731,7 +757,7 @@ public class HighwayBuilderTHM extends Module {
         }
     }
 
-    private void errorEarly(String message, Object... args) {
+        private void errorEarly(String message, Object... args) {
         super.error(message, args);
 
         displayInfo = false;
@@ -931,7 +957,7 @@ public class HighwayBuilderTHM extends Module {
 
     private boolean canPlace(MBlockPos pos, boolean liquids) {
         if (pos.getBlockPos().getSquaredDistance(mc.player.getEyePos()) > placeRange.get() * placeRange.get()) return false;
-        return liquids ? !pos.getState().getFluidState().isEmpty() : THMUtils.canPlaceWM(pos.getBlockPos());
+        return liquids ? !pos.getState().getFluidState().isEmpty() : BlockUtils.canPlace(pos.getBlockPos());
     }
 
     private void disconnect(String message, Object... args) {
@@ -1050,16 +1076,14 @@ public class HighwayBuilderTHM extends Module {
             @Override
             protected void start(HighwayBuilderTHM b) {
                 checkTasks(b);
-                b.mc.player.setPitch(20); // Prevent accidentally looking at endermen's eyes
-
+                b.mc.player.setPitch(20);
                 if (b.state == Forward) b.mc.player.setYaw(b.dir.yaw);
             }
 
             @Override
             protected void tick(HighwayBuilderTHM b) {
                 checkTasks(b);
-                b.mc.player.setPitch(20); // Prevent accidentally looking at endermen's eyes
-
+                b.mc.player.setPitch(20);
                 if (b.state == Forward) b.input.forward(true); // Move
             }
 
@@ -1973,7 +1997,6 @@ public class HighwayBuilderTHM extends Module {
              * screen. Similarly, drawing our bow by {@link ClientPlayerInteractionManager#interactItem} would get
              * cancelled by default within the handleInputEvents method if you do not have the use key held down,
              * essentially meaning without the following injection it would not work if you don't have a screen open.
-             *
              * //@see meteordevelopment.meteorclient.mixin.MinecraftClientMixin#wrapStopUsing(ClientPlayerInteractionManager, PlayerEntity)
              */
             @Override
@@ -2199,7 +2222,7 @@ public class HighwayBuilderTHM extends Module {
                 if (pos.getBlockPos().getSquaredDistance(b.mc.player.getEyePos()) > b.placeRange.get() * b.placeRange.get()) continue;
 
                 // CheckEntities & SwapBack are disabled for waiting for better accuracy and speed of the builder
-                if (BlockUtils.place(pos.getBlockPos(), Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, false, false)) {
+                if (BlockUtils.place(pos.getBlockPos(), Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, true)) {
                     placed = true;
                     b.blocksPlaced++;
                     b.placeTimer = b.placeDelay.get();
@@ -3051,7 +3074,7 @@ public class HighwayBuilderTHM extends Module {
             // when it isn't supposed to due to latency
             boolean timeout = progress() > 2 && (b.mc.player.age - (packet ? packetStartTime : normalStartTime) > 60);
 
-            return  distance || timeout;
+            return distance || timeout;
         }
 
         public double progress() {
