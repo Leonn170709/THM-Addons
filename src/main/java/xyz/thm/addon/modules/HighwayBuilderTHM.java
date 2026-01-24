@@ -45,7 +45,6 @@ import net.minecraft.client.gui.screen.ingame.ShulkerBoxScreen;
 import net.minecraft.client.input.Input;
 import net.minecraft.client.network.ClientPlayerInteractionManager;
 import net.minecraft.client.option.GameOptions;
-import net.minecraft.client.option.Perspective;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.Entity;
@@ -73,13 +72,18 @@ import org.jetbrains.annotations.Range;
 import org.joml.Vector3d;
 import xyz.thm.addon.THMAddon;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
+import javax.crypto.Cipher;
+import javax.crypto.spec.SecretKeySpec;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.*;
 import java.util.function.Predicate;
 
-import static xyz.thm.addon.utils.ServerCheck.isNot6B6T;
+import static xyz.thm.addon.utils.THMUtils.isNot6B6T;
 
 @SuppressWarnings("ConstantConditions")
 public class HighwayBuilderTHM extends Module {
@@ -126,8 +130,8 @@ public class HighwayBuilderTHM extends Module {
         .name("width")
         .description("Width of the highway.")
         .defaultValue(5)
-        .range(1, 6)
-        .sliderRange(1, 6)
+        .range(1, 5)
+        .sliderRange(1, 5)
         .build()
     );
 
@@ -209,12 +213,12 @@ public class HighwayBuilderTHM extends Module {
 
     // Digging
 
-    private final Setting<Boolean> ignoreSigns = sgDigging.add(new BoolSetting.Builder()
-        .name("ignore-signs")
-        .description("Ignore breaking signs = preserving history (based).")
-        .defaultValue(true)
-        .build()
-    );
+    //private final Setting<Boolean> ignoreSigns = sgDigging.add(new BoolSetting.Builder()
+    //    .name("ignore-signs")
+    //    .description("Ignore breaking signs = preserving history (based).")
+    //    .defaultValue(true)
+    //    .build()
+    //);
 
     private final Setting<Boolean> doubleMine = sgDigging.add(new BoolSetting.Builder()
         .name("double-mine")
@@ -535,6 +539,7 @@ public class HighwayBuilderTHM extends Module {
     public String api = "http://localhost:3000/";
     private final MBlockPos posRender2 = new MBlockPos();
     private final MBlockPos posRender3 = new MBlockPos();
+    public FreeLook.Mode Fmode;
 
     public HighwayBuilderTHM() {
         super(THMAddon.CATEGORY, "THM-HighwayBuilder", "Automatically builds highways according to THMs standards.");
@@ -545,8 +550,8 @@ public class HighwayBuilderTHM extends Module {
         private String decryptWebhook(String encryptedWebhook, String password) {
             try {
                 // Derive a 256-bit (32 byte) key from the password using SHA-256
-                java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
-                byte[] keyBytes = digest.digest(password.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                MessageDigest digest = MessageDigest.getInstance("SHA-256");
+                byte[] keyBytes = digest.digest(password.getBytes(StandardCharsets.UTF_8));
 
                 // Add proper Base64 padding for encrypted webhook if needed
                 String padded = encryptedWebhook;
@@ -555,15 +560,15 @@ public class HighwayBuilderTHM extends Module {
                     padded += "=".repeat(4 - padding);
                 }
 
-                byte[] encryptedBytes = java.util.Base64.getDecoder().decode(padded);
+                byte[] encryptedBytes = Base64.getDecoder().decode(padded);
 
                 // Create AES-256 cipher
-                javax.crypto.spec.SecretKeySpec secretKey = new javax.crypto.spec.SecretKeySpec(keyBytes, 0, keyBytes.length, "AES");
-                javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES");
-                cipher.init(javax.crypto.Cipher.DECRYPT_MODE, secretKey);
+                SecretKeySpec secretKey = new SecretKeySpec(keyBytes, 0, keyBytes.length, "AES");
+                Cipher cipher = Cipher.getInstance("AES");
+                cipher.init(Cipher.DECRYPT_MODE, secretKey);
 
                 byte[] decrypted = cipher.doFinal(encryptedBytes);
-                return new String(decrypted, java.nio.charset.StandardCharsets.UTF_8);
+                return new String(decrypted, StandardCharsets.UTF_8);
             } catch (Exception e) {
                 // If decryption fails, treat the webhook as unencrypted
                 THMAddon.LOG.warn("Failed to decrypt webhook, treating as unencrypted: " + e.getMessage());
@@ -574,8 +579,8 @@ public class HighwayBuilderTHM extends Module {
         private void sendToWebhook(String webhookUrl, String message) {
             new Thread(() -> {
                 try {
-                    @SuppressWarnings("deprecation") java.net.URL url = new java.net.URL(webhookUrl);
-                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                    @SuppressWarnings("deprecation") URL url = new URL(webhookUrl);
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                     conn.setRequestMethod("POST");
                     conn.setRequestProperty("Content-Type", "application/json");
                     conn.setDoOutput(true);
@@ -583,8 +588,8 @@ public class HighwayBuilderTHM extends Module {
                     // Create JSON payload for Discord webhook
                     String json = "{\"content\": \"" + message.replace("\"", "\\\"") + "\"}";
 
-                    try (java.io.OutputStream os = conn.getOutputStream()) {
-                        byte[] input = json.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    try (OutputStream os = conn.getOutputStream()) {
+                        byte[] input = json.getBytes(StandardCharsets.UTF_8);
                         os.write(input, 0, input.length);
                     }
 
@@ -604,10 +609,10 @@ public class HighwayBuilderTHM extends Module {
         }
         private void sendToAPI(String api, String message) {
             new Thread(() -> {
-                java.net.HttpURLConnection conn = null;
+                HttpURLConnection conn = null;
                 try {
-                    @SuppressWarnings("deprecation") java.net.URL url = new java.net.URL(api);
-                    conn = (java.net.HttpURLConnection) url.openConnection();
+                    @SuppressWarnings("deprecation") URL url = new URL(api);
+                    conn = (HttpURLConnection) url.openConnection();
                     conn.setRequestMethod("POST");
                     conn.setRequestProperty("Content-Type", "application/json");
                     conn.setDoOutput(true);
@@ -617,8 +622,8 @@ public class HighwayBuilderTHM extends Module {
                     // Create JSON payload for API
                     String json = "{\"content\": \"" + message.replace("\"", "\\\"") + "\"}";
 
-                    try (java.io.OutputStream os = conn.getOutputStream()) {
-                        byte[] input = json.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    try (OutputStream os = conn.getOutputStream()) {
+                        byte[] input = json.getBytes(StandardCharsets.UTF_8);
                         os.write(input, 0, input.length);
                         os.flush();
                     }
@@ -626,7 +631,7 @@ public class HighwayBuilderTHM extends Module {
                     int responseCode = conn.getResponseCode();
 
                     // Consume response body to prevent resource leak
-                    try (java.io.InputStream is = responseCode >= 400 ? conn.getErrorStream() : conn.getInputStream()) {
+                    try (InputStream is = responseCode >= 400 ? conn.getErrorStream() : conn.getInputStream()) {
                         if (is != null) {
                             is.readAllBytes();
                         }
@@ -689,11 +694,15 @@ public class HighwayBuilderTHM extends Module {
         if (Modules.get().get(NoGhostBlocks.class).isActive())
             warning("It's recommended to disable the NoGhostBlocks module to avoid packet kicks and wrong statistics.");
         if (!Modules.get().get(Velocity.class).isActive()) {
-            warning("It's recommended to enable the Velocity module to avoid misalignment.");}
+            warning("It's recommended to enable the Velocity module to avoid misalignment.");};
+
+        Fmode = Modules.get().get(FreeLook.class).mode.get();
         if (Modules.get().get(FreeLook.class).mode.get() == FreeLook.Mode.Player) {Modules.get().get(FreeLook.class).mode.set(FreeLook.Mode.Camera);}
         if (togglePerspective.get() == true) {Modules.get().get(FreeLook.class).togglePerspective.set(true);}
         if (togglePerspective.get() == false) {Modules.get().get(FreeLook.class).togglePerspective.set(false);}
         if (!Modules.get().get(FreeLook.class).isActive()) { Modules.get().get(FreeLook.class).toggle();}
+        if (!Modules.get().get(HotbarManager.class).isActive()) { Modules.get().get(HotbarManager.class).toggle();}
+
 
 
     }
@@ -706,6 +715,8 @@ public class HighwayBuilderTHM extends Module {
         mc.player.setYaw(dir.yaw);
         mc.options.useKey.setPressed(false);
         if (Modules.get().get(FreeLook.class).isActive()) { Modules.get().get(FreeLook.class).toggle();}
+        Modules.get().get(FreeLook.class).mode.set(Fmode);
+        if (Modules.get().get(HotbarManager.class).isActive()) { Modules.get().get(HotbarManager.class).toggle();}
 
             if (displayInfo && printStatistics.get()) {
                 info("Distance: (highlight)%.0f", PlayerUtils.distanceTo(start));
@@ -737,9 +748,10 @@ public class HighwayBuilderTHM extends Module {
                         warning("API not sent. You are not on 6B6T");
                         return;
                     }
+
                     String playerName = mc.player.getName().getLiteralString();
-                    String statsMessageapi = String.format("Player: %s , Distance: %.0f , Blocks broken: %d , Blocks placed: %d, Hash: %s",
-                        playerName, distance, blocksBroken, blocksPlaced, hash);
+                    String statsMessageapi = String.format("Player: %s , Distance: %.0f , Blocks broken: %d , Blocks placed: %d, Hash: %s, Direction: %s",
+                        playerName, distance, blocksBroken, blocksPlaced, hash, dir);
                     sendToAPI(api, statsMessageapi);
                 } else {
                     warning("Statistics NOT sent to Api! Distance too small: (highlight)%.0f", distance);
@@ -935,7 +947,6 @@ public class HighwayBuilderTHM extends Module {
 
     private int getWidthLeft() {
         return switch (width.get()) {
-            case 6 -> 3;
             case 5, 4 -> 2;
             case 3, 2 -> 1;
             default -> 0;
@@ -944,7 +955,7 @@ public class HighwayBuilderTHM extends Module {
 
     private int getWidthRight() {
         return switch (width.get()) {
-            case 6, 5 -> 2;
+            case 5 -> 2;
             case 4, 3 -> 1;
             default -> 0;
         };
@@ -962,9 +973,9 @@ public class HighwayBuilderTHM extends Module {
 
     private void disconnect(String message, Object... args) {
         MutableText text = Text.literal("<")
-        .styled(style -> style.withColor(Formatting.BLACK))
-        .append(Text.literal(title).styled(style -> style.withColor(Formatting.RED)))
-        .append(Text.literal("> ").styled(style -> style.withColor(Formatting.BLACK)))
+        .styled(style -> style.withColor(Formatting.WHITE))
+        .append(Text.literal(title).styled(style -> style.withColor(Formatting.BLUE)))
+        .append(Text.literal("> ").styled(style -> style.withColor(Formatting.WHITE)))
         .append(Text.literal(String.format(message, args)).styled(style -> style.withColor(Formatting.RED)))
         .append("\n")
         .append(getStatsText());
@@ -2149,7 +2160,7 @@ public class HighwayBuilderTHM extends Module {
                 if (b.breakTimer > 0) return;
 
                 BlockState state = pos.getState();
-                if (state.isAir() || (b.ignoreSigns.get() && state.getBlock() instanceof SignBlock && pos.getBlockPos().getY() >= (b.mc.player.getY())) || (!mineBlocksToPlace && b.blocksToPlace.get().contains(state.getBlock()))) continue;
+                if (state.isAir() || (!mineBlocksToPlace && b.blocksToPlace.get().contains(state.getBlock()))) continue;
 
                 int slot = findAndMoveBestToolToHotbar(b, state, false);
                 if (slot == -1) return;

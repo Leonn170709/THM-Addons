@@ -1,11 +1,13 @@
 package xyz.thm.addon;
 
 import meteordevelopment.meteorclient.MeteorClient;
+import meteordevelopment.meteorclient.commands.Commands;
 import meteordevelopment.meteorclient.systems.hud.HudGroup;
 import meteordevelopment.meteorclient.utils.Utils;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.metadata.ModMetadata;
 import net.minecraft.item.Items;
+import xyz.thm.addon.commands.*;
 import xyz.thm.addon.hud.DubCounter;
 import xyz.thm.addon.modules.*;
 import com.mojang.logging.LogUtils;
@@ -54,7 +56,11 @@ public class THMAddon extends MeteorAddon {
         //Modules.get().add(new WebhookEncrypt());
         Modules.get().add(new ScaffoldTHM());
         Modules.get().add(new OffhandManager());
+        Modules.get().add(new HotbarManager());
 
+
+        //Commands
+        Commands.add(new Center());
 
 
         //Hud
@@ -80,12 +86,6 @@ public class THMAddon extends MeteorAddon {
 
     @Override
     public GithubRepo getRepo() {
-        return new GithubRepo("Leonn170709", "THM-Addons", "1.21.4", null);
-    }
-
-    @Override
-    public String getCommit() {
-        String commit = MOD_META.getCustomValue(MOD_ID + ":commit").getAsString();
-        return commit.isEmpty() ? null : commit;
+        return new GithubRepo("Leonn170709", "THM-Addons", "1.21.11", null);
     }
 }
