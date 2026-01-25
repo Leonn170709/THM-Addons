@@ -34,7 +34,7 @@ public class THMAddon extends MeteorAddon {
     static {METADATA = FabricLoader.getInstance().getModContainer(MOD_ID).orElseThrow().getMetadata();
         VERSION = METADATA.getVersion().getFriendlyString();
 
-        MAIN = new Category("THM Additions", Items.BEACON.getDefaultStack());}
+        MAIN = new Category("THM Additions", Items.OBSIDIAN.getDefaultStack());}
 
     public static File GetConfigFile(String key, String filename) {
         return new File(new File(new File(new File(MeteorClient.FOLDER, "thm"), key), Utils.getFileWorldName()), filename);
@@ -45,6 +45,7 @@ public class THMAddon extends MeteorAddon {
         LOG.info("Initializing THM Addon");
 
         MOD_META = FabricLoader.getInstance().getModContainer(MOD_ID).orElseThrow().getMetadata();
+        boolean baritoneLoaded = checkModLoaded("baritone", "baritone-meteor");
 
         // Modules
         Modules.get().add(new HighwayBuilderTHM());
@@ -58,6 +59,11 @@ public class THMAddon extends MeteorAddon {
         Modules.get().add(new OffhandManager());
         Modules.get().add(new HotbarManager());
 
+        if (baritoneLoaded)
+        {
+            Modules.get().add(new HighwaySearcher());
+        }
+
 
         //Commands
         Commands.add(new Center());
@@ -66,6 +72,7 @@ public class THMAddon extends MeteorAddon {
         //Hud
         Hud.get().register(OnlineFriendsList.INFO);
         Hud.get().register(DubCounter.INFO);
+
 
     }
 
@@ -87,5 +94,22 @@ public class THMAddon extends MeteorAddon {
     @Override
     public GithubRepo getRepo() {
         return new GithubRepo("Leonn170709", "THM-Addons", "1.21.11", null);
+    }
+    private boolean checkModLoaded(String... modIds)
+    {
+        boolean loaded = false;
+        for (String id : modIds)
+        {
+            if (FabricLoader.getInstance().isModLoaded(id))
+            {
+                loaded = true;
+                break;
+            }
+        }
+        if (!loaded)
+        {
+            LOG.error("{} not found, disabling modules that require it.", modIds[0]);
+        }
+        return loaded;
     }
 }

@@ -1,11 +1,15 @@
 package xyz.thm.addon.utils;
 
+import baritone.api.BaritoneAPI;
+import baritone.api.IBaritone;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.network.ServerInfo;
 import net.minecraft.util.math.BlockPos;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 import static meteordevelopment.meteorclient.utils.world.BlockUtils.canPlace;
+import static xyz.thm.addon.utils.Logger.info;
+
 
 public class THMUtils {
     private THMUtils() {}
@@ -83,5 +87,34 @@ public class THMUtils {
         if (server == null) return false;
         return !server.address.endsWith("6b6t.org");
     }
+    public static void pickupAndReturn() {
+        if (mc.player == null) return;
+        int savedX;
+        int savedZ;
+        final boolean[] finishedbar = {false};
+        final IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
+        savedX = (int) mc.player.getX()-1;
+        savedZ = (int) mc.player.getZ()-1;
+
+        baritone.getCommandManager().execute("pickup minecraft:obsidian");
+        new Thread(() -> {
+            try {
+                info("Waiting 10 seconds for baritone to pick up.");
+                Thread.sleep(10000);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            baritone.getPathingBehavior().cancelEverything();
+            baritone.getCommandManager().execute("goto " + savedX + " " + savedZ);
+            while (!finishedbar[0]) {
+                if (Math.abs(mc.player.getX() - savedX) == 0 && Math.abs(mc.player.getZ() - savedZ) == 0) {
+                    finishedbar[0] = true;
+                    baritone.getPathingBehavior().cancelEverything();
+                }
+            }
+        }).start();
+
+    }
+    // TODO: Add this to Highway builder so it picks up all the splattered obsidian
 
 }

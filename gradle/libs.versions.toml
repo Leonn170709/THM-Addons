@@ -1,5 +1,5 @@
 [versions]
-mod-version = "0.1.0"
+mod-version = "0.1.8"
 
 # Fabric (https://fabricmc.net/develop)
 minecraft = "1.21.11"
@@ -22,6 +22,9 @@ fabric-loader = { module = "net.fabricmc:fabric-loader", version.ref = "fabric-l
 
 # Meteor client
 meteor-client = { module = "meteordevelopment:meteor-client", version.ref = "meteor" }
+
+# Baritone
+baritone = { module = "meteordevelopment:baritone", version.ref = "meteor" }
 
 # Mods
 
