@@ -78,6 +78,7 @@ public class THMAddon extends MeteorAddon {
         //Hud
         Hud.get().register(OnlineFriendsList.INFO);
         Hud.get().register(DubCounter.INFO);
+        Hud.get().register(HighwayHud.INFO);
 
 
     }

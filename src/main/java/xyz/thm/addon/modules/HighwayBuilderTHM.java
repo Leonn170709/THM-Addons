@@ -305,7 +305,7 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Integer> placementsPerTick = sgPaving.add(new IntSetting.Builder()
+    public final Setting<Integer> placementsPerTick = sgPaving.add(new IntSetting.Builder()
         .name("placements-per-tick")
         .description("The maximum amount of blocks that can be placed in a tick.")
         .defaultValue(3)
@@ -525,7 +525,14 @@ public class HighwayBuilderTHM extends Module {
         .defaultValue(true)
         .build()
     );
-    private HorizontalDirection dir, leftDir, rightDir;
+
+    public final Setting<Boolean> enablehud = sgGeneral.add(new BoolSetting.Builder()
+        .name("toggle-hud")
+        .description("Toggles the hud")
+        .defaultValue(true)
+        .build()
+    );
+    public HorizontalDirection dir, leftDir, rightDir;
 
     private Input prevInput;
     private CustomPlayerInput input;
@@ -675,7 +682,6 @@ public class HighwayBuilderTHM extends Module {
         state = State.Forward;
         setState(State.Center);
         lastBreakingPos.set(0, 0, 0);
-
         start = mc.player.getEntityPos();
         blocksBroken = blocksPlaced = 0;
         displayInfo = true;
