@@ -19,7 +19,7 @@ import java.util.Map;
 public class BlockCounter extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     public BlockCounter() {
-        super(THMAddon.CATEGORY, "BlockCounter", "Zählt ausgewählte Blöcke in der Nähe und zeigt die Anzahl im Chat.");
+        super(THMAddon.CATEGORY, "BlockCounter", "Counts the selected Blocks");
     }
 
     private final Setting<List<Block>> blocks = sgGeneral.add(new BlockListSetting.Builder()

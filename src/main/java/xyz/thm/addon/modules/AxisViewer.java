@@ -1,11 +1,15 @@
+//Thank you https://github.com/1exmc that you have alr added support for Ring and diamond Highways
+
 package xyz.thm.addon.modules;
 
+import it.unimi.dsi.fastutil.ints.IntList;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
+import meteordevelopment.meteorclient.utils.world.Dimension;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.util.math.Vec3d;
 import xyz.thm.addon.THMAddon;
@@ -44,28 +48,54 @@ public class AxisViewer extends Module {
 
     // Nether
 
-    private final Setting<AxisType> netherAxisTypes = sgNether.add(new EnumSetting.Builder<AxisType>()
-        .name("render")
-        .description("Which axes to display.")
-        .defaultValue(AxisType.Both)
+    private final Setting<Boolean> netherCardinal = sgNether.add(new BoolSetting.Builder()
+        .name("Render Cardinal Highway")
+        .description("Draw cardinal highways")
+        .defaultValue(true)
         .build()
     );
 
-    private final Setting<Integer> netherY = sgNether.add(new IntSetting.Builder()
-        .name("height")
-        .description("Y position of the line.")
-        .defaultValue(120)
-        .sliderMin(0)
-        .sliderMax(255)
-        .visible(() -> netherAxisTypes.get() != AxisType.None)
+    private final Setting<Boolean> netherDiagonal = sgNether.add(new BoolSetting.Builder()
+        .name("Render Diagonal Highway")
+        .description("Draw diagonal highways")
+        .defaultValue(true)
         .build()
     );
+
+    private final Setting<Boolean> netherRing = sgNether.add(new BoolSetting.Builder()
+        .name("Render Ring Highway")
+        .description("Draw ring highways")
+        .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Boolean> netherDiamond = sgNether.add(new BoolSetting.Builder()
+        .name("Render Diamond Highway")
+        .description("Draw diamond highways")
+        .defaultValue(false)
+        .build()
+    );
+
+   // private final Setting<Integer> netherY = sgNether.add(new IntSetting.Builder()
+   //     .name("height")
+   //     .description("Y position of the line.")
+   //     .defaultValue(120)
+   //     .sliderMin(0)
+   //     .sliderMax(255)
+   //     .build()
+   // );
 
     private final Setting<SettingColor> netherColor = sgNether.add(new ColorSetting.Builder()
         .name("color")
         .description("The line color.")
         .defaultValue(new SettingColor(225, 25, 25, 255))
-        .visible(() -> netherAxisTypes.get() != AxisType.None)
+        .build()
+    );
+
+    private final Setting<Boolean> highwayCenterMode = sgNether.add(new BoolSetting.Builder()
+        .name("Draw True Center: ")
+        .description("This will move the axis line to the center of the middle block instead of the block edge.")
+        .defaultValue(false)
         .build()
     );
 
@@ -100,6 +130,50 @@ public class AxisViewer extends Module {
         super(THMAddon.CATEGORY, "axis-viewer", "Displays world axes.");
     }
 
+    private static final IntList RING_ROADS = IntList.of(
+        200,
+        500,
+        750,
+        1000,
+        1500,
+        2000,
+        2500,
+        5000,
+        7500,
+        10000,
+        15000,
+        20000,
+        25000,
+        50000,
+        55000,
+        62500,
+        75000,
+        100000,
+        125000,
+        250000,
+        500000,
+        750000,
+        1000000,
+        1250000,
+        1568852,
+        1875000,
+        2500000,
+        3750000
+    );
+
+    private static final IntList DIAMONDS = IntList.of(
+        1000,
+        2000,
+        2500,
+        5000,
+        25000,
+        50000,
+        125000,
+        250000,
+        500000,
+        3750000
+    );
+
     @EventHandler
     private void onRender3D(Render3DEvent event) {
         if (mc.options.hudHidden) return;
@@ -107,6 +181,10 @@ public class AxisViewer extends Module {
         AxisType axisType;
         int y;
         Color lineColor;
+        boolean netherCardinalLocal = false;
+        boolean netherDiagonalLocal = false;
+        boolean netherRingLocal = false;
+        boolean netherDiamondLocal = false;
 
         switch (PlayerUtils.getDimension()) {
             case Overworld -> {
@@ -115,8 +193,12 @@ public class AxisViewer extends Module {
                 lineColor = overworldColor.get();
             }
             case Nether -> {
-                axisType = netherAxisTypes.get();
-                y = netherY.get();
+                axisType = AxisType.None;
+                netherCardinalLocal = netherCardinal.get();
+                netherDiagonalLocal = netherDiagonal.get();
+                netherRingLocal = netherRing.get();
+                netherDiamondLocal = netherDiamond.get();
+                y = 120;
                 lineColor = netherColor.get();
             }
             case End -> {
@@ -127,25 +209,108 @@ public class AxisViewer extends Module {
             default -> throw new IllegalStateException("Unexpected value: " + PlayerUtils.getDimension());
         }
 
-        if (axisType == AxisType.None) return;
+        if (axisType == AxisType.None && PlayerUtils.getDimension() != Dimension.Nether) return;
 
         double renderY = y;
 
+        double centerOffset = highwayCenterMode.get() ? 0.5 : 0.0;
+
         // Render cardinal lines
-        if (axisType.cardinals()) {
-            drawSegmentedLine(event, new Vec3d(0, renderY, 0), new Vec3d(30_000_000, renderY, 0), lineColor); // X+
-            drawSegmentedLine(event, new Vec3d(0, renderY, 0), new Vec3d(-30_000_000, renderY, 0), lineColor); // -X
-            drawSegmentedLine(event, new Vec3d(0, renderY, 0), new Vec3d(0, renderY, 30_000_000), lineColor); // Z+
-            drawSegmentedLine(event, new Vec3d(0, renderY, 0), new Vec3d(0, renderY, -30_000_000), lineColor); // -Z
+        if (axisType.cardinals() || netherCardinalLocal) {
+            // X axis
+            drawSegmentedLine(event,
+                new Vec3d(-30_000_000, renderY, centerOffset),
+                new Vec3d( 30_000_000, renderY, centerOffset),
+                lineColor
+            );
+
+            // Z axis
+            drawSegmentedLine(event,
+                new Vec3d(centerOffset, renderY, -30_000_000),
+                new Vec3d(centerOffset, renderY,  30_000_000),
+                lineColor
+            );
         }
 
-        // Render diagonal lines
-        if (axisType.diagonals()) {
-            drawSegmentedLine(event, new Vec3d(0, renderY, 0), new Vec3d(30_000_000, renderY, 30_000_000), lineColor); // ++
-            drawSegmentedLine(event, new Vec3d(0, renderY, 0), new Vec3d(30_000_000, renderY, -30_000_000), lineColor); // +-
-            drawSegmentedLine(event, new Vec3d(0, renderY, 0), new Vec3d(-30_000_000, renderY, 30_000_000), lineColor); // -+
-            drawSegmentedLine(event, new Vec3d(0, renderY, 0), new Vec3d(-30_000_000, renderY, -30_000_000), lineColor); // --
+        if (axisType.diagonals() || netherDiagonalLocal) {
+            // Diagonal 1: x = z
+            drawSegmentedLine(event,
+                new Vec3d(-30_000_000 + centerOffset, renderY, -30_000_000 + centerOffset),
+                new Vec3d( 30_000_000 + centerOffset, renderY,  30_000_000 + centerOffset),
+                lineColor
+            );
+
+            // Diagonal 2:
+            if (!highwayCenterMode.get()) {
+                drawSegmentedLine(event,
+                    new Vec3d(-30_000_000, renderY,  30_000_000),
+                    new Vec3d( 30_000_000, renderY, -30_000_000),
+                    lineColor
+                );
+            } else {
+                drawSegmentedLine(event,
+                    new Vec3d(-30_000_000, renderY,  30_000_000 + 1),
+                    new Vec3d( 30_000_000, renderY, -30_000_000 + 1),
+                    lineColor
+                );
+            }
         }
+
+        // Render ring lines
+        if (PlayerUtils.getDimension() == Dimension.Nether && netherRingLocal) {
+            for (int r : RING_ROADS) {
+                drawRing(event, renderY, r, centerOffset, lineColor);
+            }
+        }
+
+        // Render diamond lines
+        if (PlayerUtils.getDimension() == Dimension.Nether && netherDiamondLocal) {
+            for (int d : DIAMONDS) {
+                drawDiamond(event, renderY, d, centerOffset, lineColor);
+            }
+        }
+    }
+
+    private void drawRing(Render3DEvent event, double y, double r, double centerOffset, Color color) {
+        double left   = -r + centerOffset;
+        double right  =  r + centerOffset;
+        double bottom = -r + centerOffset;
+        double top    =  r + centerOffset;
+
+        // bottom
+        drawSegmentedLine(event, new Vec3d(left, y, bottom), new Vec3d(right, y, bottom), color);
+        // top
+        drawSegmentedLine(event, new Vec3d(left, y, top), new Vec3d(right, y, top), color);
+        // left
+        drawSegmentedLine(event, new Vec3d(left, y, bottom), new Vec3d(left,  y, top), color);
+        // right
+        drawSegmentedLine(event, new Vec3d(right,y, bottom), new Vec3d(right, y, top), color);
+    }
+
+    private void drawDiamond(Render3DEvent event, double y, int d, double centerOffset, Color color) {
+        drawSegmentedLine(event,
+            new Vec3d( d + centerOffset, y,  0 + centerOffset),
+            new Vec3d( 0 + centerOffset, y,  d + centerOffset),
+            color
+        );
+
+        drawSegmentedLine(event,
+            new Vec3d( 0 + centerOffset, y,  d + centerOffset),
+            new Vec3d(-d + centerOffset, y,  0 + centerOffset),
+            color
+        );
+
+        drawSegmentedLine(event,
+            new Vec3d(-d + centerOffset, y,  0 + centerOffset),
+            new Vec3d( 0 + centerOffset, y, -d + centerOffset),
+            color
+        );
+
+        drawSegmentedLine(event,
+            new Vec3d( 0 + centerOffset, y, -d + centerOffset),
+            new Vec3d( d + centerOffset, y,  0 + centerOffset),
+            color
+        );
     }
 
     private void drawSegmentedLine(Render3DEvent event, Vec3d start, Vec3d end, Color color) {
@@ -184,3 +349,4 @@ public class AxisViewer extends Module {
         }
     }
 }
+

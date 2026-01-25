@@ -2,14 +2,19 @@ package xyz.thm.addon;
 
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.commands.Commands;
+import meteordevelopment.meteorclient.gui.tabs.Tabs;
 import meteordevelopment.meteorclient.pathing.BaritoneUtils;
+import meteordevelopment.meteorclient.systems.Systems;
 import meteordevelopment.meteorclient.systems.hud.HudGroup;
+import meteordevelopment.meteorclient.systems.modules.misc.BetterChat;
 import meteordevelopment.meteorclient.utils.Utils;
+import meteordevelopment.meteorclient.utils.misc.MeteorStarscript;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.metadata.ModMetadata;
 import net.minecraft.item.Items;
+import org.meteordev.starscript.value.ValueMap;
 import xyz.thm.addon.commands.*;
-import xyz.thm.addon.hud.DubCounter;
+import xyz.thm.addon.hud.*;
 import xyz.thm.addon.modules.*;
 import com.mojang.logging.LogUtils;
 import meteordevelopment.meteorclient.systems.hud.Hud;
@@ -21,6 +26,8 @@ import xyz.thm.addon.hud.OnlineFriendsList;
 import org.slf4j.Logger;
 
 import java.io.File;
+
+import static meteordevelopment.meteorclient.MeteorClient.identifier;
 
 public class THMAddon extends MeteorAddon {
     public static final String MOD_ID = "thm-addon";

@@ -9,6 +9,7 @@ import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.orbit.EventHandler;
 import net.minecraft.world.World;
 import xyz.thm.addon.THMAddon;
 
@@ -49,14 +50,18 @@ public class HighwaySearcher extends Module {
     @Override
     public void onActivate() {
         assert mc.player != null;
-        if (Highwaytp.get() && axiswalker.get()) {error("You cant have two modes enabled at the same time.");
-            toggle();}
+        if (Highwaytp.get() && axiswalker.get()) {
+            error("You cant have two modes enabled at the same time.");
+            toggle();
+            return;
+        }
         if (axiswalker.get()) {
             if (mc.player == null) return;
             if (mc.world == null) return;
             if (mc.world.getRegistryKey() == World.NETHER) {
                 baritone.getCommandManager().execute("axis");
                 baritone.getCommandManager().execute("path");
+                info("Test");
             } else {
                 error("You can only use this in the Nether");
             }
@@ -84,12 +89,13 @@ public class HighwaySearcher extends Module {
         }
 
     }
-    private void onMessageReceive(ReceiveMessageEvent event) {
-        if (mc.player == null) return;
+    @EventHandler
+    private void onMessageReceive(ReceiveMessageEvent event)
+    { if (mc.player == null) return;
 
         String msg = event.getMessage().getString();
 
-        if (msg.contains("KitBot1") && msg.contains("You can now tp") && autoTp.get()) {
+        if (msg.contains("You can now tp") && msg.contains("KitBot1") && autoTp.get()) {
             mc.player.networkHandler.sendChatCommand("tpa KitBot1");
             info("TPA has been send.");
         }
