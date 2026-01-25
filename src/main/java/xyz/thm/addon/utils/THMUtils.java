@@ -5,10 +5,11 @@ import baritone.api.IBaritone;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.network.ServerInfo;
 import net.minecraft.util.math.BlockPos;
+import xyz.thm.addon.THMAddon;
+import meteordevelopment.meteorclient.systems.modules.Module;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 import static meteordevelopment.meteorclient.utils.world.BlockUtils.canPlace;
-import static xyz.thm.addon.utils.Logger.info;
 
 
 public class THMUtils {
@@ -99,7 +100,7 @@ public class THMUtils {
         baritone.getCommandManager().execute("pickup minecraft:obsidian");
         new Thread(() -> {
             try {
-                info("Waiting 10 seconds for baritone to pick up.");
+                THMAddon.LOG.info("Waiting 10 seconds for baritone to pick up");
                 Thread.sleep(10000);
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
@@ -116,5 +117,22 @@ public class THMUtils {
 
     }
     // TODO: Add this to Highway builder so it picks up all the splattered obsidian
+    private boolean checkModLoaded(String... modIds)
+    {
+        boolean loaded = false;
+        for (String id : modIds)
+        {
+            if (FabricLoader.getInstance().isModLoaded(id))
+            {
+                loaded = true;
+                break;
+            }
+        }
+        if (!loaded)
+        {
+            THMAddon.LOG.error("{} not found, disabling modules that require it.", modIds[0]);
+        }
+        return loaded;
+    }
 
 }

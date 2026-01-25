@@ -2,6 +2,7 @@ package xyz.thm.addon;
 
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.commands.Commands;
+import meteordevelopment.meteorclient.pathing.BaritoneUtils;
 import meteordevelopment.meteorclient.systems.hud.HudGroup;
 import meteordevelopment.meteorclient.utils.Utils;
 import net.fabricmc.loader.api.FabricLoader;
@@ -45,7 +46,6 @@ public class THMAddon extends MeteorAddon {
         LOG.info("Initializing THM Addon");
 
         MOD_META = FabricLoader.getInstance().getModContainer(MOD_ID).orElseThrow().getMetadata();
-        boolean baritoneLoaded = checkModLoaded("baritone", "baritone-meteor");
 
         // Modules
         Modules.get().add(new HighwayBuilderTHM());
@@ -58,9 +58,8 @@ public class THMAddon extends MeteorAddon {
         Modules.get().add(new ScaffoldTHM());
         Modules.get().add(new OffhandManager());
         Modules.get().add(new HotbarManager());
-
-        if (baritoneLoaded)
-        {
+        Modules.get().add(new UnfocusedFpsLimiter());
+        if (BaritoneUtils.IS_AVAILABLE) {
             Modules.get().add(new HighwaySearcher());
         }
 
@@ -94,22 +93,5 @@ public class THMAddon extends MeteorAddon {
     @Override
     public GithubRepo getRepo() {
         return new GithubRepo("Leonn170709", "THM-Addons", "1.21.11", null);
-    }
-    private boolean checkModLoaded(String... modIds)
-    {
-        boolean loaded = false;
-        for (String id : modIds)
-        {
-            if (FabricLoader.getInstance().isModLoaded(id))
-            {
-                loaded = true;
-                break;
-            }
-        }
-        if (!loaded)
-        {
-            LOG.error("{} not found, disabling modules that require it.", modIds[0]);
-        }
-        return loaded;
     }
 }

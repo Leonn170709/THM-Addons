@@ -18,7 +18,6 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import xyz.thm.addon.THMAddon;
-import xyz.thm.addon.utils.ListMode;
 
 import java.util.List;
 
@@ -116,6 +115,10 @@ public class ScaffoldTHM extends Module {
 
             InvUtils.swapBack();
         }
+    }
+    public enum ListMode {
+        Blacklist,
+        Whitelist
     }
 
     public boolean hasWorked() {

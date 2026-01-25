@@ -16,7 +16,6 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.util.Formatting;
 import xyz.thm.addon.THMAddon;
-import xyz.thm.addon.utils.Logger;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -211,7 +210,7 @@ public class ChatFilterModule extends Module {
 
         WButton btn = theme.button("Print number of filtered messages");
         btn.action = () -> {
-            Logger.info("%sTotal Filtered Messages: %s%d", Formatting.GREEN, Formatting.WHITE, filteredCount);
+            info("%sTotal Filtered Messages: %s%d", Formatting.GREEN, Formatting.WHITE, filteredCount);
         };
         hList.add(btn);
 

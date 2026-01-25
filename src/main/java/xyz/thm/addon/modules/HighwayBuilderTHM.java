@@ -355,6 +355,13 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+    public final Setting<Boolean> hotbarmanager = sgInventory.add(new BoolSetting.Builder()
+        .name("Manage hotbar")
+        .description("Automatically sorts the Hotbar.")
+        .defaultValue(true)
+        .build()
+    );
+
     private final Setting<Integer> minEmpty = sgInventory.add(new IntSetting.Builder()
         .name("minimum-empty-slots")
         .description("The minimum amount of empty slots you want left after mining obsidian.")
@@ -701,7 +708,7 @@ public class HighwayBuilderTHM extends Module {
         if (togglePerspective.get() == true) {Modules.get().get(FreeLook.class).togglePerspective.set(true);}
         if (togglePerspective.get() == false) {Modules.get().get(FreeLook.class).togglePerspective.set(false);}
         if (!Modules.get().get(FreeLook.class).isActive()) { Modules.get().get(FreeLook.class).toggle();}
-        if (!Modules.get().get(HotbarManager.class).isActive()) { Modules.get().get(HotbarManager.class).toggle();}
+        if (!Modules.get().get(HotbarManager.class).isActive() && hotbarmanager.get()) { Modules.get().get(HotbarManager.class).toggle();}
 
 
 
@@ -716,7 +723,7 @@ public class HighwayBuilderTHM extends Module {
         mc.options.useKey.setPressed(false);
         if (Modules.get().get(FreeLook.class).isActive()) { Modules.get().get(FreeLook.class).toggle();}
         Modules.get().get(FreeLook.class).mode.set(Fmode);
-        if (Modules.get().get(HotbarManager.class).isActive()) { Modules.get().get(HotbarManager.class).toggle();}
+        if (Modules.get().get(HotbarManager.class).isActive() && hotbarmanager.get()) { Modules.get().get(HotbarManager.class).toggle();}
 
             if (displayInfo && printStatistics.get()) {
                 info("Distance: (highlight)%.0f", PlayerUtils.distanceTo(start));
@@ -1764,8 +1771,6 @@ public class HighwayBuilderTHM extends Module {
                 }
                 if (b.restockTask.pickaxes) slotsPulled += countSlots(b, itemStack -> itemStack.isIn(ItemTags.PICKAXES)) - b.savePickaxes.get();
                 if (b.restockTask.food) slotsPulled += countSlots(b, itemStack -> itemStack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(itemStack.getItem()));
-
-
                 // whether we have pulled the minimum amount of items we want
                 if (slotsPulled >= minimumSlots && !indicateStopping) {
                     indicateStopping = true;

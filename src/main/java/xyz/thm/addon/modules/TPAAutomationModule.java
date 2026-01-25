@@ -8,7 +8,6 @@ import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.util.Formatting;
 import xyz.thm.addon.THMAddon;
-import xyz.thm.addon.utils.Logger;
 
 import java.util.List;
 import java.util.Set;
@@ -49,7 +48,7 @@ public class TPAAutomationModule extends Module {
         .build()
     );
 
-    private final Setting<Boolean> acceptTSRBots = sgGeneral.add(new BoolSetting.Builder()
+    private final Setting<Boolean> acceptTHMBots = sgGeneral.add(new BoolSetting.Builder()
         .name("accept-THM-bot")
         .description("Automatically accept teleport requests that are from the THM bot.")
         .defaultValue(true)
@@ -96,7 +95,7 @@ public class TPAAutomationModule extends Module {
     private static final Pattern TPA_DENIED_PATTERN = Pattern.compile("^Request from ([A-Za-z0-9_]{3,16}) denied!$");
     private static final Pattern TPA_REQUEST_PATTERN = Pattern.compile("^([A-Za-z0-9_]{3,16}) wants to teleport to you\\.$");
 
-    private static final Set<String> TSR_KIT_BOT_USERS = Set.of(
+    private static final Set<String> THM_KIT_BOT_USERS = Set.of(
             "KitBot1"
 
     );
@@ -136,17 +135,17 @@ public class TPAAutomationModule extends Module {
 
         String username = matcher.group(1);
 
-        if (printTpaDetected.get()) Logger.info("%sTPA Detected:%s %s!", Formatting.RED, Formatting.WHITE, username);
+        if (printTpaDetected.get()) info("%sTPA Detected:%s %s!", Formatting.RED, Formatting.WHITE, username);
 
-        if (approvedUsers.get().contains(username) || (acceptFriends.get() && Friends.get().get(username) != null) || (acceptTSRBots.get() &&  TSR_KIT_BOT_USERS.contains(username))) {
+        if (approvedUsers.get().contains(username) || (acceptFriends.get() && Friends.get().get(username) != null) || (acceptTHMBots.get() &&  THM_KIT_BOT_USERS.contains(username))) {
             ChatUtils.sendPlayerMsg(tpystring + username);
 
-            if (printTpaAccepted.get()) Logger.info("%sAuto Accepted:%s %s!", Formatting.GREEN, Formatting.WHITE, username);
+            if (printTpaAccepted.get()) info("%sAuto Accepted:%s %s!", Formatting.GREEN, Formatting.WHITE, username);
 
         } else if (autoDeny.get()){
             ChatUtils.sendPlayerMsg(tpnstring + username);
 
-            if (printTpaIgnored.get()) Logger.info("%sIgnored:%s %s!", Formatting.RED, Formatting.WHITE, username);
+            if (printTpaIgnored.get()) info("%sIgnored:%s %s!", Formatting.RED, Formatting.WHITE, username);
         }
 
         if (filterTpaMessages.get() && printTpaDetected.get()) event.cancel();

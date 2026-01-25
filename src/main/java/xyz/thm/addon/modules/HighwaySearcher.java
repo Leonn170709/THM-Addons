@@ -3,6 +3,7 @@ package xyz.thm.addon.modules;
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 
+import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.Setting;
@@ -29,8 +30,15 @@ public class HighwaySearcher extends Module {
         .defaultValue(false)
         .build()
     );
+    public final Setting<Boolean> autoTp = sgGeneral.add(new BoolSetting.Builder()
+        .name("Auto Tp")
+        .description("Automatically sends a tprequest to KitBot1")
+        .defaultValue(true)
+        .visible(() -> Highwaytp.get())
+        .build()
+    );
     public final Setting<Highway> highway = sgGeneral.add(new EnumSetting.Builder<Highway>()
-        .name("HIghway")
+        .name("Highway")
         .description("Highway to go to.")
         .defaultValue(Highway.West)
         .visible(() -> Highwaytp.get())
@@ -73,11 +81,19 @@ public class HighwaySearcher extends Module {
             if (highway.get() == Highway.DugSouthEast) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto dugSE");
             if (highway.get() == Highway.DugSouthWest) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto dugSW");
             if (highway.get() == Highway.DugNorthWest) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto dugNW");
-            toggle();
-
-
-
         }
+
+    }
+    private void onMessageReceive(ReceiveMessageEvent event) {
+        if (mc.player == null) return;
+
+        String msg = event.getMessage().getString();
+
+        if (msg.contains("KitBot1") && msg.contains("You can now tp") && autoTp.get()) {
+            mc.player.networkHandler.sendChatCommand("tpa KitBot1");
+            info("TPA has been send.");
+        }
+
     }
     public enum Highway {
         West,

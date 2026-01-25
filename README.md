@@ -9,6 +9,9 @@
 - OffhandManager
 - ScaffoldTHM
 - TPAAutomationModule
+- HighwaySearcher (needs Baritone)
+- Hotbar Manager
+- Dub Counter
 
 ## Building
 ### Local Build
