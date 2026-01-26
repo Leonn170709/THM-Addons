@@ -6,7 +6,6 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.network.ServerInfo;
 import net.minecraft.util.math.BlockPos;
 import xyz.thm.addon.THMAddon;
-import meteordevelopment.meteorclient.systems.modules.Module;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 import static meteordevelopment.meteorclient.utils.world.BlockUtils.canPlace;

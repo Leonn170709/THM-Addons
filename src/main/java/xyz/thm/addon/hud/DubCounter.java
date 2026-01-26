@@ -10,7 +10,7 @@ import net.minecraft.block.ChestBlock;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.ChestBlockEntity;
 import net.minecraft.block.enums.ChestType;
-import xyz.thm.addon.*;
+import xyz.thm.addon.THMAddon;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 

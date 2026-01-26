@@ -2,7 +2,6 @@ package xyz.thm.addon.modules;
 
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
-
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.EnumSetting;

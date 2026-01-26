@@ -1,6 +1,5 @@
 package xyz.thm.addon.hud;
 
-import xyz.thm.addon.THMAddon;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.ColorSetting;
 import meteordevelopment.meteorclient.settings.Setting;
@@ -11,6 +10,7 @@ import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import net.minecraft.client.network.PlayerListEntry;
+import xyz.thm.addon.THMAddon;
 
 import java.util.ArrayList;
 import java.util.List;
