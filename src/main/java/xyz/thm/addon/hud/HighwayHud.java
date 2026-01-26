@@ -1,15 +1,21 @@
 package xyz.thm.addon.hud;
 
-import meteordevelopment.meteorclient.systems.modules.Modules;
-import meteordevelopment.meteorclient.utils.player.PlayerUtils;
-import xyz.thm.addon.modules.HighwayBuilderTHM;
+import meteordevelopment.meteorclient.settings.BoolSetting;
+import meteordevelopment.meteorclient.settings.Setting;
+import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
+import meteordevelopment.meteorclient.systems.modules.Modules;
+import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import xyz.thm.addon.THMAddon;
-import xyz.thm.addon.modules.HighwaySearcher;
+import xyz.thm.addon.modules.HighwayBuilderTHM;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
@@ -22,23 +28,79 @@ public class HighwayHud extends HudElement {
     }
     private int lastDistance = 0;
     HighwayBuilderTHM mod = Modules.get().get(HighwayBuilderTHM.class);
+    private final SettingGroup sgGeneral = settings.getDefaultGroup();
+    private final Setting<Boolean> showDistance = sgGeneral.add(new BoolSetting.Builder()
+        .name("Show-distance")
+        .description("Displays the distance")
+        .defaultValue(true)
+        .build()
+    );
+    private final Setting<Boolean> showBroken = sgGeneral.add(new BoolSetting.Builder()
+        .name("show-blocks-broken")
+        .description("Displays the blocks broken")
+        .defaultValue(true)
+        .build()
+    );
+    private final Setting<Boolean> showPlaced = sgGeneral.add(new BoolSetting.Builder()
+        .name("show-Placed")
+        .description("Displays the blocks placed")
+        .defaultValue(true)
+        .build()
+    );
+    private final Setting<Boolean> showDirection = sgGeneral.add(new BoolSetting.Builder()
+        .name("show-direction")
+        .description("Displays direction you're heading in")
+        .defaultValue(true)
+        .build()
+    );
+    private final Setting<Boolean> showRefill = sgGeneral.add(new BoolSetting.Builder()
+        .name("show-distance-till-restock")
+        .description("Shows the eta of the distance till restock")
+        .defaultValue(true)
+        .build()
+    );
     private String[][] getLines() {
-        if (mc.player == null) return new String[0][0];
-        if (mod == null) return new String[0][0];
+        if (mc.player == null || mod == null) return new String[0][0];
 
-        // Distanz NUR aktualisieren, wenn Modul aktiv + start != null
-        if (mod.isActive() && mod.start != null) {
+        if (mod.isActive() && mod.start != null)
             lastDistance = (int) PlayerUtils.distanceTo(mod.start);
+
+        List<String[]> l = new ArrayList<>();
+        String dir = mod.dir != null ? mod.dir.toString() : "";
+        distanceTillRestock = getDistanceTillRestock();
+
+        if (showDistance.get())  l.add(new String[]{"Distance travelled", String.valueOf(lastDistance)});
+        if (showBroken.get())   l.add(new String[]{"Blocks broken", String.valueOf(mod.blocksBroken)});
+        if (showPlaced.get())   l.add(new String[]{"Blocks placed", String.valueOf(mod.blocksPlaced)});
+        if (showDirection.get())l.add(new String[]{"Direction", dir});
+        if (showRefill.get())   l.add(new String[]{"Distance till restock", String.valueOf(distanceTillRestock)});
+
+        return l.toArray(new String[0][0]);
+    }
+    private int distanceTillRestock = 0;
+    public static int getDistanceTillRestock() {
+        if (mc.player == null) return 0;
+
+        int obsidian = 0;
+        int echests = 0;
+
+        // Player inventory (Hotbar + Main)
+        for (int i = 0; i < mc.player.getInventory().size(); i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+
+            if (stack.isEmpty()) continue;
+
+            if (stack.getItem() == Items.OBSIDIAN) {
+                obsidian += stack.getCount();
+            } else if (stack.getItem() == Items.ENDER_CHEST) {
+                echests += stack.getCount();
+            }
         }
-        String direction = mod.dir != null ? mod.dir.toString() : "";
 
+        int totalBlocks = obsidian + (echests * 8);
 
-        return new String[][]{
-            {"Distance travelled", String.valueOf(lastDistance)},
-            {"Blocks broken", String.valueOf(mod.blocksBroken)},
-            {"Blocks placed", String.valueOf(mod.blocksPlaced)},
-            {"Direction", direction}
-        };
+        // 7 Blocks pro Distanz-Einheit
+        return totalBlocks / 7;
     }
 
     @Override

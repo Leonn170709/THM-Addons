@@ -655,7 +655,7 @@ public class HighwayBuilderTHM extends Module {
                         info("Successfully sent statistics to Api!");
                     } else {
                         THMAddon.LOG.warn("API response code: " + responseCode);
-                        warning("Failed to send to Api" + responseCode);
+                        warning("Failed to send to Api " + responseCode);
                     }
                 } catch (Exception e) {
                     THMAddon.LOG.warn("Failed to send to API: " + e.getMessage(), e);
@@ -761,10 +761,13 @@ public class HighwayBuilderTHM extends Module {
                         warning("API not sent. You are not on 6B6T");
                         return;
                     }
+                    String server = mc.getCurrentServerEntry() != null
+                        ? mc.getCurrentServerEntry().address
+                        : "singleplayer";
 
                     String playerName = mc.player.getName().getLiteralString();
-                    String statsMessageapi = String.format("Player: %s , Distance: %.0f , Blocks broken: %d , Blocks placed: %d, Hash: %s, Direction: %s",
-                        playerName, distance, blocksBroken, blocksPlaced, hash, dir);
+                    String statsMessageapi = String.format("%s:%s:%s:%.0f:%s:%s:%s",
+                        hash, playerName, server, distance, blocksBroken, blocksPlaced, dir);
                     sendToAPI(api, statsMessageapi);
                 } else {
                     warning("Statistics NOT sent to Api! Distance too small: (highlight)%.0f", distance);
