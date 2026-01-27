@@ -12,6 +12,7 @@
 - HighwaySearcher (needs Baritone)
 - Hotbar Manager
 - Dub Counter
+- HighwayHud
 
 ## Building
 ### Local Build

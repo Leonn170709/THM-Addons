@@ -273,7 +273,7 @@ public class HighwayBuilderTHM extends Module {
     private final Setting<Integer> blocksPerTick = sgDigging.add(new IntSetting.Builder()
         .name("blocks-per-tick")
         .description("The maximum amount of blocks that can be mined in a tick. Only applies to blocks instantly breakable.")
-        .defaultValue(1)
+        .defaultValue(7)
         .range(1, 100)
         .sliderRange(1, 25)
         .build()

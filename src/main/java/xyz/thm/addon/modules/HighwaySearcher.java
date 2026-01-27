@@ -68,24 +68,25 @@ public class HighwaySearcher extends Module {
         }
         if (Highwaytp.get()) {
             tpaSent = false;
-            //Normal
-            if (highway.get() == Highway.West) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto W");
-            if (highway.get() == Highway.East) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto E");
-            if (highway.get() == Highway.North) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto N");
-            if (highway.get() == Highway.South) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto S");
-            if (highway.get() == Highway.NorthEast) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto NE");
-            if (highway.get() == Highway.SouthEast) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto SE");
-            if (highway.get() == Highway.SouthWest) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto SW");
-            if (highway.get() == Highway.NorthWest) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto NW");
+            // Normal
+            if (highway.get() == Highway.West)      ChatUtils.sendPlayerMsg("$goto W");
+            if (highway.get() == Highway.East)      ChatUtils.sendPlayerMsg("$goto E");
+            if (highway.get() == Highway.North)     ChatUtils.sendPlayerMsg("$goto N");
+            if (highway.get() == Highway.South)     ChatUtils.sendPlayerMsg("$goto S");
+            if (highway.get() == Highway.NorthEast) ChatUtils.sendPlayerMsg("$goto NE");
+            if (highway.get() == Highway.SouthEast) ChatUtils.sendPlayerMsg("$goto SE");
+            if (highway.get() == Highway.SouthWest) ChatUtils.sendPlayerMsg("$goto SW");
+            if (highway.get() == Highway.NorthWest) ChatUtils.sendPlayerMsg("$goto NW");
             // Dug
-            if (highway.get() == Highway.DugWest) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto dugW");
-            if (highway.get() == Highway.DugEast) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto dugE");
-            if (highway.get() == Highway.DugNorth) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto dugN");
-            if (highway.get() == Highway.DugSouth) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto dugS");
-            if (highway.get() == Highway.DugNorthEast) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto dugNE");
-            if (highway.get() == Highway.DugSouthEast) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto dugSE");
-            if (highway.get() == Highway.DugSouthWest) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto dugSW");
-            if (highway.get() == Highway.DugNorthWest) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto dugNW");
+            if (highway.get() == Highway.DugWest)      ChatUtils.sendPlayerMsg("$goto dugW");
+            if (highway.get() == Highway.DugEast)      ChatUtils.sendPlayerMsg("$goto dugE");
+            if (highway.get() == Highway.DugNorth)     ChatUtils.sendPlayerMsg("$goto dugN");
+            if (highway.get() == Highway.DugSouth)     ChatUtils.sendPlayerMsg("$goto dugS");
+            if (highway.get() == Highway.DugNorthEast) ChatUtils.sendPlayerMsg("$goto dugNE");
+            if (highway.get() == Highway.DugSouthEast) ChatUtils.sendPlayerMsg("$goto dugSE");
+            if (highway.get() == Highway.DugSouthWest) ChatUtils.sendPlayerMsg("$goto dugSW");
+            if (highway.get() == Highway.DugNorthWest) ChatUtils.sendPlayerMsg("$goto dugNW");
+
         }
 
     }
@@ -104,7 +105,7 @@ public class HighwaySearcher extends Module {
             ChatUtils.sendPlayerMsg("/tpa KitBot1");
             info("TPA has been sent.");
 
-            tpaSent = true; // 🚫 block further executions
+            tpaSent = true; //// ONLY ONCE
             toggle();
         }
     }
