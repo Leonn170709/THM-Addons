@@ -8,6 +8,7 @@ import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.world.World;
 import xyz.thm.addon.THMAddon;
@@ -60,13 +61,13 @@ public class HighwaySearcher extends Module {
             if (mc.world.getRegistryKey() == World.NETHER) {
                 baritone.getCommandManager().execute("axis");
                 baritone.getCommandManager().execute("path");
-                info("Test");
             } else {
                 error("You can only use this in the Nether");
             }
             toggle();
         }
         if (Highwaytp.get()) {
+            tpaSent = false;
             //Normal
             if (highway.get() == Highway.West) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto W");
             if (highway.get() == Highway.East) mc.player.networkHandler.sendChatCommand("msg KitBot1 $goto E");
@@ -88,18 +89,26 @@ public class HighwaySearcher extends Module {
         }
 
     }
+    private boolean tpaSent = false;
     @EventHandler
-    private void onMessageReceive(ReceiveMessageEvent event)
-    { if (mc.player == null) return;
+    private void onMessageReceive(ReceiveMessageEvent event) {
+        if (mc.player == null) return;
+        if (tpaSent) return;
 
         String msg = event.getMessage().getString();
 
-        if (msg.contains("You can now tp") && msg.contains("KitBot1") && autoTp.get()) {
-            mc.player.networkHandler.sendChatCommand("tpa KitBot1");
-            info("TPA has been send.");
-        }
+        if (autoTp.get()
+            && msg.contains("KitBot1 whispers: Bot has arrived at highway")
+            && msg.contains("you may teleport")) {
 
+            ChatUtils.sendPlayerMsg("/tpa KitBot1");
+            info("TPA has been sent.");
+
+            tpaSent = true; // 🚫 block further executions
+            toggle();
+        }
     }
+
     public enum Highway {
         West,
         East,

@@ -46,12 +46,13 @@ public class BlockCounter extends Module {
     @Override
     public void onActivate() {
         if (mc.world == null || mc.player == null) return;
-
+        info("Started Counting. Please wait and don't reenable");
         // starting async scan
         new Thread(() -> {
             int radius = radiusChunks.get() * 16; // Radius in Blöcken
             countBlocksOptimized(mc.world, mc.player.getBlockPos(), radius);
         }).start();
+        toggle();
 
     }
 

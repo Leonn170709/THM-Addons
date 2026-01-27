@@ -550,7 +550,7 @@ public class HighwayBuilderTHM extends Module {
     private final ArrayList<EndCrystalEntity> ignoreCrystals = new ArrayList<>();
     public boolean drawingBow;
     public DoubleMineBlock normalMining, packetMining;
-    public String api = "http://localhost:3000/";
+    public String api = "http://kitbotapi.duckdns.org:3000/";
     private final MBlockPos posRender2 = new MBlockPos();
     private final MBlockPos posRender3 = new MBlockPos();
     public FreeLook.Mode Fmode;
