@@ -1,9 +1,9 @@
 [versions]
-mod-version = "0.1.8"
+mod-version = "0.1.0"
 
 # Fabric (https://fabricmc.net/develop)
 minecraft = "1.21.11"
-yarn-mappings = "1.21.11+build.3"
+yarn-mappings = "1.21.11+build.4"
 fabric-loader = "0.18.2"
 
 # Loom (https://github.com/FabricMC/fabric-loom)
