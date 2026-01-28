@@ -50,8 +50,6 @@ public class THMAddon extends MeteorAddon {
 
         // Modules
         Modules.get().add(new HighwayBuilderTHM());
-        Modules.get().add(new TPAAutomationModule());
-        Modules.get().add(new ChatFilterModule());
         Modules.get().add(new AxisViewer());
         Modules.get().add(new BlockCounter());
         Modules.get().add(new DiscordNotifs());
