@@ -2,38 +2,39 @@
 
 ## Features
 
-- **OnlineFriendsList**  
-  <span style="color:gray">Displays a live list of your friends who are currently online.</span>
+- **OnlineFriendsList**
+  > Displays a live list of your friends who are currently online.
 
-- **AxisViewer**  
-  <span style="color:gray">Visualizes the center lines of all major highways, including Ring Roads and Diamond Highways.</span>
+- **AxisViewer**
+  > Visualizes the center lines of all major highways, including Ring Roads and Diamond Highways.
 
-- **BlockCounter**  
-  <span style="color:gray">Counts all selected block types within the current render distance.</span>
+- **BlockCounter**
+  > Counts all selected block types within the current render distance.
 
-- **DiscordNotifier**  
-  <span style="color:gray">Sends selected in-game data such as chat messages or events to a Discord webhook.</span>
+- **DiscordNotifier**
+  > Sends selected in-game data such as chat messages or events to a Discord webhook.
 
-- **HighwayBuilderTHM**  
-  <span style="color:gray">Automatically builds highways with API integration for precise alignment and tracking.</span>
+- **HighwayBuilderTHM**
+  > Automatically builds highways with API integration.
 
-- **OffhandManager**  
-  <span style="color:gray">Automatically manages offhand items based on configurable conditions.</span>
+- **OffhandManager**
+  > Automatically manages offhand items based on configurable conditions.
 
-- **ScaffoldTHM**  
-  <span style="color:gray">Advanced scaffolding module optimized for highway and large-scale building.</span>
+- **ScaffoldTHM**
+  > Advanced scaffolding module optimized for digging tunnels.
 
-- **HighwaySearcher** *(requires Baritone)*  
-  <span style="color:gray">Automatically navigates to the nearest highway using Baritone pathfinding.</span>
+- **HighwaySearcher** *(requires Baritone)*
+  > Automatically navigates to the nearest highway using Baritone pathfinding.
 
-- **HotbarManager**  
-  <span style="color:gray">Automatically organizes and switches hotbar items based on priority rules.</span>
+- **HotbarManager**
+  > Automatically organizes and switches hotbar items based on configured rules.
 
-- **DubCounter**  
-  <span style="color:gray">Tracks and counts duplicated items or defined stack events.</span>
+- **DubCounter**
+  > Counts all chests being rendered.
 
-- **HighwayHud**  
-  <span style="color:gray">Displays live HighwayBuilder statistics such as progress, distance, and status.</span>
+- **HighwayHud**
+  > Displays live HighwayBuilder statistics such as progress, distance, and direction.
+
 
 ## Building
 ### Local Build
