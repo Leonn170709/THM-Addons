@@ -5,7 +5,6 @@ import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
-import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.util.math.BlockPos;
@@ -58,8 +57,8 @@ public class BlockCounter extends Module {
 
     public void countBlocksOptimized(World world, BlockPos center, int radius) {
         blockCounts.clear();
-        // Limiting Y to 400 blocks
-        int yRadius = Math.min(400, radius);
+        // Limiting Y to 500 blocks should be enough for everything
+        int yRadius = Math.min(500, radius);
 
         // Chunk based instead of blocks
         int chunkRadiusX = (radius + 15) / 16;
@@ -100,12 +99,12 @@ public class BlockCounter extends Module {
         // Showing results in chat
         if (!blockCounts.isEmpty()) {
             blockCounts.forEach((block, count) ->
-                ChatUtils.info(block.getName().getString() + ": (highlight)" + count)
+                info(block.getName().getString() + ": (highlight)" + count)
             );
-            ChatUtils.info("Total: (highlight)" + getTotalCount() + " (highlight)| Scanned: " + blocksScanned + " blocks in " + duration + "ms");
+            info("Total: (highlight)" + getTotalCount() + " (highlight)| Scanned: " + blocksScanned + " blocks in " + duration + "ms");
             THMAddon.LOG.info("Scanned: " + blocksScanned + " blocks in " + duration + "ms");
         } else {
-            ChatUtils.info("No selected blocks found. (Scanned: " + blocksScanned + " blocks)");
+            info("No selected blocks found. (Scanned: " + blocksScanned + " blocks)");
         }
     }
 
