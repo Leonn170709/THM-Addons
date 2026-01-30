@@ -183,7 +183,7 @@ public class HighwayBuilderTHM extends Module {
     private final Setting<Boolean> disconnectOnToggle = sgGeneral.add(new BoolSetting.Builder()
         .name("disconnect-on-toggle")
         .description("Automatically disconnects when the module is turned off, for example for not having enough blocks.")
-        .defaultValue(false)
+        .defaultValue(true)
         .build()
     );
 
@@ -308,7 +308,7 @@ public class HighwayBuilderTHM extends Module {
     public final Setting<Integer> placementsPerTick = sgPaving.add(new IntSetting.Builder()
         .name("placements-per-tick")
         .description("The maximum amount of blocks that can be placed in a tick.")
-        .defaultValue(3)
+        .defaultValue(1)
         .min(1)
         .build()
     );
@@ -656,10 +656,12 @@ public class HighwayBuilderTHM extends Module {
                     } else {
                         THMAddon.LOG.warn("API response code: " + responseCode);
                         warning("Failed to send to Api " + responseCode);
+                        warning("Take a screenshot of your stats and send it in proof of work");
                     }
                 } catch (Exception e) {
                     THMAddon.LOG.warn("Failed to send to API: " + e.getMessage(), e);
                     warning("Failed to send to API: " + e.getMessage(), e);
+                    warning("Take a screenshot of your stats and send it in proof of work");
                 } finally {
                     if (conn != null) conn.disconnect();
                 }
