@@ -107,7 +107,6 @@ public class BlockCounter extends Module {
         } else {
             ChatUtils.info("No selected blocks found. (Scanned: " + blocksScanned + " blocks)");
         }
-        toggle();
     }
 
     public Map<Block, Integer> getBlockCounts() {
