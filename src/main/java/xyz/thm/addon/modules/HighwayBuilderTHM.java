@@ -655,12 +655,12 @@ public class HighwayBuilderTHM extends Module {
                         info("Successfully sent statistics to Api!");
                     } else {
                         THMAddon.LOG.warn("API response code: " + responseCode);
-                        warning("Failed to send to Api " + responseCode);
+                        warning("Failed to send to Api");
                         warning("Take a screenshot of your stats and send it in proof of work");
                     }
                 } catch (Exception e) {
                     THMAddon.LOG.warn("Failed to send to API: " + e.getMessage(), e);
-                    warning("Failed to send to API: " + e.getMessage(), e);
+                    warning("Failed to send to Api");
                     warning("Take a screenshot of your stats and send it in proof of work");
                 } finally {
                     if (conn != null) conn.disconnect();
