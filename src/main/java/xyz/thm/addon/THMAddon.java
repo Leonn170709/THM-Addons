@@ -58,6 +58,7 @@ public class THMAddon extends MeteorAddon {
         Modules.get().add(new OffhandManager());
         Modules.get().add(new HotbarManager());
         Modules.get().add(new UnfocusedFpsLimiter());
+        Modules.get().add(new AntiDrop());
         if (BaritoneUtils.IS_AVAILABLE) {
             Modules.get().add(new HighwaySearcher());
         }

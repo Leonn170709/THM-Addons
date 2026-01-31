@@ -356,9 +356,16 @@ public class HighwayBuilderTHM extends Module {
     );
 
     public final Setting<Boolean> hotbarmanager = sgInventory.add(new BoolSetting.Builder()
-        .name("Manage hotbar")
+        .name("Manage-hotbar")
         .description("Automatically sorts the Hotbar.")
         .defaultValue(true)
+        .build()
+    );
+
+    public final Setting<Boolean> antidrop = sgInventory.add(new BoolSetting.Builder()
+        .name("Anti-drop")
+        .description("Stops you from dropping needed items")
+        .defaultValue(false)
         .build()
     );
 
@@ -717,6 +724,7 @@ public class HighwayBuilderTHM extends Module {
         if (togglePerspective.get() == false) {Modules.get().get(FreeLook.class).togglePerspective.set(false);}
         if (!Modules.get().get(FreeLook.class).isActive()) { Modules.get().get(FreeLook.class).toggle();}
         if (!Modules.get().get(HotbarManager.class).isActive() && hotbarmanager.get()) { Modules.get().get(HotbarManager.class).toggle();}
+        if (!Modules.get().get(AntiDrop.class).isActive() && antidrop.get()) { Modules.get().get(AntiDrop.class).toggle();}
 
 
 
@@ -732,6 +740,7 @@ public class HighwayBuilderTHM extends Module {
         if (Modules.get().get(FreeLook.class).isActive()) { Modules.get().get(FreeLook.class).toggle();}
         Modules.get().get(FreeLook.class).mode.set(Fmode);
         if (Modules.get().get(HotbarManager.class).isActive() && hotbarmanager.get()) { Modules.get().get(HotbarManager.class).toggle();}
+        if (Modules.get().get(AntiDrop.class).isActive() && antidrop.get()) { Modules.get().get(AntiDrop.class).toggle();}
 
             if (displayInfo && printStatistics.get()) {
                 info("Distance: (highlight)%.0f", PlayerUtils.distanceTo(start));
