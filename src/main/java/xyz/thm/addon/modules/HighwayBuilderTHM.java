@@ -563,7 +563,7 @@ public class HighwayBuilderTHM extends Module {
     public FreeLook.Mode Fmode;
 
     public HighwayBuilderTHM() {
-        super(THMAddon.CATEGORY, "THM-HighwayBuilder", "Automatically builds highways according to THMs standards.");
+        super(THMAddon.MAIN, "THM-HighwayBuilder", "Automatically builds highways according to THMs standards.");
         runInMainMenu = true;
     }
 

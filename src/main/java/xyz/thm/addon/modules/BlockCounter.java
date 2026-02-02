@@ -5,6 +5,7 @@ import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.util.math.BlockPos;
@@ -18,7 +19,7 @@ import java.util.Map;
 public class BlockCounter extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     public BlockCounter() {
-        super(THMAddon.CATEGORY, "BlockCounter", "Counts the selected Blocks");
+        super(THMAddon.MAIN, "BlockCounter", "Counts the selected Blocks");
     }
 
     private final Setting<List<Block>> blocks = sgGeneral.add(new BlockListSetting.Builder()
@@ -57,7 +58,7 @@ public class BlockCounter extends Module {
 
     public void countBlocksOptimized(World world, BlockPos center, int radius) {
         blockCounts.clear();
-        // Limiting Y to 500 blocks should be enough for everything
+        // Limiting Y to 500 blocks
         int yRadius = Math.min(500, radius);
 
         // Chunk based instead of blocks

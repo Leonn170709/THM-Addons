@@ -31,12 +31,14 @@ public class THMAddon extends MeteorAddon {
     public static final ModMetadata METADATA;
     public static final String VERSION;
     public static final Category MAIN;
+    public static final Category PVP;
     public static final HudGroup HUD_GROUP = new HudGroup("THM");
 
     static {METADATA = FabricLoader.getInstance().getModContainer(MOD_ID).orElseThrow().getMetadata();
         VERSION = METADATA.getVersion().getFriendlyString();
 
-        MAIN = new Category("THM Additions", Items.OBSIDIAN.getDefaultStack());}
+        MAIN = new Category("THM Highway", Items.OBSIDIAN.getDefaultStack());
+        PVP = new Category("THM PVP", Items.END_CRYSTAL.getDefaultStack());}
 
     public static File GetConfigFile(String key, String filename) {
         return new File(new File(new File(new File(MeteorClient.FOLDER, "thm"), key), Utils.getFileWorldName()), filename);
@@ -54,11 +56,19 @@ public class THMAddon extends MeteorAddon {
         Modules.get().add(new BlockCounter());
         Modules.get().add(new DiscordNotifs());
         //Modules.get().add(new WebhookEncrypt());
+        Modules.get().add(new AntiDrop());
         Modules.get().add(new ScaffoldTHM());
         Modules.get().add(new OffhandManager());
         Modules.get().add(new HotbarManager());
         Modules.get().add(new UnfocusedFpsLimiter());
-        Modules.get().add(new AntiDrop());
+        Modules.get().add(new AntiConcrete());
+        Modules.get().add(new AntiConcreteDetection());
+        Modules.get().add(new AntiFeetPlace());
+        Modules.get().add(new AutoConcrete());
+        Modules.get().add(new AutoMinePlus());
+        Modules.get().add(new PacketMinePlus());
+        Modules.get().add(new SurroundPlus());
+        Modules.get().add(new Phase());
         if (BaritoneUtils.IS_AVAILABLE) {
             Modules.get().add(new HighwaySearcher());
         }
@@ -78,7 +88,9 @@ public class THMAddon extends MeteorAddon {
 
     @Override
     public void onRegisterCategories() {
-        Modules.registerCategory(CATEGORY);
+
+        Modules.registerCategory(MAIN);
+        Modules.registerCategory(PVP);
     }
 
     @Override
@@ -93,6 +105,6 @@ public class THMAddon extends MeteorAddon {
 
     @Override
     public GithubRepo getRepo() {
-        return new GithubRepo("Leonn170709", "THM-Addons", "1.21.11", null);
+        return new GithubRepo("Leonn170709", "THM-Addons", "1.21.8", null);
     }
 }

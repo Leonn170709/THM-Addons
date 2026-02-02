@@ -127,7 +127,7 @@ public class AxisViewer extends Module {
     );
 
     public AxisViewer() {
-        super(THMAddon.CATEGORY, "axis-viewer", "Displays world axes.");
+        super(THMAddon.MAIN, "axis-viewer", "Displays world axes.");
     }
 
     private static final IntList RING_ROADS = IntList.of(

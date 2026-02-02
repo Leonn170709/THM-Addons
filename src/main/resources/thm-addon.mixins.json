@@ -4,6 +4,14 @@
   "compatibilityLevel": "JAVA_21",
   "injectors": {
     "defaultRequire": 1
-  }
+  },
+  "mixins": [
+    "accessor.ExplosionS2CPacketAccessor",
+    "accessor.PlayerInventoryAccessor",
+    "accessor.UpdateSelectedSlotS2CPacketAccessor",
+    "meteor.AutoEatMixin",
+    "meteor.KillAuraMixin",
+    "meteor.TimerMixin"
+  ]
 }
 

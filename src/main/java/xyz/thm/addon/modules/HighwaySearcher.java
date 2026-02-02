@@ -16,7 +16,7 @@ import xyz.thm.addon.THMAddon;
 
 public class HighwaySearcher extends Module {
     public HighwaySearcher() {
-        super(THMAddon.CATEGORY, "HighwaySearchers", "Automatically paths to the nearest Axis.");
+        super(THMAddon.MAIN, "HighwaySearchers", "Automatically paths to the nearest Axis.");
     }
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     public final Setting<Boolean> axiswalker = sgGeneral.add(new BoolSetting.Builder()

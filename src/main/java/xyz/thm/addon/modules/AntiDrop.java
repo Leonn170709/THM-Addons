@@ -44,7 +44,7 @@ public class AntiDrop extends Module {
     );
 
     public AntiDrop() {
-        super(THMAddon.CATEGORY, "AntiDrop", "Stops you from dropping certain items.");
+        super(THMAddon.MAIN, "AntiDrop", "Stops you from dropping certain items.");
     }
 
     @EventHandler

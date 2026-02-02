@@ -65,7 +65,7 @@ public class HotbarManager extends Module {
     private double ticksLeft;
 
     public HotbarManager() {
-        super(THMAddon.CATEGORY, "hotbar-manager", "Automatically move items to your hotbar.");
+        super(THMAddon.MAIN, "hotbar-manager", "Automatically move items to your hotbar.");
         final SettingGroup sgHotbar = settings.createGroup("Hotbar");
 
         for (int i = 0; i < 9; i++) {

@@ -118,7 +118,7 @@ public class DiscordNotifs extends Module
 
     public DiscordNotifs()
     {
-        super(THMAddon.CATEGORY, "discord-notifs", "Sends notifications to a discord webhook.");
+        super(THMAddon.MAIN, "discord-notifs", "Sends notifications to a discord webhook.");
     }
 
     @Override

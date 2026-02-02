@@ -25,7 +25,7 @@ public class UnfocusedFpsLimiter extends Module {
     private int originalFps;
 
     public UnfocusedFpsLimiter() {
-        super(THMAddon.CATEGORY, "unfocused-fps", "Limits the FPS when the game is unfocused or not the main task.");
+        super(THMAddon.MAIN, "unfocused-fps", "Limits the FPS when the game is unfocused or not the main task.");
     }
 
     @Override
