@@ -4,6 +4,9 @@ import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.network.ServerInfo;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.util.math.BlockPos;
 import xyz.thm.addon.THMAddon;
 
@@ -132,6 +135,13 @@ public class THMUtils {
             THMAddon.LOG.error("{} not found, disabling modules that require it.", modIds[0]);
         }
         return loaded;
+    }
+    public static boolean checkThreshold(ItemStack i, double threshold) {
+        return getDamage(i) <= threshold;
+    }
+
+    public static double getDamage(ItemStack i) {
+        return (((double) (i.getMaxDamage() - i.getDamage()) / i.getMaxDamage()) * 100);
     }
     private boolean canceled = false;
     public boolean isCanceled() {

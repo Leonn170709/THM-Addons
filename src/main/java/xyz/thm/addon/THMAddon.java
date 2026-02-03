@@ -65,6 +65,7 @@ public class THMAddon extends MeteorAddon {
         Modules.get().add(new AutoConcrete());
         Modules.get().add(new AutoMinePlus());
         Modules.get().add(new PacketMinePlus());
+        Modules.get().add(new ArmorNotify());
         Modules.get().add(new SurroundPlus());
         Modules.get().add(new Phase());
         if (BaritoneUtils.IS_AVAILABLE) {
@@ -105,6 +106,6 @@ public class THMAddon extends MeteorAddon {
 
     @Override
     public GithubRepo getRepo() {
-        return new GithubRepo("Leonn170709", "THM-Addons", "1.21.8", null);
+        return new GithubRepo("Leonn170709", "THM-Addons", "1.21.11", null);
     }
 }
