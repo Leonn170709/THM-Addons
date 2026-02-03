@@ -16,9 +16,7 @@ import net.fabricmc.loader.api.metadata.ModMetadata;
 import net.minecraft.item.Items;
 import org.slf4j.Logger;
 import xyz.thm.addon.commands.Center;
-import xyz.thm.addon.hud.DubCounter;
-import xyz.thm.addon.hud.HighwayHud;
-import xyz.thm.addon.hud.OnlineFriendsList;
+import xyz.thm.addon.hud.*;
 import xyz.thm.addon.modules.*;
 
 import java.io.File;
@@ -82,6 +80,8 @@ public class THMAddon extends MeteorAddon {
         Hud.get().register(OnlineFriendsList.INFO);
         Hud.get().register(DubCounter.INFO);
         Hud.get().register(HighwayHud.INFO);
+        Hud.get().register(WelcomerHud.INFO);
+        Hud.get().register(CrystalMetrics.INFO);
 
 
     }
