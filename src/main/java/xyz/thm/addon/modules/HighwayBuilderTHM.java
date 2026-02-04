@@ -753,7 +753,7 @@ public class HighwayBuilderTHM extends Module {
                 if (webhookUrl != null) {
                     double distance = PlayerUtils.distanceTo(start);
 
-                    // Don't send if distance it's bigger than 30,000
+                    // Don't send if distance it's smaller than 1
                     if (distance > 1) {
                         String playerName = mc.player.getName().getLiteralString();
                         String statsMessage = String.format("Player: %s , Distance: %.0f , Blocks broken: %d , Blocks placed: %d",
@@ -768,22 +768,26 @@ public class HighwayBuilderTHM extends Module {
             if (sendStatisticsapi.get()) {
                     double distance = PlayerUtils.distanceTo(start);
                 if (distance > 1) {
-                    if (isNot6B6T()) {
-                        warning("API not sent. You are not on 6B6T");
-                        return;
-                    }
-                    String server = mc.getCurrentServerEntry() != null
-                        ? mc.getCurrentServerEntry().address
-                        : "singleplayer";
+                    if (distance < 50000) {
+                        if (isNot6B6T()) {
+                            warning("API not sent. You are not on 6B6T");
+                            return;
+                        }
+                        String server = mc.getCurrentServerEntry() != null
+                            ? mc.getCurrentServerEntry().address
+                            : "singleplayer";
 
-                    String playerName = mc.player.getName().getLiteralString();
-                    String statsMessageapi = String.format("%s:%s:%s:%.0f:%s:%s:%s",
-                        hash, playerName, server, distance, blocksBroken, blocksPlaced, dir);
-                    sendToAPI(api, statsMessageapi);
+                        String playerName = mc.player.getName().getLiteralString();
+                        String statsMessageapi = String.format("%s:%s:%s:%.0f:%s:%s:%s",
+                            hash, playerName, server, distance, blocksBroken, blocksPlaced, dir);
+                        sendToAPI(api, statsMessageapi);
+                    } else {
+                        warning("Statistics NOT sent to Api! Please send your Stats in proof of work and calculate the real distance ");
+                        }
                 } else {
-                    warning("Statistics NOT sent to Api! Distance too small: (highlight)%.0f", distance);
-                }
-              }
+                        warning("Statistics NOT sent to Api! Distance too small: (highlight)%.0f", distance);
+                    }
+            }
 
     }
     @Override

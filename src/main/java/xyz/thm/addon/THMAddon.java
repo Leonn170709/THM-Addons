@@ -68,6 +68,7 @@ public class THMAddon extends MeteorAddon {
         Modules.get().add(new ArmorNotify());
         Modules.get().add(new SurroundPlus());
         Modules.get().add(new Phase());
+        Modules.get().add(new AutoPortal());
         if (BaritoneUtils.IS_AVAILABLE) {
             Modules.get().add(new HighwaySearcher());
         }
