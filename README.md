@@ -34,6 +34,10 @@
 
 - **HighwayHud**
   > Displays live HighwayBuilder statistics such as progress, distance, and direction.
+- **PVP Tab**
+  > A pvp tab with extensive and good hvh features
+- **Enhancements**
+  >Enhancements to existing Meteor Modules like Killaura
 
 
 ## Building
