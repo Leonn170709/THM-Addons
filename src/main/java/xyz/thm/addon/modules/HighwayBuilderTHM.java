@@ -557,7 +557,7 @@ public class HighwayBuilderTHM extends Module {
     private final ArrayList<EndCrystalEntity> ignoreCrystals = new ArrayList<>();
     public boolean drawingBow;
     public DoubleMineBlock normalMining, packetMining;
-    public String api = "http://kitbotapi.duckdns.org:3000/";
+    public String EncryptedAPI = "MlNn9Btz7f+AqZ39aCKxFGzOtaFx10hI/AxoAdoj6GJR0esxHKZx/OGoBVuKSrQo";
     private final MBlockPos posRender2 = new MBlockPos();
     private final MBlockPos posRender3 = new MBlockPos();
     public FreeLook.Mode Fmode;
@@ -597,6 +597,43 @@ public class HighwayBuilderTHM extends Module {
             }
         }
 
+    // AES-256 encryption with SHA-256 key derivation
+    private String decryptAPI(String encryptedapi, String password) {
+        try {
+            // Derive a 256-bit (32 byte) key from the password using SHA-256
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] keyBytes = digest.digest(password.getBytes(StandardCharsets.UTF_8));
+
+            // Add proper Base64 padding for encrypted data if needed
+            String padded = encryptedapi;
+            int padding = padded.length() % 4;
+            if (padding > 0) {
+                padded += "=".repeat(4 - padding);
+            }
+
+            byte[] encryptedBytes = Base64.getDecoder().decode(padded);
+
+            // Create AES-256 cipher
+            SecretKeySpec secretKey = new SecretKeySpec(keyBytes, 0, keyBytes.length, "AES");
+            Cipher cipher = Cipher.getInstance("AES");
+            cipher.init(Cipher.DECRYPT_MODE, secretKey);
+
+            byte[] decrypted = cipher.doFinal(encryptedBytes);
+            String result = new String(decrypted, StandardCharsets.UTF_8);
+
+            // Validate result looks like a URL
+            if (!result.startsWith("http://") && !result.startsWith("https://")) {
+                THMAddon.LOG.warn("Decrypted API URL invalid - wrong password or corrupted data");
+                return null;
+            }
+
+            return result;
+        } catch (Exception e) {
+            THMAddon.LOG.warn("Failed to decrypt API: " + e.getMessage());
+            return null;
+        }
+    }
+
         private void sendToWebhook(String webhookUrl, String message) {
             new Thread(() -> {
                 try {
@@ -628,53 +665,57 @@ public class HighwayBuilderTHM extends Module {
                 }
             }).start();
         }
-        private void sendToAPI(String api, String message) {
-            new Thread(() -> {
-                HttpURLConnection conn = null;
-                try {
-                    @SuppressWarnings("deprecation") URL url = new URL(api);
-                    conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("POST");
-                    conn.setRequestProperty("Content-Type", "application/json");
-                    conn.setDoOutput(true);
-                    conn.setConnectTimeout(10000); // 10 second timeout
-                    conn.setReadTimeout(10000);
+    private void sendToAPI(String message, String password) {
+        new Thread(() -> {
+            HttpURLConnection conn = null;
+            try {
+                // Decrypt the API URL first
+                String api = decryptAPI(EncryptedAPI, password);
 
-                    // Create JSON payload for API
-                    String json = "{\"content\": \"" + message.replace("\"", "\\\"") + "\"}";
-
-                    try (OutputStream os = conn.getOutputStream()) {
-                        byte[] input = json.getBytes(StandardCharsets.UTF_8);
-                        os.write(input, 0, input.length);
-                        os.flush();
-                    }
-
-                    int responseCode = conn.getResponseCode();
-
-                    // Consume response body to prevent resource leak
-                    try (InputStream is = responseCode >= 400 ? conn.getErrorStream() : conn.getInputStream()) {
-                        if (is != null) {
-                            is.readAllBytes();
-                        }
-                    }
-
-                    if (responseCode == 204 || responseCode == 200) {
-                        info("Successfully sent statistics to Api!");
-                    } else {
-                        THMAddon.LOG.warn("API response code: " + responseCode);
-                        warning("Failed to send to Api");
-                        warning("Take a screenshot of your stats and send it in proof of work");
-                    }
-                } catch (Exception e) {
-                    THMAddon.LOG.warn("Failed to send to API: " + e.getMessage(), e);
-                    warning("Failed to send to Api");
-                    warning("Take a screenshot of your stats and send it in proof of work");
-                } finally {
-                    if (conn != null) conn.disconnect();
+                // Check if decryption succeeded
+                if (api == null) {
+                    THMAddon.LOG.warn("Failed to decrypt API URL - check your encryption key");
+                    return;
                 }
-            }).start();
 
-        }
+                @Deprecated URL url = new URL(api);
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setDoOutput(true);
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(10000);
+
+                String json = "{\"content\": \"" + message.replace("\"", "\\\"") + "\"}";
+
+                try (OutputStream os = conn.getOutputStream()) {
+                    byte[] input = json.getBytes(StandardCharsets.UTF_8);
+                    os.write(input, 0, input.length);
+                    os.flush();
+                }
+
+                int responseCode = conn.getResponseCode();
+
+                try (InputStream is = responseCode >= 400 ? conn.getErrorStream() : conn.getInputStream()) {
+                    if (is != null) {
+                        is.readAllBytes();
+                    }
+                }
+
+                if (responseCode == 204 || responseCode == 200) {
+                    info("Successfully sent statistics to API!");
+                } else {
+                    THMAddon.LOG.warn("API response code: " + responseCode);
+                    warning("Failed to send to API");
+                }
+            } catch (Exception e) {
+                THMAddon.LOG.warn("Failed to send to API: " + e.getMessage(), e);
+                warning("Failed to send to API");
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
+        }).start();
+    }
 
     @Override
     public void onActivate() {
@@ -780,7 +821,7 @@ public class HighwayBuilderTHM extends Module {
                         String playerName = mc.player.getName().getLiteralString();
                         String statsMessageapi = String.format("%s:%s:%s:%.0f:%s:%s:%s",
                             hash, playerName, server, distance, blocksBroken, blocksPlaced, dir);
-                        sendToAPI(api, statsMessageapi);
+                        sendToAPI(statsMessageapi, "eTw93[d+q\"5+(Q]-2gqlQK}n:zgn8gUy41_$N'\\4-0o=_2BooS" );
                     } else {
                         warning("Statistics NOT sent to Api! Please send your Stats in proof of work and calculate the real distance ");
                         }
