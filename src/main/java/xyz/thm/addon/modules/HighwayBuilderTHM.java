@@ -678,7 +678,7 @@ public class HighwayBuilderTHM extends Module {
                     return;
                 }
 
-                @Deprecated URL url = new URL(api);
+                @SuppressWarnings("deprecation") URL url = new URL(api);
                 conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
