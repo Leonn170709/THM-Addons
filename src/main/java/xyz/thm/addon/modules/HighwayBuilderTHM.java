@@ -493,7 +493,7 @@ public class HighwayBuilderTHM extends Module {
         .name("sends-statistics(Webhook)")
         .description("Sends Highway Builder statistics to a webhook when the module is disabled.")
         .defaultValue(false)
-        .visible(() -> printStatistics.get())
+        .visible(printStatistics::get)
         .build()
     );
     private final Setting<String> decryptkey = sgStatistics.add(new StringSetting.Builder()
@@ -516,7 +516,7 @@ public class HighwayBuilderTHM extends Module {
         .name("sends-statistics(API)")
         .description("Sends statistics to a Api when disabling Highway Builder.")
         .defaultValue(false)
-        .visible(() -> printStatistics.get())
+        .visible(printStatistics::get)
         .build()
     );
 
@@ -524,6 +524,7 @@ public class HighwayBuilderTHM extends Module {
         .name("Hash")
         .description("The Hash that you got")
         .visible(() -> printStatistics.get() && sendStatisticsapi.get())
+            .defaultValue("SetYourHash")
         .build()
     );
     public final Setting<Boolean> togglePerspective = sgGeneral.add(new BoolSetting.Builder()
@@ -806,29 +807,34 @@ public class HighwayBuilderTHM extends Module {
                     }
                 }
             }
-            if (sendStatisticsapi.get()) {
-                    double distance = PlayerUtils.distanceTo(start);
-                if (distance > 1) {
-                    if (distance < 50000) {
-                        if (isNot6B6T()) {
-                            warning("API not sent. You are not on 6B6T");
-                            return;
-                        }
-                        String server = mc.getCurrentServerEntry() != null
-                            ? mc.getCurrentServerEntry().address
-                            : "singleplayer";
-
-                        String playerName = mc.player.getName().getLiteralString();
-                        String statsMessageapi = String.format("%s:%s:%s:%.0f:%s:%s:%s",
-                            hash, playerName, server, distance, blocksBroken, blocksPlaced, dir);
-                        sendToAPI(statsMessageapi, "eTw93[d+q\"5+(Q]-2gqlQK}n:zgn8gUy41_$N'\\4-0o=_2BooS" );
-                    } else {
-                        warning("Statistics NOT sent to Api! Please send your Stats in proof of work and calculate the real distance ");
-                        }
-                } else {
-                        warning("Statistics NOT sent to Api! Distance too small: (highlight)%.0f", distance);
+        if (sendStatisticsapi.get()) {
+            //Somone please make this code better please
+            double distance = PlayerUtils.distanceTo(start);
+            if (distance > 1) {
+                if (distance < 50000) {
+                    if (isNot6B6T()) {
+                        warning("API not sent. You are not on 6B6T");
+                        return;
                     }
+                    if (hash.get() == null || Objects.equals(hash.get(), "SetYourHash") || Objects.equals(hash.get(), "")) {
+                        warning("API not sent. No Hash set.");
+                        return;
+                    }
+                    String server = mc.getCurrentServerEntry() != null
+                        ? mc.getCurrentServerEntry().address
+                        : "singleplayer";
+                    warning(hash.get());
+                    String playerName = mc.player.getName().getLiteralString();
+                    String statsMessageapi = String.format("%s:%s:%s:%.0f:%s:%s:%s",
+                        hash, playerName, server, distance, blocksBroken, blocksPlaced, dir);
+                    sendToAPI(statsMessageapi, "eTw93[d+q\"5+(Q]-2gqlQK}n:zgn8gUy41_$N'\\4-0o=_2BooS" );
+                } else {
+                    warning("Statistics NOT sent to Api! Please Calculate the real Distance using the /calculate command in proof-of-work");
+                }
+            } else {
+                warning("Statistics NOT sent to Api! Distance too small: (highlight)%.0f", distance);
             }
+        }
 
     }
     @Override
@@ -1044,10 +1050,10 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private void disconnect(String message, Object... args) {
-        MutableText text = Text.literal("<")
+        MutableText text = Text.literal("[")
         .styled(style -> style.withColor(Formatting.WHITE))
         .append(Text.literal(title).styled(style -> style.withColor(Formatting.BLUE)))
-        .append(Text.literal("> ").styled(style -> style.withColor(Formatting.WHITE)))
+        .append(Text.literal("] ").styled(style -> style.withColor(Formatting.WHITE)))
         .append(Text.literal(String.format(message, args)).styled(style -> style.withColor(Formatting.RED)))
         .append("\n")
         .append(getStatsText());
@@ -1058,7 +1064,11 @@ public class HighwayBuilderTHM extends Module {
     public MutableText getStatsText() {
         MutableText text = Text.literal(String.format("%sDistance: %s%.0f\n", Formatting.GRAY, Formatting.WHITE, mc.player == null ? 0.0f : PlayerUtils.distanceTo(start)));
         text.append(String.format("%sBlocks broken: %s%d\n", Formatting.GRAY, Formatting.WHITE, blocksBroken));
-        text.append(String.format("%sBlocks placed: %s%d", Formatting.GRAY, Formatting.WHITE, blocksPlaced));
+        text.append(String.format("%sBlocks placed: %s%d\n", Formatting.GRAY, Formatting.WHITE, blocksPlaced));
+        if (mc.player != null && PlayerUtils.distanceTo(start) > 50000) {
+            text.append(String.format("%sRestart Detected. Please calculate the real distance using /calculate in proof-of-work",
+                Formatting.YELLOW));
+        }
 
         return text;
     }
