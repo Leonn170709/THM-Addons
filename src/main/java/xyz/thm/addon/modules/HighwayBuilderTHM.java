@@ -823,7 +823,6 @@ public class HighwayBuilderTHM extends Module {
                     String server = mc.getCurrentServerEntry() != null
                         ? mc.getCurrentServerEntry().address
                         : "singleplayer";
-                    warning(hash.get());
                     String playerName = mc.player.getName().getLiteralString();
                     String statsMessageapi = String.format("%s:%s:%s:%.0f:%s:%s:%s",
                         hash, playerName, server, distance, blocksBroken, blocksPlaced, dir);
