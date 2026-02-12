@@ -126,16 +126,16 @@ public class HighwayBuilderTHM extends Module {
     private final SettingGroup sgRenderPaving = settings.createGroup("Render Paving");
     private final SettingGroup sgStatistics = settings.createGroup("Statistics");
 
-    private final Setting<Integer> width = sgGeneral.add(new IntSetting.Builder()
+    public final Setting<Integer> width = sgGeneral.add(new IntSetting.Builder()
         .name("width")
         .description("Width of the highway.")
         .defaultValue(5)
-        .range(1, 5)
-        .sliderRange(1, 5)
+        .range(1, 7)
+        .sliderRange(1, 7)
         .build()
     );
 
-    private final Setting<Integer> height = sgGeneral.add(new IntSetting.Builder()
+    public final Setting<Integer> height = sgGeneral.add(new IntSetting.Builder()
         .name("height")
         .description("Height of the highway.")
         .defaultValue(3)
@@ -151,7 +151,7 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Boolean> railings = sgGeneral.add(new BoolSetting.Builder()
+    public final Setting<Boolean> railings = sgGeneral.add(new BoolSetting.Builder()
         .name("railings")
         .description("Builds railings next to the highway.")
         .defaultValue(true)
@@ -166,7 +166,7 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Boolean> mineAboveRailings = sgGeneral.add(new BoolSetting.Builder()
+    public final Setting<Boolean> mineAboveRailings = sgGeneral.add(new BoolSetting.Builder()
         .name("mine-above-railings")
         .description("Mines blocks above railings.")
         .defaultValue(true)
@@ -190,7 +190,7 @@ public class HighwayBuilderTHM extends Module {
     private final Setting<Boolean> pauseOnLag = sgGeneral.add(new BoolSetting.Builder()
         .name("pause-on-lag")
         .description("Pauses the current process while the server stops responding.")
-        .defaultValue(true)
+        .defaultValue(false)
         .build()
     );
 
@@ -722,9 +722,7 @@ public class HighwayBuilderTHM extends Module {
     public void onActivate() {
         if (mc.player == null || mc.world == null) return;
         if (!Utils.canUpdate()) return;
-
         updateVariables();
-
         dir = HorizontalDirection.get(mc.player.getYaw());
         leftDir = dir.rotateLeftSkipOne();
         rightDir = leftDir.opposite();
@@ -767,6 +765,26 @@ public class HighwayBuilderTHM extends Module {
         if (!Modules.get().get(FreeLook.class).isActive()) { Modules.get().get(FreeLook.class).toggle();}
         if (!Modules.get().get(HotbarManager.class).isActive() && hotbarmanager.get()) { Modules.get().get(HotbarManager.class).toggle();}
         if (!Modules.get().get(AntiDrop.class).isActive() && antidrop.get()) { Modules.get().get(AntiDrop.class).toggle();}
+
+        HighwayProfiles hwProfiles = Modules.get().get(HighwayProfiles.class);
+
+        if (hwProfiles != null && hwProfiles.isActive()) {
+            int playerY = (int) mc.player.getY();
+
+            if (hwProfiles.mode.get() == HighwayProfiles.Mode.HighwayBuilding) {
+                if (playerY != 120) {
+                    warning("You are not on Y Level 120!!");
+                    toggle();
+                }
+            }
+            if (hwProfiles.mode.get() == HighwayProfiles.Mode.HighwayDigging) {
+                if (playerY != 119) {
+                    warning("You are not on Y Level 119!!");
+                    toggle();
+                }
+            }
+
+        }
 
 
 
@@ -1024,6 +1042,7 @@ public class HighwayBuilderTHM extends Module {
 
     private int getWidthLeft() {
         return switch (width.get()) {
+            case 6, 7 -> 3;
             case 5, 4 -> 2;
             case 3, 2 -> 1;
             default -> 0;
@@ -1032,7 +1051,8 @@ public class HighwayBuilderTHM extends Module {
 
     private int getWidthRight() {
         return switch (width.get()) {
-            case 5 -> 2;
+            case 7 -> 3;
+            case 6, 5 -> 2;
             case 4, 3 -> 1;
             default -> 0;
         };
