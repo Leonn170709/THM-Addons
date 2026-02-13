@@ -410,7 +410,7 @@ public abstract class KillAuraMixin extends Module {
                 }
             });
         }
-        @Deprecated double attackCooldownTicks = 1.0 / attackSpeedAttr.getValue() * 20.0;
+        @SuppressWarnings("deprecation") double attackCooldownTicks = 1.0 / attackSpeedAttr.getValue() * 20.0;
         float ticks = 0.0f;
         float currentTime = (System.currentTimeMillis() - bephax$lastAttackTime) + (ticks * 50.0f);
         if ((currentTime / 50.0f) >= attackCooldownTicks && bephax$attackTarget(target)) {

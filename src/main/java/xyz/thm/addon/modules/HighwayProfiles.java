@@ -32,7 +32,7 @@ public class HighwayProfiles extends Module {
     // Store original values
     private int savedWidth;
     private int savedHeight;
-    private boolean savedMineAboveRailings;
+    private boolean savedMineAboveRailings, savedBuildRailings;
     private java.util.List<net.minecraft.block.Block> savedBlocksToPlace; // Store the original blocks
 
     public HighwayProfiles() {
@@ -51,6 +51,7 @@ public class HighwayProfiles extends Module {
         savedHeight = hwBuilder.height.get();
         savedMineAboveRailings = hwBuilder.mineAboveRailings.get();
         savedBlocksToPlace = hwBuilder.blocksToPlace.get();
+        savedBuildRailings = hwBuilder.railings.get();
 
         switch (mode.get()) {
             case HighwayBuilding -> {
@@ -58,12 +59,14 @@ public class HighwayProfiles extends Module {
                 hwBuilder.height.set(3);
                 hwBuilder.blocksToPlace.set(java.util.List.of(Blocks.OBSIDIAN));
                 hwBuilder.mineAboveRailings.set(true);
+                hwBuilder.railings.set(true);
             }
             case HighwayDigging -> {
                 hwBuilder.blocksToPlace.set(java.util.List.of(Blocks.NETHERRACK, Blocks.BASALT, Blocks.BLACKSTONE));
                 hwBuilder.width.set(7);
                 hwBuilder.height.set(4);
                 hwBuilder.mineAboveRailings.set(false);
+                hwBuilder.railings.set(false);
             }
         }
         if (toggleModules.get()) {
@@ -82,6 +85,7 @@ public class HighwayProfiles extends Module {
             hwBuilder.height.set(savedHeight);
             hwBuilder.mineAboveRailings.set(savedMineAboveRailings);
             hwBuilder.blocksToPlace.set(savedBlocksToPlace);
+            hwBuilder.railings.set(savedBuildRailings);
         }
         if (toggleModules.get() && hwBuilder.isActive()) {
             hwBuilder.toggle();
