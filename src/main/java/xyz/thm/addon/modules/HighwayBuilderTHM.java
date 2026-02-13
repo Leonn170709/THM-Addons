@@ -558,7 +558,7 @@ public class HighwayBuilderTHM extends Module {
     private final ArrayList<EndCrystalEntity> ignoreCrystals = new ArrayList<>();
     public boolean drawingBow;
     public DoubleMineBlock normalMining, packetMining;
-    public String EncryptedAPI = "MlNn9Btz7f+AqZ39aCKxFGzOtaFx10hI/AxoAdoj6GJR0esxHKZx/OGoBVuKSrQo";
+    public String EncryptedAPI = "aiFhLwYofBHFnPOXakHouVStbcED1w1tafObbF6qTVI=";
     private final MBlockPos posRender2 = new MBlockPos();
     private final MBlockPos posRender3 = new MBlockPos();
     public FreeLook.Mode Fmode;
