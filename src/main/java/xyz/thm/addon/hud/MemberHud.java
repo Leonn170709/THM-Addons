@@ -99,7 +99,7 @@ public class MemberHud extends HudElement {
     // Cache variables
     private List<User> cachedMembers = null;
     private long lastCacheTime = 0;
-    private static final long CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
+    private static final long CACHE_DURATION = 30 * 60 * 1000; // 30 minutes in milliseconds
 
     private String decryptAPI(String encryptedapi, String password) {
         try {
