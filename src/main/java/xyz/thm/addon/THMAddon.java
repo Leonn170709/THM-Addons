@@ -85,6 +85,7 @@ public class THMAddon extends MeteorAddon {
         Hud.get().register(HighwayHud.INFO);
         Hud.get().register(WelcomerHud.INFO);
         Hud.get().register(CrystalMetrics.INFO);
+        Hud.get().register(MemberHud.INFO);
 
 
     }

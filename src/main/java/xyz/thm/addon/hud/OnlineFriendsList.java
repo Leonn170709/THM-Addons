@@ -37,7 +37,7 @@ public class OnlineFriendsList extends HudElement {
     private final Setting<SettingColor> backgroundColor = sgGeneral.add(new ColorSetting.Builder()
         .name("background-color")
         .description("Color of the background.")
-        .defaultValue(new SettingColor(0, 0, 0, 64))
+        .defaultValue(new SettingColor(0, 0, 0, 0))
         .build()
     );
 
