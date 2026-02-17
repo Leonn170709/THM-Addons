@@ -9,6 +9,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.Difficulty;
 import org.jetbrains.annotations.Nullable;
 import xyz.thm.addon.THMAddon;
 
@@ -86,10 +87,12 @@ public class THMUtils {
     // TODO: Add toast notifications system (reference Baritone?)
 
     public static boolean isNot6B6T() {
+        assert mc.world != null;
         if (FabricLoader.getInstance().isDevelopmentEnvironment()) return false; // Bypass check in dev environment
         if (mc.isIntegratedServerRunning()) return true;
         ServerInfo server = mc.getCurrentServerEntry();
         if (server == null) return false;
+        if (mc.world.getDifficulty() != Difficulty.HARD) return true;
         return !server.address.endsWith("6b6t.org");
     }
     public static void pickupAndReturn() {
