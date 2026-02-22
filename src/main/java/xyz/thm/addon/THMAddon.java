@@ -72,6 +72,7 @@ public class THMAddon extends MeteorAddon {
         Modules.get().add(new HighwayProfiles());
         Modules.get().add(new FlightBypass());
         Modules.get().add(new DiscordRPC());
+        Modules.get().add(new TunnelMinerModule());
         if (BaritoneUtils.IS_AVAILABLE) {
             Modules.get().add(new HighwaySearcher());
         }
@@ -88,6 +89,7 @@ public class THMAddon extends MeteorAddon {
         Hud.get().register(WelcomerHud.INFO);
         Hud.get().register(CrystalMetrics.INFO);
         Hud.get().register(MemberHud.INFO);
+        Hud.get().register(TunnelMinerHud.INFO);
 
 
     }

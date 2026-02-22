@@ -29,6 +29,9 @@
 - **HotbarManager**
   > Automatically organizes and switches hotbar items based on configured rules.
 
+  **TunnelMiner**
+  > Automatically mines Tunnels to your specified cords by [NexLordMax](https://github.com/JoniBicaku/tunnelminer)
+
 - **DubCounter**
   > Counts all chests being rendered.
 
