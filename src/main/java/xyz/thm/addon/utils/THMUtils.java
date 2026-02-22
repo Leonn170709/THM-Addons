@@ -4,9 +4,7 @@ import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.network.ServerInfo;
-import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.Difficulty;
@@ -184,6 +182,6 @@ public class THMUtils {
         this.canceled = true;
     }
     public void setCanceled(boolean canceled) {
-        this.canceled = canceled;}
-
+        this.canceled = canceled;
+    }
 }

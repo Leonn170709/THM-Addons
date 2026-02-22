@@ -5,6 +5,8 @@ import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.addons.GithubRepo;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
 import meteordevelopment.meteorclient.commands.Commands;
+import meteordevelopment.meteorclient.gui.GuiTheme;
+import meteordevelopment.meteorclient.gui.GuiThemes;
 import meteordevelopment.meteorclient.pathing.BaritoneUtils;
 import meteordevelopment.meteorclient.systems.hud.Hud;
 import meteordevelopment.meteorclient.systems.hud.HudGroup;
@@ -16,6 +18,7 @@ import net.fabricmc.loader.api.metadata.ModMetadata;
 import net.minecraft.item.Items;
 import org.slf4j.Logger;
 import xyz.thm.addon.commands.Center;
+import xyz.thm.addon.gui.themes.*;
 import xyz.thm.addon.hud.*;
 import xyz.thm.addon.modules.*;
 
@@ -73,6 +76,8 @@ public class THMAddon extends MeteorAddon {
         Modules.get().add(new FlightBypass());
         Modules.get().add(new DiscordRPC());
         Modules.get().add(new TunnelMinerModule());
+        Modules.get().add(new SignRender());
+        Modules.get().add(new AfkLogout());
         if (BaritoneUtils.IS_AVAILABLE) {
             Modules.get().add(new HighwaySearcher());
         }
@@ -90,6 +95,15 @@ public class THMAddon extends MeteorAddon {
         Hud.get().register(CrystalMetrics.INFO);
         Hud.get().register(MemberHud.INFO);
         Hud.get().register(TunnelMinerHud.INFO);
+
+        //Themes
+        GuiThemes.add(DarkTheme.INSTANCE);
+        GuiThemes.add(SnowyTheme.INSTANCE);
+        GuiThemes.add(LambdaTheme.INSTANCE);
+        GuiThemes.add(StardustTheme.INSTANCE);
+        GuiThemes.add(MidnightTheme.INSTANCE);
+        GuiThemes.add(MonochromeTheme.INSTANCE);
+        GuiThemes.add(Nether.INSTANCE);
 
 
     }

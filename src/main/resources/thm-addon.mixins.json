@@ -10,7 +10,9 @@
     "accessor.PlayerInventoryAccessor",
     "accessor.UpdateSelectedSlotS2CPacketAccessor",
     "meteor.AutoEatMixin",
+    "meteor.GuiThemeMixin",
     "meteor.KillAuraMixin",
+    "meteor.MeteorGuiThemeMixin",
     "meteor.TimerMixin"
   ]
 }
