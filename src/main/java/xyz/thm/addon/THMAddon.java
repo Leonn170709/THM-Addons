@@ -77,6 +77,7 @@ public class THMAddon extends MeteorAddon {
         Modules.get().add(new TunnelMinerModule());
         Modules.get().add(new SignRender());
         Modules.get().add(new AfkLogout());
+        Modules.get().add(new FlightBypass());
         if (BaritoneUtils.IS_AVAILABLE) {
             Modules.get().add(new HighwaySearcher());
         }

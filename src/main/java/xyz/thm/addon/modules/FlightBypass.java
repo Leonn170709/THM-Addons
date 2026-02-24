@@ -1,0 +1,200 @@
+package xyz.thm.addon.modules;
+
+import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
+import meteordevelopment.meteorclient.events.entity.player.SendMovementPacketsEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
+import meteordevelopment.meteorclient.settings.*;
+import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.utils.player.PlayerUtils;
+import meteordevelopment.orbit.EventHandler;
+import net.minecraft.entity.EntityPosition;
+import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
+import net.minecraft.network.packet.c2s.play.TeleportConfirmC2SPacket;
+import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
+import net.minecraft.util.math.Vec3d;
+import xyz.thm.addon.THMAddon;
+
+import java.util.HashSet;
+
+public class FlightBypass extends Module {
+    private final HashSet<PlayerMoveC2SPacket> packets = new HashSet<>();
+    private final SettingGroup sgMovement = settings.createGroup("Movement");
+    private final SettingGroup sgClient = settings.createGroup("Client");
+    private final SettingGroup sgBypass = settings.createGroup("Bypass");
+
+    private final Setting<Double> horizontalSpeed = sgMovement.add(new DoubleSetting.Builder()
+        .name("horizontal-speed")
+        .description("Horizontal speed in blocks per second.(No Rotate is recommended)")
+        .defaultValue(0.501)
+        .min(0.0)
+        .max(20.0)
+        .sliderMin(0.0)
+        .sliderMax(20.0)
+        .build()
+    );
+
+    private final Setting<Double> verticalSpeed = sgMovement.add(new DoubleSetting.Builder()
+        .name("vertical-speed")
+        .description("Vertical speed in blocks per second.")
+        .defaultValue(0.501)
+        .min(0.0)
+        .max(20.0)
+        .sliderMin(0.0)
+        .sliderMax(20.0)
+        .build()
+    );
+
+    private final Setting<Boolean> sendTeleport = sgBypass.add(new BoolSetting.Builder()
+        .name("teleport")
+        .description("Sends teleport packets.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> setYaw = sgClient.add(new BoolSetting.Builder()
+        .name("set-yaw")
+        .description("Sets yaw client side.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> setMove = sgClient.add(new BoolSetting.Builder()
+        .name("set-move")
+        .description("Sets movement client side.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> setPos = sgClient.add(new BoolSetting.Builder()
+        .name("set-pos")
+        .description("Sets position client side.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> setID = sgClient.add(new BoolSetting.Builder()
+        .name("set-id")
+        .description("Updates teleport id when a position packet is received.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> invalidPacket = sgBypass.add(new BoolSetting.Builder()
+        .name("invalid-packet")
+        .description("Sends invalid movement packets.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private boolean antiKick = false;
+    private int downDelayFlying = 10;
+    private int downDelay = 4;
+    private int flightCounter = 0;
+    private int teleportID = 0;
+
+    public FlightBypass() {
+        super(THMAddon.MAIN, "Fly-Bypass", "Fly using packets.");
+    }
+
+    @EventHandler
+    public void onSendMovementPackets(SendMovementPacketsEvent.Pre event) {
+        mc.player.setVelocity(0.0,0.0,0.0);
+        double speed = 0.0;
+        boolean checkCollisionBoxes = checkHitBoxes();
+
+        boolean movingForward = mc.player.input.playerInput.forward() && !mc.player.input.playerInput.backward();
+        boolean movingSideways = mc.player.input.playerInput.left() != mc.player.input.playerInput.right();
+        speed = mc.player.input.playerInput.jump() && (checkCollisionBoxes || !(movingForward || movingSideways)) ? (antiKick && !checkCollisionBoxes ? (resetCounter(downDelayFlying) ? -0.032 : verticalSpeed.get()/20) : verticalSpeed.get()/20) : (mc.player.input.playerInput.sneak() ? verticalSpeed.get()/-20 : (!checkCollisionBoxes ? (resetCounter(downDelay) ? (antiKick ? -0.04 : 0.0) : 0.0) : 0.0));
+
+        Vec3d horizontal = PlayerUtils.getHorizontalVelocity(horizontalSpeed.get());
+
+        mc.player.setVelocity(horizontal.x, speed, horizontal.z);
+        sendPackets(mc.player.getVelocity().x, mc.player.getVelocity().y, mc.player.getVelocity().z, sendTeleport.get());
+    }
+
+    @EventHandler
+    public void onMove (PlayerMoveEvent event) {
+        if (setMove.get() && flightCounter != 0) {
+            event.movement = new Vec3d(mc.player.getVelocity().x, mc.player.getVelocity().y, mc.player.getVelocity().z);
+        }
+    }
+
+    @EventHandler
+    public void onPacketSent(PacketEvent.Send event) {
+        if (event.packet instanceof PlayerMoveC2SPacket && !packets.remove((PlayerMoveC2SPacket) event.packet)) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler
+    public void onPacketReceive(PacketEvent.Receive event) {
+        if (event.packet instanceof PlayerPositionLookS2CPacket && !(mc.player == null || mc.world == null)) {
+            PlayerPositionLookS2CPacket packet = (PlayerPositionLookS2CPacket) event.packet;
+            EntityPosition oldPos = packet.change();
+            if (setYaw.get()) {
+                EntityPosition newPos = new EntityPosition(oldPos.position(), oldPos.deltaMovement(), mc.player.getYaw(), mc.player.getPitch());
+                event.packet = PlayerPositionLookS2CPacket.of(
+                    packet.teleportId(),
+                    newPos,
+                    packet.relatives()
+                );
+            }
+            if (setID.get()) {
+                teleportID = packet.teleportId();
+            }
+        }
+    }
+
+    private boolean checkHitBoxes() {
+        return !mc.world.getBlockCollisions(mc.player, mc.player.getBoundingBox().stretch(-0.0625,-0.0625,-0.0625)).iterator().hasNext();
+    }
+
+    private boolean resetCounter(int counter) {
+        if (++flightCounter >= counter) {
+            flightCounter = 0;
+            return true;
+        }
+        return false;
+    }
+
+    private void sendPackets(double x, double y, double z, boolean teleport) {
+        Vec3d vec = new Vec3d(x, y, z);
+        Vec3d position = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ()).add(vec);
+        Vec3d outOfBoundsVec = outOfBoundsVec(vec, position);
+        packetSender(new PlayerMoveC2SPacket.PositionAndOnGround(position.x, position.y, position.z, mc.player.isOnGround(), mc.player.horizontalCollision));
+        if (invalidPacket.get()) {
+            packetSender(new PlayerMoveC2SPacket.PositionAndOnGround(outOfBoundsVec.x, outOfBoundsVec.y, outOfBoundsVec.z, mc.player.isOnGround(), mc.player.horizontalCollision));
+        }
+        if (setPos.get()) {
+            mc.player.setPos(position.x, position.y, position.z);
+        }
+        teleportPacket(position, teleport);
+    }
+
+    private void teleportPacket(Vec3d pos, boolean shouldTeleport) {
+        if (shouldTeleport) {
+            mc.player.networkHandler.sendPacket(new TeleportConfirmC2SPacket(++teleportID));
+        }
+    }
+
+    private Vec3d outOfBoundsVec(Vec3d offset, Vec3d position) {
+        return position.add(0.0, 1500.0, 0.0);
+    }
+
+    private void packetSender(PlayerMoveC2SPacket packet) {
+        packets.add(packet);
+        mc.player.networkHandler.sendPacket(packet);
+    }
+    public void onActivate() {
+        if (mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem() == Items.ELYTRA) {
+            warning("You cant have a Elytra equipped");
+            toggle();
+
+        }
+
+    }
+}
