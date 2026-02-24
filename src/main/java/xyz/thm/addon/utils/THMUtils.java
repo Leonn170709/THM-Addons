@@ -174,6 +174,10 @@ public class THMUtils {
         if (yaw < 0) yaw += 360;
         return Math.round(yaw / 45.0f) * 45;
     }
+    public static long generateTimestamp() {
+        // Get current time in milliseconds since epoch (UTC)
+        return System.currentTimeMillis();
+    }
     private boolean canceled = false;
     public boolean isCanceled() {
         return canceled;
@@ -183,5 +187,30 @@ public class THMUtils {
     }
     public void setCanceled(boolean canceled) {
         this.canceled = canceled;
+    }
+    public static boolean isOnMainHighway() {
+        // Get player's current X and Z coordinates
+        assert mc.player != null;
+        double playerX = mc.player.getX();
+        double playerZ = mc.player.getZ();
+
+        // Check if X coordinate is on main highway (0, 1, or -1)
+        boolean xOnHighway = isMainHighwayCoordinate(playerX);
+
+        // Check if Z coordinate is on main highway (0, 1, or -1)
+        boolean zOnHighway = isMainHighwayCoordinate(playerZ);
+
+        // Check if coordinates are approximately equal with tolerance of 5
+        boolean coordsEqual = Math.abs(playerX - playerZ) <= 5;
+
+        // Return true if on main highway or coordinates are equal
+        return (xOnHighway || zOnHighway) || coordsEqual;
+    }
+
+    // Helper method to check if a coordinate is a main highway value
+    private static boolean isMainHighwayCoordinate(double coord) {
+        // Check if coordinate is close to 0, 1, or -1
+        double tolerance = 1.0;
+        return Math.abs(coord % 1) <= tolerance || Math.abs(coord % 1) >= (1 - tolerance);
     }
 }
