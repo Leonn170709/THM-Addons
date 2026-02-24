@@ -24,6 +24,7 @@ import java.security.MessageDigest;
 import java.util.*;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
+import static xyz.thm.addon.utils.password.*;
 
 public class MemberHud extends HudElement {
     public static final HudElementInfo<MemberHud> INFO = new HudElementInfo<>(THMAddon.HUD_GROUP, "THM Member Hud", "Shows all online THM members and ranks", MemberHud::new);
@@ -94,7 +95,7 @@ public class MemberHud extends HudElement {
         }
     }
 
-    public String apiUrl = "MlNn9Btz7f+AqZ39aCKxFGzOtaFx10hI/AxoAdoj6GKj8Z2pdY4jywtS6Ab6bct4";
+    public String apiUrl = getAPIMemberHud();
 
     // Cache variables
     private List<User> cachedMembers = null;
@@ -142,16 +143,17 @@ public class MemberHud extends HudElement {
 
         try {
             // Create HTTP connection to the API endpoint
-            HttpURLConnection connection = (HttpURLConnection) new URI(decryptAPI(apiUrl, "eTw93[d+q\"5+(Q]-2gqlQK}n:zgn8gUy41_$N'\\4-0o=_2BooS")).toURL().openConnection();
+            HttpURLConnection connection = (HttpURLConnection) new URI(Objects.requireNonNull(decryptAPI(apiUrl, getPassword()))).toURL().openConnection();
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(5000);
             connection.setReadTimeout(5000);
 
             // Check if the response is successful
             if (connection.getResponseCode() != 200) {
-                System.err.println("Failed to fetch members from API. Response code: " + connection.getResponseCode());
+                THMAddon.LOG.error("Failed to fetch members from API. Response code: {}", connection.getResponseCode());
                 return members;
             }
+            THMAddon.LOG.info("Fetched Members");
 
             // Read the response body
             StringBuilder response = new StringBuilder();

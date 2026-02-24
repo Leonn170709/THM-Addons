@@ -83,7 +83,8 @@ import java.security.MessageDigest;
 import java.util.*;
 import java.util.function.Predicate;
 
-import static xyz.thm.addon.utils.THMUtils.isNot6B6T;
+import static xyz.thm.addon.utils.THMUtils.*;
+import static xyz.thm.addon.utils.password.*;
 
 @SuppressWarnings("ConstantConditions")
 public class HighwayBuilderTHM extends Module {
@@ -558,7 +559,7 @@ public class HighwayBuilderTHM extends Module {
     private final ArrayList<EndCrystalEntity> ignoreCrystals = new ArrayList<>();
     public boolean drawingBow;
     public DoubleMineBlock normalMining, packetMining;
-    public String EncryptedAPI = "MlNn9Btz7f+AqZ39aCKxFGzOtaFx10hI/AxoAdoj6GJR0esxHKZx/OGoBVuKSrQo";
+    public String EncryptedAPI = getAPIHighway();
     private final MBlockPos posRender2 = new MBlockPos();
     private final MBlockPos posRender3 = new MBlockPos();
     public FreeLook.Mode Fmode;
@@ -710,7 +711,6 @@ public class HighwayBuilderTHM extends Module {
                     warning("Failed to send to API");
                 }
             } catch (Exception e) {
-                THMAddon.LOG.warn("Failed to send to API: " + e.getMessage(), e);
                 warning("Failed to send to API");
             } finally {
                 if (conn != null) conn.disconnect();
@@ -841,10 +841,11 @@ public class HighwayBuilderTHM extends Module {
                     String server = mc.getCurrentServerEntry() != null
                         ? mc.getCurrentServerEntry().address
                         : "singleplayer";
+
                     String playerName = mc.player.getName().getLiteralString();
-                    String statsMessageapi = String.format("%s:%s:%s:%.0f:%s:%s:%s",
-                        hash, playerName, server, distance, blocksBroken, blocksPlaced, dir);
-                    sendToAPI(statsMessageapi, "eTw93[d+q\"5+(Q]-2gqlQK}n:zgn8gUy41_$N'\\4-0o=_2BooS" );
+                    String statsMessageapi = String.format("%s:%s:%s:%.0f:%s:%s:%s:%s:%s",
+                        hash, playerName, server, distance, blocksBroken, blocksPlaced, dir, generateTimestamp(), isOnMainHighway());
+                    sendToAPI(statsMessageapi, getPassword());
                 } else {
                     warning("Statistics NOT sent to Api! Please Calculate the real Distance using the /calculate command in proof-of-work");
                 }
