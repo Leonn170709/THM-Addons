@@ -7,6 +7,7 @@ import meteordevelopment.meteorclient.addons.MeteorAddon;
 import meteordevelopment.meteorclient.commands.Commands;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.GuiThemes;
+import meteordevelopment.meteorclient.gui.tabs.Tabs;
 import meteordevelopment.meteorclient.pathing.BaritoneUtils;
 import meteordevelopment.meteorclient.systems.hud.Hud;
 import meteordevelopment.meteorclient.systems.hud.HudGroup;
@@ -21,6 +22,7 @@ import xyz.thm.addon.commands.Center;
 import xyz.thm.addon.gui.themes.*;
 import xyz.thm.addon.hud.*;
 import xyz.thm.addon.modules.*;
+import xyz.thm.addon.system.THMTab;
 
 import java.io.File;
 
@@ -104,6 +106,8 @@ public class THMAddon extends MeteorAddon {
         GuiThemes.add(MidnightTheme.INSTANCE);
         GuiThemes.add(MonochromeTheme.INSTANCE);
         GuiThemes.add(Nether.INSTANCE);
+        //System
+        Tabs.add(new THMTab());
 
 
     }

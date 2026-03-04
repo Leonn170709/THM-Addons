@@ -71,6 +71,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Range;
 import org.joml.Vector3d;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.system.THMSystem;
+import xyz.thm.addon.system.THMTab;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
@@ -125,7 +127,7 @@ public class HighwayBuilderTHM extends Module {
     private final SettingGroup sgInventory = settings.createGroup("Inventory");
     private final SettingGroup sgRenderDigging = settings.createGroup("Render Digging");
     private final SettingGroup sgRenderPaving = settings.createGroup("Render Paving");
-    private final SettingGroup sgStatistics = settings.createGroup("Statistics");
+    private final SettingGroup sgStatistics = settings.createGroup("Logging");
 
     public final Setting<Integer> width = sgGeneral.add(new IntSetting.Builder()
         .name("width")
@@ -490,6 +492,14 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+
+    private final Setting<Boolean> statuslog = sgStatistics.add(new BoolSetting.Builder()
+        .name("Send-Status")
+        .description("Sends the status every 5 min (Digging/Paving,Axis,Name,hash)")
+        .defaultValue(true)
+        .build()
+    );
+
     private final Setting<Boolean> sendStatisticsWebhhok = sgStatistics.add(new BoolSetting.Builder()
         .name("sends-statistics(Webhook)")
         .description("Sends Highway Builder statistics to a webhook when the module is disabled.")
@@ -520,14 +530,6 @@ public class HighwayBuilderTHM extends Module {
         .visible(printStatistics::get)
         .build()
     );
-
-    private final Setting<String> hash = sgStatistics.add(new StringSetting.Builder()
-        .name("Hash")
-        .description("The Hash that you got")
-        .visible(() -> printStatistics.get() && sendStatisticsapi.get())
-            .defaultValue("SetYourHash")
-        .build()
-    );
     public final Setting<Boolean> togglePerspective = sgGeneral.add(new BoolSetting.Builder()
         .name("toggle-perspective")
         .description("Changes your perspective on toggle.")
@@ -554,15 +556,15 @@ public class HighwayBuilderTHM extends Module {
     private final MBlockPos lastBreakingPos = new MBlockPos();
     private boolean displayInfo, sentLagMessage;
     private boolean suspended = true, inventory = true;
-    private int placeTimer, breakTimer, count, syncId;
+    private int placeTimer, breakTimer, count, syncId, statusLogTimer;
     private final RestockTask restockTask = new RestockTask(this);
     private final ArrayList<EndCrystalEntity> ignoreCrystals = new ArrayList<>();
     public boolean drawingBow;
     public DoubleMineBlock normalMining, packetMining;
-    public String EncryptedAPI = getAPIHighway();
     private final MBlockPos posRender2 = new MBlockPos();
     private final MBlockPos posRender3 = new MBlockPos();
     public FreeLook.Mode Fmode;
+    public String hash = THMSystem.get().hash.get();
 
     public HighwayBuilderTHM() {
         super(THMAddon.MAIN, "THM-HighwayBuilder", "Automatically builds highways according to THMs standards.");
@@ -667,7 +669,7 @@ public class HighwayBuilderTHM extends Module {
                 }
             }).start();
         }
-    private void sendToAPI(String message, String password) {
+    private void sendToAPI(String message, String password, String EncryptedAPI, String logType) {
         new Thread(() -> {
             HttpURLConnection conn = null;
             try {
@@ -705,7 +707,7 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 if (responseCode == 204 || responseCode == 200) {
-                    info("Successfully sent statistics to API!");
+                    info("Successfully sent %s to API!", logType);
                 } else {
                     THMAddon.LOG.warn("API response code: " + responseCode);
                     warning("Failed to send to API");
@@ -716,6 +718,37 @@ public class HighwayBuilderTHM extends Module {
                 if (conn != null) conn.disconnect();
             }
         }).start();
+    }
+
+    private void sendStatusLog() {
+        if (!statuslog.get() || mc.player == null || dir == null) return;
+
+        if (isNot6B6T()) {
+            warning("Status not sent. You are not on 6B6T");
+            return;
+        }
+        if (!isOnMainHighway()) {
+            warning("Status wont get send. You are not on a main highway");
+            return;
+        }
+        if (hash == null || Objects.equals(hash, "SetYourHash") || Objects.equals(hash, "")) {
+            warning("Status not sent. No Hash set.");
+            return;
+        }
+
+        String playerName = mc.player.getName().getLiteralString();
+        String axis = dir.toString();
+
+        String statusMessage = String.format("%s:%s:%s:%d:%d:%s",
+            hash,
+            playerName,
+            axis,
+            blocksBroken,
+            blocksPlaced,
+            generateTimestamp()
+        );
+
+        sendToAPI(statusMessage, getPassword(), getAPIStatus(), "status");
     }
 
     @Override
@@ -736,6 +769,7 @@ public class HighwayBuilderTHM extends Module {
         displayInfo = true;
         sentLagMessage = false;
         suspended = false;
+        statusLogTimer = 0;
 
         restockTask.complete();
 
@@ -757,7 +791,6 @@ public class HighwayBuilderTHM extends Module {
             warning("It's recommended to disable the NoGhostBlocks module to avoid packet kicks and wrong statistics.");
         if (!Modules.get().get(Velocity.class).isActive()) {
             warning("It's recommended to enable the Velocity module to avoid misalignment.");};
-
         Fmode = Modules.get().get(FreeLook.class).mode.get();
         if (Modules.get().get(FreeLook.class).mode.get() == FreeLook.Mode.Player) {Modules.get().get(FreeLook.class).mode.set(FreeLook.Mode.Camera);}
         if (togglePerspective.get() == true) {Modules.get().get(FreeLook.class).togglePerspective.set(true);}
@@ -767,7 +800,6 @@ public class HighwayBuilderTHM extends Module {
         if (!Modules.get().get(AntiDrop.class).isActive() && antidrop.get()) { Modules.get().get(AntiDrop.class).toggle();}
 
         HighwayProfiles hwProfiles = Modules.get().get(HighwayProfiles.class);
-
         if (hwProfiles != null && hwProfiles.isActive()) {
             int playerY = (int) mc.player.getY();
 
@@ -834,7 +866,7 @@ public class HighwayBuilderTHM extends Module {
                         warning("API not sent. You are not on 6B6T");
                         return;
                     }
-                    if (hash.get() == null || Objects.equals(hash.get(), "SetYourHash") || Objects.equals(hash.get(), "")) {
+                    if (hash == null || Objects.equals(hash, "SetYourHash") || Objects.equals(hash, "")) {
                         warning("API not sent. No Hash set.");
                         return;
                     }
@@ -845,7 +877,7 @@ public class HighwayBuilderTHM extends Module {
                     String playerName = mc.player.getName().getLiteralString();
                     String statsMessageapi = String.format("%s:%s:%s:%.0f:%s:%s:%s:%s:%s",
                         hash, playerName, server, distance, blocksBroken, blocksPlaced, dir, generateTimestamp(), isOnMainHighway());
-                    sendToAPI(statsMessageapi, getPassword());
+                    sendToAPI(statsMessageapi, getPassword(), getAPIHighway(), "statistics");
                 } else {
                     warning("Statistics NOT sent to Api! Please Calculate the real Distance using the /calculate command in proof-of-work");
                 }
@@ -875,6 +907,14 @@ public class HighwayBuilderTHM extends Module {
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
+
+        if (statuslog.get()) {
+            statusLogTimer++;
+            if (statusLogTimer >= 6000) { // 5 minutes
+                sendStatusLog();
+                statusLogTimer = 0;
+            }
+        }
 
         if (dir == null) {
             onActivate();

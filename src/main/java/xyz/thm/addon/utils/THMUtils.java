@@ -190,27 +190,17 @@ public class THMUtils {
     }
     public static boolean isOnMainHighway() {
         // Get player's current X and Z coordinates
-        assert mc.player != null;
+        if (mc.player == null) return false;
         double playerX = mc.player.getX();
         double playerZ = mc.player.getZ();
 
-        // Check if X coordinate is on main highway (0, 1, or -1)
-        boolean xOnHighway = isMainHighwayCoordinate(playerX);
+        // Check if player is on X or Z axis highway (within a 5 block tolerance)
+        boolean onXAxis = Math.abs(playerZ) < 5;
+        boolean onZAxis = Math.abs(playerX) < 5;
 
-        // Check if Z coordinate is on main highway (0, 1, or -1)
-        boolean zOnHighway = isMainHighwayCoordinate(playerZ);
+        // Check if player is on a diagonal highway (within a 5 block tolerance)
+        boolean onDiagonal = Math.abs(Math.abs(playerX) - Math.abs(playerZ)) < 5;
 
-        // Check if coordinates are approximately equal with tolerance of 5
-        boolean coordsEqual = Math.abs(playerX - playerZ) <= 5;
-
-        // Return true if on main highway or coordinates are equal
-        return (xOnHighway || zOnHighway) || coordsEqual;
-    }
-
-    // Helper method to check if a coordinate is a main highway value
-    private static boolean isMainHighwayCoordinate(double coord) {
-        // Check if coordinate is close to 0, 1, or -1
-        double tolerance = 1.0;
-        return Math.abs(coord % 1) <= tolerance || Math.abs(coord % 1) >= (1 - tolerance);
+        return onXAxis || onZAxis || onDiagonal;
     }
 }
