@@ -1042,7 +1042,7 @@ public class HighwayBuilderTHM extends Module {
                 int excludeDir = 0;
 
                 for (Direction side : Direction.values()) {
-                    posRender3.set(posRender2).add(0, 0, 0);
+                    posRender3.set(posRender2).add(side.getOffsetX(), side.getOffsetY(), side.getOffsetZ());
 
                     it.save();
                     for (MBlockPos p : it) {
