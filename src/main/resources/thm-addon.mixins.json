@@ -6,7 +6,6 @@
     "defaultRequire": 1
   },
   "mixins": [
-    "SystemsMixin",
     "accessor.ExplosionS2CPacketAccessor",
     "accessor.PlayerInventoryAccessor",
     "accessor.UpdateSelectedSlotS2CPacketAccessor",

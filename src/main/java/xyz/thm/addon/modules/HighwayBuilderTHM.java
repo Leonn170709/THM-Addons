@@ -71,8 +71,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Range;
 import org.joml.Vector3d;
 import xyz.thm.addon.THMAddon;
-import xyz.thm.addon.system.THMSystem;
-import xyz.thm.addon.system.THMTab;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
@@ -530,6 +528,15 @@ public class HighwayBuilderTHM extends Module {
         .visible(printStatistics::get)
         .build()
     );
+
+    public final Setting<String> setHash = sgStatistics.add(new StringSetting.Builder()
+        .name("Hash")
+        .description("The Hash that you got")
+        .defaultValue("SetYourHash")
+        .wide()
+        .build()
+    );
+
     public final Setting<Boolean> togglePerspective = sgGeneral.add(new BoolSetting.Builder()
         .name("toggle-perspective")
         .description("Changes your perspective on toggle.")
@@ -564,7 +571,6 @@ public class HighwayBuilderTHM extends Module {
     private final MBlockPos posRender2 = new MBlockPos();
     private final MBlockPos posRender3 = new MBlockPos();
     public FreeLook.Mode Fmode;
-    public String hash = THMSystem.get().hash.get();
 
     public HighwayBuilderTHM() {
         super(THMAddon.MAIN, "THM-HighwayBuilder", "Automatically builds highways according to THMs standards.");
@@ -731,7 +737,7 @@ public class HighwayBuilderTHM extends Module {
             warning("Status wont get send. You are not on a main highway");
             return;
         }
-        if (hash == null || Objects.equals(hash, "SetYourHash") || Objects.equals(hash, "")) {
+        if (setHash.get() == null || Objects.equals(setHash.get(), "SetYourHash") || Objects.equals(setHash.get(), "")) {
             warning("Status not sent. No Hash set.");
             return;
         }
@@ -740,7 +746,7 @@ public class HighwayBuilderTHM extends Module {
         String axis = dir.toString();
 
         String statusMessage = String.format("%s:%s:%s:%d:%d:%s",
-            hash,
+            setHash.get(),
             playerName,
             axis,
             blocksBroken,
@@ -866,7 +872,7 @@ public class HighwayBuilderTHM extends Module {
                         warning("API not sent. You are not on 6B6T");
                         return;
                     }
-                    if (hash == null || Objects.equals(hash, "SetYourHash") || Objects.equals(hash, "")) {
+                    if (setHash.get() == null || Objects.equals(setHash.get(), "SetYourHash") || Objects.equals(setHash.get(), "")) {
                         warning("API not sent. No Hash set.");
                         return;
                     }
@@ -876,7 +882,7 @@ public class HighwayBuilderTHM extends Module {
 
                     String playerName = mc.player.getName().getLiteralString();
                     String statsMessageapi = String.format("%s:%s:%s:%.0f:%s:%s:%s:%s:%s",
-                        hash, playerName, server, distance, blocksBroken, blocksPlaced, dir, generateTimestamp(), isOnMainHighway());
+                        setHash.get(), playerName, server, distance, blocksBroken, blocksPlaced, dir, generateTimestamp(), isOnMainHighway());
                     sendToAPI(statsMessageapi, getPassword(), getAPIHighway(), "statistics");
                 } else {
                     warning("Statistics NOT sent to Api! Please Calculate the real Distance using the /calculate command in proof-of-work");
