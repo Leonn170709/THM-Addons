@@ -71,6 +71,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Range;
 import org.joml.Vector3d;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.system.THMSystem;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
@@ -529,14 +530,6 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    public final Setting<String> setHash = sgStatistics.add(new StringSetting.Builder()
-        .name("Hash")
-        .description("The Hash that you got")
-        .defaultValue("SetYourHash")
-        .wide()
-        .build()
-    );
-
     public final Setting<Boolean> togglePerspective = sgGeneral.add(new BoolSetting.Builder()
         .name("toggle-perspective")
         .description("Changes your perspective on toggle.")
@@ -737,7 +730,7 @@ public class HighwayBuilderTHM extends Module {
             warning("Status wont get send. You are not on a main highway");
             return;
         }
-        if (setHash.get() == null || Objects.equals(setHash.get(), "SetYourHash") || Objects.equals(setHash.get(), "")) {
+        if (THMSystem.get() == null || Objects.equals(THMSystem.get().getHash(), "SetYourHash") || Objects.equals(THMSystem.get().getHash(), "")) {
             warning("Status not sent. No Hash set.");
             return;
         }
@@ -746,7 +739,7 @@ public class HighwayBuilderTHM extends Module {
         String axis = dir.toString();
 
         String statusMessage = String.format("%s:%s:%s:%d:%d:%s",
-            setHash.get(),
+            THMSystem.get().getHash(),
             playerName,
             axis,
             blocksBroken,
@@ -805,23 +798,22 @@ public class HighwayBuilderTHM extends Module {
         if (!Modules.get().get(HotbarManager.class).isActive() && hotbarmanager.get()) { Modules.get().get(HotbarManager.class).toggle();}
         if (!Modules.get().get(AntiDrop.class).isActive() && antidrop.get()) { Modules.get().get(AntiDrop.class).toggle();}
 
-        HighwayProfiles hwProfiles = Modules.get().get(HighwayProfiles.class);
-        if (hwProfiles != null && hwProfiles.isActive()) {
+        THMSystem thmSystem = THMSystem.get();
+        if (thmSystem != null) {
             int playerY = (int) mc.player.getY();
 
-            if (hwProfiles.mode.get() == HighwayProfiles.Mode.HighwayBuilding) {
+            if (thmSystem.mode.get() == THMSystem.Mode.HighwayBuilding) {
                 if (playerY != 120) {
                     warning("You are not on Y Level 120!!");
                     toggle();
                 }
             }
-            if (hwProfiles.mode.get() == HighwayProfiles.Mode.HighwayDigging) {
+            if (thmSystem.mode.get() == THMSystem.Mode.HighwayDigging) {
                 if (playerY != 119) {
                     warning("You are not on Y Level 119!!");
                     toggle();
                 }
             }
-
         }
 
 
@@ -872,7 +864,7 @@ public class HighwayBuilderTHM extends Module {
                         warning("API not sent. You are not on 6B6T");
                         return;
                     }
-                    if (setHash.get() == null || Objects.equals(setHash.get(), "SetYourHash") || Objects.equals(setHash.get(), "")) {
+                    if (THMSystem.get().getHash() == null || Objects.equals(THMSystem.get().getHash(), "SetYourHash") || Objects.equals(THMSystem.get().getHash(), "")) {
                         warning("API not sent. No Hash set.");
                         return;
                     }
@@ -882,7 +874,7 @@ public class HighwayBuilderTHM extends Module {
 
                     String playerName = mc.player.getName().getLiteralString();
                     String statsMessageapi = String.format("%s:%s:%s:%.0f:%s:%s:%s:%s:%s",
-                        setHash.get(), playerName, server, distance, blocksBroken, blocksPlaced, dir, generateTimestamp(), isOnMainHighway());
+                        THMSystem.get().getHash(), playerName, server, distance, blocksBroken, blocksPlaced, dir, generateTimestamp(), isOnMainHighway());
                     sendToAPI(statsMessageapi, getPassword(), getAPIHighway(), "statistics");
                 } else {
                     warning("Statistics NOT sent to Api! Please Calculate the real Distance using the /calculate command in proof-of-work");
@@ -1050,7 +1042,7 @@ public class HighwayBuilderTHM extends Module {
                 int excludeDir = 0;
 
                 for (Direction side : Direction.values()) {
-                    posRender3.set(posRender2).add(side.getOffsetX(), side.getOffsetY(), side.getOffsetZ());
+                    posRender3.set(posRender2).add(0, 0, 0);
 
                     it.save();
                     for (MBlockPos p : it) {
@@ -2153,7 +2145,7 @@ public class HighwayBuilderTHM extends Module {
              * meaning we cannot draw our bow using {@link GameOptions#useKey} since it would not work if you are in a
              * screen. Similarly, drawing our bow by {@link ClientPlayerInteractionManager#interactItem} would get
              * cancelled by default within the handleInputEvents method if you do not have the use key held down,
-             * essentially meaning without the following injection it would not work if you don't have a screen open.
+             * essentially meaning without the following injection it would not work if you don't have a screen open?
              * //@see meteordevelopment.meteorclient.mixin.MinecraftClientMixin#wrapStopUsing(ClientPlayerInteractionManager, PlayerEntity)
              */
             @Override
@@ -2283,7 +2275,7 @@ public class HighwayBuilderTHM extends Module {
 
                 // repeating the code for swapping to a tool, since we don't want to start mining a block if we don't
                 // have a tool to mine it with, but also we want to lock the slot to the tool while we are mining even
-                // the ArrayDequeue is empty
+                // the ArrayDeque is empty
                 if (!toDoubleMine.isEmpty()) {
                     int slot = findAndMoveBestToolToHotbar(b, b.mc.world.getBlockState(toDoubleMine.peek()), false);
                     if (slot == -1) return;
@@ -2966,7 +2958,6 @@ public class HighwayBuilderTHM extends Module {
 
                         pos.coerceBlockLevel(mc.player).add(0, -1, 0).offset(dir).offset(leftDir, getWidthLeft());
                     }
-
                     return pos2;
                 }
 

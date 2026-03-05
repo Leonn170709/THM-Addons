@@ -22,6 +22,7 @@ import xyz.thm.addon.commands.Center;
 import xyz.thm.addon.gui.themes.*;
 import xyz.thm.addon.hud.*;
 import xyz.thm.addon.modules.*;
+import xyz.thm.addon.system.THMTab;
 
 import java.io.File;
 
@@ -73,7 +74,6 @@ public class THMAddon extends MeteorAddon {
         Modules.get().add(new SurroundPlus());
         Modules.get().add(new Phase());
         Modules.get().add(new AutoPortal());
-        Modules.get().add(new HighwayProfiles());
         Modules.get().add(new DiscordRPC());
         Modules.get().add(new TunnelMinerModule());
         Modules.get().add(new SignRender());
@@ -105,6 +105,9 @@ public class THMAddon extends MeteorAddon {
         GuiThemes.add(MidnightTheme.INSTANCE);
         GuiThemes.add(MonochromeTheme.INSTANCE);
         GuiThemes.add(Nether.INSTANCE);
+
+        //System/Tab
+        Tabs.add(new THMTab());
 
 
     }
