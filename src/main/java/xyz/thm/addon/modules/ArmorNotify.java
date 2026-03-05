@@ -44,8 +44,8 @@ public class ArmorNotify extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
+        if (mc.player == null) return;
         double thresholdValue = threshold.get();
-        assert mc.player != null;
 
         ItemStack helmet = mc.player.getEquippedStack(EquipmentSlot.HEAD);
         ItemStack chestplate = mc.player.getEquippedStack(EquipmentSlot.CHEST);

@@ -187,11 +187,15 @@ public class DiscordNotifs extends Module
             int queueIndex = message.indexOf("Position in queue: ");
             if (queueIndex != -1)
             {
-                int queuePos = Integer.parseInt(message.substring(queueIndex + 19));
-                if (queuePos != lastQueuePos)
-                {
-                    handleMessage(message, MessageType.QUEUE);
-                    lastQueuePos = queuePos;
+                String rawQueuePos = message.substring(queueIndex + 19).trim();
+                String digitsOnly = rawQueuePos.replaceAll("[^0-9]", "");
+                if (!digitsOnly.isEmpty()) {
+                    int queuePos = Integer.parseInt(digitsOnly);
+                    if (queuePos != lastQueuePos)
+                    {
+                        handleMessage(message, MessageType.QUEUE);
+                        lastQueuePos = queuePos;
+                    }
                 }
             }
         }

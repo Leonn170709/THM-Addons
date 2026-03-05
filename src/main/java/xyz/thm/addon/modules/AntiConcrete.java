@@ -98,10 +98,7 @@ public class AntiConcrete extends Module {
                 int hotbarIndex = hotbarSlotSetting.get() - 1;
                 if (hotbarIndex < 0) hotbarIndex = 0;
                 if (originalSlot >= 0) {
-                    // guard: ensure indexes are sane
-                    try {
-                        InvUtils.move().from(hotbarIndex).to(originalSlot);
-                    } catch (Exception ignored) {}
+                    InvUtils.move().from(hotbarIndex).to(originalSlot);
                 }
                 waitingToReturn = false;
                 originalSlot = -1;

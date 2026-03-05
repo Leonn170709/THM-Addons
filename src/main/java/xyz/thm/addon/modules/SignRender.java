@@ -249,6 +249,7 @@ public class SignRender extends Module {
     private int updateTicker = 0;
     private int globalCycleIndex = 0;
     private long lastGlobalCycleTime = 0;
+    private boolean collectErrorLogged = false;
     public SignRender() {
         super(THMAddon.MAIN, "sign-render", "Renders sign text through walls with advanced clustering.");
     }
@@ -294,7 +295,12 @@ public class SignRender extends Module {
                 signData.color = new Color(textColor.get());
                 tempSignList.add(signData);
                 signCache.put(signPos, signData);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                if (!collectErrorLogged) {
+                    THMAddon.LOG.warn("SignRender collect error: {}", e.getMessage());
+                    collectErrorLogged = true;
+                }
+            }
         }
         if (prioritizeClosest.get()) {
             tempSignList.sort(Comparator.comparingDouble(s -> s.distance));
@@ -324,8 +330,6 @@ public class SignRender extends Module {
     }
     private void createClusters() {
         clusters.clear();
-        for (SignRenderData sign : allSigns) {
-        }
         List<SignRenderData> toCluster = new ArrayList<>(allSigns);
         Set<SignRenderData> clustered = new HashSet<>();
         double radiusSq = clusterRadius.get() * clusterRadius.get();
@@ -603,45 +607,41 @@ public class SignRender extends Module {
     }
     private List<String> extractSignLines(BlockEntity blockEntity) {
         List<String> lines = new ArrayList<>();
-        try {
-            SignText frontText = null;
-            SignText backText = null;
-            if (blockEntity instanceof SignBlockEntity sign) {
-                frontText = sign.getFrontText();
-                backText = sign.getBackText();
-            } else if (blockEntity instanceof HangingSignBlockEntity sign) {
-                frontText = sign.getFrontText();
-                backText = sign.getBackText();
+        SignText frontText = null;
+        SignText backText = null;
+        if (blockEntity instanceof SignBlockEntity sign) {
+            frontText = sign.getFrontText();
+            backText = sign.getBackText();
+        } else if (blockEntity instanceof HangingSignBlockEntity sign) {
+            frontText = sign.getFrontText();
+            backText = sign.getBackText();
+        }
+        if (frontText != null) {
+            List<String> frontLines = extractTextLines(frontText);
+            if (!frontLines.isEmpty()) {
+                lines.addAll(frontLines);
             }
-            if (frontText != null) {
-                List<String> frontLines = extractTextLines(frontText);
-                if (!frontLines.isEmpty()) {
-                    lines.addAll(frontLines);
-                }
+        }
+        if (backText != null && lines.isEmpty()) {
+            List<String> backLines = extractTextLines(backText);
+            if (!backLines.isEmpty()) {
+                lines.addAll(backLines);
             }
-            if (backText != null && lines.isEmpty()) {
-                List<String> backLines = extractTextLines(backText);
-                if (!backLines.isEmpty()) {
-                    lines.addAll(backLines);
-                }
-            }
-        } catch (Exception ignored) {}
+        }
         return lines;
     }
     private List<String> extractTextLines(SignText signText) {
         List<String> lines = new ArrayList<>();
-        try {
-            Text[] messages = signText.getMessages(false);
-            if (messages != null) {
-                for (Text message : messages) {
-                    if (message == null) continue;
-                    String line = safeExtractString(message);
-                    if (!line.isEmpty()) {
-                        lines.add(line);
-                    }
+        Text[] messages = signText.getMessages(false);
+        if (messages != null) {
+            for (Text message : messages) {
+                if (message == null) continue;
+                String line = safeExtractString(message);
+                if (!line.isEmpty()) {
+                    lines.add(line);
                 }
             }
-        } catch (Exception ignored) {}
+        }
         return lines;
     }
     private String safeExtractString(Text text) {
@@ -651,12 +651,10 @@ public class SignRender extends Module {
             if (result == null) return "";
             return cleanSignText(result);
         } catch (Exception e) {
-            try {
-                String literal = text.getLiteralString();
-                if (literal != null) {
-                    return cleanSignText(literal);
-                }
-            } catch (Exception ignored) {}
+            String literal = text.getLiteralString();
+            if (literal != null) {
+                return cleanSignText(literal);
+            }
             return "";
         }
     }

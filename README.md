@@ -46,12 +46,13 @@
 ## Building
 ### Local Build
 1. Clone the repository.
-2. Open the terminal and navigate to the cloned repository.
-3. Run the following command to build the project:
+2. Use JDK 21 or newer.
+3. Open the terminal and navigate to the cloned repository.
+4. Run the following command to build the project:
    ```bash
    ./gradlew build
    ```
-4. The built jar will be located in the `build/libs` directory.
+5. The built jar will be located in the `build/libs` directory.
 ## Contributing
 Contributions are welcome! Please review the [Contributing Guidelines](CONTRIBUTING.md) if you have any suggestions or improvements, then feel free to open an issue or submit a pull request.
 

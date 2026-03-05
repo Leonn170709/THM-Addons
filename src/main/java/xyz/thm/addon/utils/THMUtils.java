@@ -4,7 +4,9 @@ import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.network.ServerInfo;
+import net.minecraft.client.toast.SystemToast;
 import net.minecraft.item.ItemStack;
+import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.Difficulty;
@@ -82,10 +84,45 @@ public class THMUtils {
         return -1;
     }
 
-    // TODO: Add toast notifications system (reference Baritone?)
+    private static final String TOAST_TITLE = "THM Addon";
+
+    public enum ToastLevel {
+        INFO,
+        WARNING,
+        ERROR
+    }
+
+    public static void toast(String message) {
+        toast(ToastLevel.INFO, TOAST_TITLE, message);
+    }
+
+    public static void toastWarning(String message) {
+        toast(ToastLevel.WARNING, TOAST_TITLE, message);
+    }
+
+    public static void toastError(String message) {
+        toast(ToastLevel.ERROR, TOAST_TITLE, message);
+    }
+
+    public static void toast(ToastLevel level, String title, @Nullable String message) {
+        if (mc == null) return;
+
+        SystemToast.Type toastType = switch (level) {
+            case WARNING -> SystemToast.Type.UNSECURE_SERVER_WARNING;
+            case ERROR -> SystemToast.Type.PACK_LOAD_FAILURE;
+            default -> SystemToast.Type.PERIODIC_NOTIFICATION;
+        };
+
+        Text titleText = Text.literal(title == null || title.isEmpty() ? TOAST_TITLE : title);
+        Text messageText = message == null || message.isEmpty() ? Text.empty() : Text.literal(message);
+        Runnable notify = () -> SystemToast.show(mc.getToastManager(), toastType, titleText, messageText);
+
+        if (mc.isOnThread()) notify.run();
+        else mc.execute(notify);
+    }
 
     public static boolean isNot6B6T() {
-        assert mc.world != null;
+        if (mc.world == null) return false;
         if (FabricLoader.getInstance().isDevelopmentEnvironment()) return false; // Bypass check in dev environment
         if (mc.isIntegratedServerRunning()) return true;
         ServerInfo server = mc.getCurrentServerEntry();
@@ -108,20 +145,27 @@ public class THMUtils {
                 THMAddon.LOG.info("Waiting 10 seconds for baritone to pick up");
                 Thread.sleep(10000);
             } catch (InterruptedException e) {
-                throw new RuntimeException(e);
+                Thread.currentThread().interrupt();
+                return;
             }
             baritone.getPathingBehavior().cancelEverything();
             baritone.getCommandManager().execute("goto " + savedX + " " + savedZ);
-            while (!finishedbar[0]) {
-                if (Math.abs(mc.player.getX() - savedX) == 0 && Math.abs(mc.player.getZ() - savedZ) == 0) {
+            while (!finishedbar[0] && mc.player != null) {
+                if (Math.abs(mc.player.getX() - savedX) <= 0.5 && Math.abs(mc.player.getZ() - savedZ) <= 0.5) {
                     finishedbar[0] = true;
                     baritone.getPathingBehavior().cancelEverything();
+                } else {
+                    try {
+                        Thread.sleep(50);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
                 }
             }
         }).start();
 
     }
-    // TODO: Add this to Highway builder so it picks up all the splattered obsidian
     private boolean checkModLoaded(String... modIds)
     {
         boolean loaded = false;

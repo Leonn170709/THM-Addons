@@ -5,16 +5,18 @@ import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
-import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
+import net.minecraft.world.chunk.ChunkStatus;
 import xyz.thm.addon.THMAddon;
 
+import java.util.HashSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public class BlockCounter extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -47,45 +49,45 @@ public class BlockCounter extends Module {
     public void onActivate() {
         if (mc.world == null || mc.player == null) return;
         info("Started Counting. Please wait and don't reenable");
-        // starting async scan
-        new Thread(() -> {
-            int radius = radiusChunks.get() * 16; // Radius in Blöcken
-            countBlocksOptimized(mc.world, mc.player.getBlockPos(), radius);
-        }).start();
+        int radius = radiusChunks.get() * 16;
+        countBlocksOptimized(mc.world, mc.player.getBlockPos(), radius);
         toggle();
 
     }
 
     public void countBlocksOptimized(World world, BlockPos center, int radius) {
         blockCounts.clear();
-        // Limiting Y to 500 blocks
-        int yRadius = Math.min(500, radius);
+        Set<Block> blockSet = new HashSet<>(blocks.get());
+        if (blockSet.isEmpty()) return;
 
-        // Chunk based instead of blocks
+        int yRadius = Math.min(500, radius);
+        int minY = Math.max(world.getBottomY(), center.getY() - yRadius);
+        int maxY = Math.min(world.getTopYInclusive(), center.getY() + yRadius);
+
         int chunkRadiusX = (radius + 15) / 16;
         int chunkCenterX = center.getX() >> 4;
         int chunkCenterZ = center.getZ() >> 4;
 
         long startTime = System.currentTimeMillis();
-        int blocksScanned = 0;
+        long blocksScanned = 0;
+        BlockPos.Mutable mutablePos = new BlockPos.Mutable();
 
         for (int chunkX = chunkCenterX - chunkRadiusX; chunkX <= chunkCenterX + chunkRadiusX; chunkX++) {
             for (int chunkZ = chunkCenterZ - chunkRadiusX; chunkZ <= chunkCenterZ + chunkRadiusX; chunkZ++) {
-                // checking if chunk is in range
                 int chunkBlockX = chunkX * 16;
                 int chunkBlockZ = chunkZ * 16;
 
                 if (Math.abs(chunkBlockX - center.getX()) > radius && Math.abs(chunkBlockX + 15 - center.getX()) > radius) continue;
                 if (Math.abs(chunkBlockZ - center.getZ()) > radius && Math.abs(chunkBlockZ + 15 - center.getZ()) > radius) continue;
+                if (world.getChunk(chunkX, chunkZ, ChunkStatus.FULL, false) == null) continue;
 
-                // Searching Chunk for blocks
                 for (int x = chunkBlockX; x < chunkBlockX + 16; x++) {
                     for (int z = chunkBlockZ; z < chunkBlockZ + 16; z++) {
-                        for (int y = center.getY() - yRadius; y <= center.getY() + yRadius; y++) {
-                            BlockPos pos = new BlockPos(x, y, z);
-                            Block block = world.getBlockState(pos).getBlock();
+                        for (int y = minY; y <= maxY; y++) {
+                            mutablePos.set(x, y, z);
+                            Block block = world.getBlockState(mutablePos).getBlock();
 
-                            if (blocks.get().contains(block)) {
+                            if (blockSet.contains(block)) {
                                 blockCounts.put(block, blockCounts.getOrDefault(block, 0) + 1);
                             }
                             blocksScanned++;
@@ -97,7 +99,6 @@ public class BlockCounter extends Module {
 
         long duration = System.currentTimeMillis() - startTime;
 
-        // Showing results in chat
         if (!blockCounts.isEmpty()) {
             blockCounts.forEach((block, count) ->
                 info(block.getName().getString() + ": (highlight)" + count)

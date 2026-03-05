@@ -18,7 +18,6 @@ import net.minecraft.util.math.*;
 import xyz.thm.addon.utils.RotationUtils;
 import xyz.thm.addon.utils.PlacementUtils;
 import xyz.thm.addon.utils.InventoryManager;
-import xyz.thm.addon.utils.THMUtils;
 
 public class Phase extends Module {
     private final SettingGroup sgPearl = settings.createGroup("Pearl");
@@ -76,13 +75,6 @@ public class Phase extends Module {
     public void onDeactivate() {
         if (mc.player != null) {
             mc.player.noClip = false;
-        }
-    }
-
-    @EventHandler
-    private void onPushOutOfBlocks(THMUtils event) {
-        if (isActive()) {
-            event.cancel();
         }
     }
 

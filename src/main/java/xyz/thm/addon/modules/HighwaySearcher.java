@@ -49,7 +49,7 @@ public class HighwaySearcher extends Module {
     private final IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
     @Override
     public void onActivate() {
-        assert mc.player != null;
+        if (mc.player == null) return;
         if (Highwaytp.get() && axiswalker.get()) {
             error("You cant have two modes enabled at the same time.");
             toggle();
