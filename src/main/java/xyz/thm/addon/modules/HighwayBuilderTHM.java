@@ -82,7 +82,6 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
-import java.util.function.Supplier;
 import java.util.function.Predicate;
 
 import static xyz.thm.addon.utils.THMUtils.*;
@@ -265,6 +264,16 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+    private final Setting<Integer> restockPickaxesAmount = sgDigging.add(new IntSetting.Builder()
+        .name("restock-pickaxes-amount")
+        .description("How many pickaxes to pull per pickaxe restock task.")
+        .defaultValue(1)
+        .range(1, 36)
+        .sliderRange(1, 9)
+        .visible(() -> !dontBreakTools.get())
+        .build()
+    );
+
     private final Setting<Integer> breakDelay = sgDigging.add(new IntSetting.Builder()
         .name("break-delay")
         .description("The delay between breaking blocks.")
@@ -308,13 +317,6 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Boolean> checkBehind = sgGeneral.add(new BoolSetting.Builder()
-        .name("check-behind")
-        .description("Checks and repairs missing highway floor and railings behind the player.")
-        .defaultValue(false)
-        .build()
-    );
-
     public final Setting<Integer> placementsPerTick = sgPaving.add(new IntSetting.Builder()
         .name("placements-per-tick")
         .description("The maximum amount of blocks that can be placed in a tick.")
@@ -333,6 +335,15 @@ public class HighwayBuilderTHM extends Module {
             Items.GLOWSTONE, Items.BLACKSTONE, Items.BASALT, Items.GHAST_TEAR, Items.SOUL_SAND, Items.SOUL_SOIL,
             Items.ROTTEN_FLESH, Items.MAGMA_BLOCK
         )
+        .build()
+    );
+
+    private final Setting<Integer> keepTrashBlockStacks = sgInventory.add(new IntSetting.Builder()
+        .name("keep-trash-block-stacks")
+        .description("How many trash block stacks to keep before dropping the rest.")
+        .defaultValue(1)
+        .range(1, 10)
+        .sliderRange(1, 10)
         .build()
     );
 
@@ -566,6 +577,8 @@ public class HighwayBuilderTHM extends Module {
     private boolean suspended = true, inventory = true;
     private int placeTimer, breakTimer, count, syncId, statusLogTimer;
     private final RestockTask restockTask = new RestockTask(this);
+    private int invalidRestockRecoveryRetries;
+    private boolean invalidRestockRecoveryPending;
     private final ArrayList<EndCrystalEntity> ignoreCrystals = new ArrayList<>();
     public boolean drawingBow;
     public DoubleMineBlock normalMining, packetMining;
@@ -1015,13 +1028,13 @@ public class HighwayBuilderTHM extends Module {
             render(event, blockPosProvider.getLiquids(), mBlockPos -> canPlace(mBlockPos, true), false);
 
             if (railings.get()) {
-                render(event, blockPosProvider.getRailings(0, checkBehind.get()), mBlockPos -> canPlace(mBlockPos, false), false);
+                render(event, blockPosProvider.getRailings(0), mBlockPos -> canPlace(mBlockPos, false), false);
 
                 if (cornerBlock.get()) {
                     // make sure we only render corner support blocks if we are actually planning to place a block there
-                    render(event, blockPosProvider.getRailings(-1, checkBehind.get()), mBlockPos -> {
+                    render(event, blockPosProvider.getRailings(-1), mBlockPos -> {
                         boolean valid = false;
-                        for (MBlockPos pos : blockPosProvider.getRailings(0, checkBehind.get())) {
+                        for (MBlockPos pos : blockPosProvider.getRailings(0)) {
                             if (!blocksToPlace.get().contains(pos.getState().getBlock()) && pos.add(0, -1, 0).equals(mBlockPos)) {
                                 valid = true;
                                 break;
@@ -1033,7 +1046,7 @@ public class HighwayBuilderTHM extends Module {
                 }
             }
 
-            render(event, blockPosProvider.getFloor(checkBehind.get()), mBlockPos -> canPlace(mBlockPos, false), false);
+            render(event, blockPosProvider.getFloor(), mBlockPos -> canPlace(mBlockPos, false), false);
             if (state == State.PlaceEChestBlockade) render(event, blockPosProvider.getBlockade(false, blockadeType.get()), mBlockPos -> canPlace(mBlockPos, false), false);
         }
     }
@@ -1253,11 +1266,11 @@ public class HighwayBuilderTHM extends Module {
                 else if (b.floor.get() == Floor.Replace && needsToMine(b, b.blockPosProvider.getFloor(), false)) b.setState(MineFloor); // Mine Floor
                 else if (b.railings.get() && needsToMine(b, b.blockPosProvider.getRailings(0), false)) b.setState(MineRailings); // Mine Railings
                 else if (b.mineAboveRailings.get() && needsToMine(b, b.blockPosProvider.getRailings(1), true)) b.setState(MineAboveRailings); // Mine above railings
-                else if (b.railings.get() && needsToPlace(b, b.blockPosProvider.getRailings(0, b.checkBehind.get()), false)) {
-                    if (b.cornerBlock.get() && needsToPlace(b, b.blockPosProvider.getRailings(-1, b.checkBehind.get()), false)) b.setState(PlaceCornerBlock); // Place corner support block
+                else if (b.railings.get() && needsToPlace(b, b.blockPosProvider.getRailings(0), false)) {
+                    if (b.cornerBlock.get() && needsToPlace(b, b.blockPosProvider.getRailings(-1), false)) b.setState(PlaceCornerBlock); // Place corner support block
                     else b.setState(PlaceRailings); // Place Railings
                 }
-                else if (needsToPlace(b, b.blockPosProvider.getFloor(b.checkBehind.get()), false)) b.setState(PlaceFloor); // Place Floor
+                else if (needsToPlace(b, b.blockPosProvider.getFloor(), false)) b.setState(PlaceFloor); // Place Floor
             }
 
             private boolean needsToMine(HighwayBuilderTHM b, MBPIterator it, boolean mineBlocksToPlace) {
@@ -1438,7 +1451,7 @@ public class HighwayBuilderTHM extends Module {
                 int slot = findBlocksToPlacePrioritizeTrash(b);
                 if (slot == -1) return;
 
-                place(b, b.blockPosProvider.getRailings(-1, b.checkBehind.get()), slot, Forward);
+                place(b, b.blockPosProvider.getRailings(-1), slot, Forward);
             }
 
             @Override
@@ -1446,7 +1459,7 @@ public class HighwayBuilderTHM extends Module {
                 int slot = findBlocksToPlacePrioritizeTrash(b);
                 if (slot == -1) return;
 
-                place(b, b.blockPosProvider.getRailings(-1, b.checkBehind.get()), slot, Forward);
+                place(b, b.blockPosProvider.getRailings(-1), slot, Forward);
             }
         },
 
@@ -1456,7 +1469,7 @@ public class HighwayBuilderTHM extends Module {
                 int slot = findBlocksToPlace(b);
                 if (slot == -1) return;
 
-                place(b, b.blockPosProvider.getRailings(0, b.checkBehind.get()), slot, Forward);
+                place(b, b.blockPosProvider.getRailings(0), slot, Forward);
             }
 
             @Override
@@ -1464,7 +1477,7 @@ public class HighwayBuilderTHM extends Module {
                 int slot = findBlocksToPlace(b);
                 if (slot == -1) return;
 
-                place(b, b.blockPosProvider.getRailings(0, b.checkBehind.get()), slot, Forward);
+                place(b, b.blockPosProvider.getRailings(0), slot, Forward);
             }
         },
 
@@ -1474,7 +1487,7 @@ public class HighwayBuilderTHM extends Module {
                 int slot = findBlocksToPlace(b);
                 if (slot == -1) return;
 
-                place(b, b.blockPosProvider.getFloor(b.checkBehind.get()), slot, Forward);
+                place(b, b.blockPosProvider.getFloor(), slot, Forward);
             }
 
             @Override
@@ -1482,32 +1495,35 @@ public class HighwayBuilderTHM extends Module {
                 int slot = findBlocksToPlace(b);
                 if (slot == -1) return;
 
-                place(b, b.blockPosProvider.getFloor(b.checkBehind.get()), slot, Forward);
+                place(b, b.blockPosProvider.getFloor(), slot, Forward);
             }
         },
 
         ThrowOutTrash {
-            private int skipSlot;
+            private final Set<Integer> keepSlots = new HashSet<>();
             private boolean timerEnabled, firstTick, threwItems;
             private int timer;
             private static final ItemStack[] ITEMS = new ItemStack[27];
 
             @Override
             protected void start(HighwayBuilderTHM b) {
-                int biggestCount = 0;
+                keepSlots.clear();
+                List<Integer> trashBlockSlots = new ArrayList<>();
 
                 for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
                     ItemStack itemStack = b.mc.player.getInventory().getStack(i);
 
-                    if (itemStack.getItem() instanceof BlockItem && b.trashItems.get().contains(itemStack.getItem()) && itemStack.getCount() > biggestCount) {
-                        biggestCount = itemStack.getCount();
-                        skipSlot = i;
-
-                        if (biggestCount >= 64) break;
-                    }
+                    if (itemStack.getItem() instanceof BlockItem && b.trashItems.get().contains(itemStack.getItem())) trashBlockSlots.add(i);
                 }
 
-                if (biggestCount == 0) skipSlot = -1;
+                trashBlockSlots.sort((a, c) -> Integer.compare(
+                    b.mc.player.getInventory().getStack(c).getCount(),
+                    b.mc.player.getInventory().getStack(a).getCount()
+                ));
+
+                int keepCount = Math.min(b.keepTrashBlockStacks.get(), trashBlockSlots.size());
+                for (int i = 0; i < keepCount; i++) keepSlots.add(trashBlockSlots.get(i));
+
                 timerEnabled = false;
                 firstTick = true;
                 threwItems = false;
@@ -1536,9 +1552,10 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
-                    if (i == skipSlot) continue;
+                    if (keepSlots.contains(i)) continue;
 
                     ItemStack itemStack = b.mc.player.getInventory().getStack(i);
+                    if (itemStack.getItem() == Items.OBSIDIAN && !b.trashItems.get().contains(Items.OBSIDIAN)) continue;
 
                     if (b.trashItems.get().contains(itemStack.getItem())) {
                         InvUtils.drop().slot(i);
@@ -1561,6 +1578,24 @@ public class HighwayBuilderTHM extends Module {
                             if (stack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(stack.getItem())) {
                                 eject = false;
                                 break;
+                            }
+                        }
+
+                        if (eject) {
+                            // Redundant safety pass: before dropping, verify again that no useful items exist.
+                            for (ItemStack stack : ITEMS) {
+                                if (stack.getItem() instanceof BlockItem bi && (b.blocksToPlace.get().contains(bi.getBlock()) || (b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && bi == Items.ENDER_CHEST))) {
+                                    eject = false;
+                                    break;
+                                }
+                                if (stack.isIn(ItemTags.PICKAXES)) {
+                                    eject = false;
+                                    break;
+                                }
+                                if (stack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(stack.getItem())) {
+                                    eject = false;
+                                    break;
+                                }
                             }
                         }
 
@@ -1764,8 +1799,10 @@ public class HighwayBuilderTHM extends Module {
         Restock {
             private static final MBlockPos pos = new MBlockPos();
             private static final ItemStack[] ITEMS = new ItemStack[27];
+            private static final int INVALID_RESTOCK_RECOVERY_MAX_RETRIES = 1;
             private int minimumSlots, stopTimer, delayTimer;
             private boolean breakContainer, indicateStopping;
+            private int restockPickaxesStartCount;
             private Predicate<ItemStack> shulkerPredicate;
 
             // if this is ever not -1 when we expect it to be, things break a lot
@@ -1773,6 +1810,11 @@ public class HighwayBuilderTHM extends Module {
 
             @Override
             protected void start(HighwayBuilderTHM b) {
+                if (b.lastState != this) {
+                    restockPickaxesStartCount = countItem(b, itemStack -> itemStack.isIn(ItemTags.PICKAXES));
+                    b.invalidRestockRecoveryRetries = 0;
+                    b.invalidRestockRecoveryPending = false;
+                }
                 slot = -1; // :ptsd:
 
                 // set the predicate to test for shulker boxes
@@ -1836,7 +1878,7 @@ public class HighwayBuilderTHM extends Module {
                 if (slot == -1) {
                     boolean restockOccurred = (
                         (b.restockTask.materials && (hasItem(b, stack -> stack.getItem() instanceof BlockItem bi && b.blocksToPlace.get().contains(bi.getBlock())) || b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && countItem(b, itemStack -> itemStack.getItem() == Items.ENDER_CHEST) > b.saveEchests.get())) ||
-                            (b.restockTask.pickaxes && countItem(b, itemStack -> itemStack.isIn(ItemTags.PICKAXES)) > b.savePickaxes.get()) ||
+                            (b.restockTask.pickaxes && countItem(b, itemStack -> itemStack.isIn(ItemTags.PICKAXES)) > restockPickaxesStartCount) ||
                             (b.restockTask.food && hasItem(b, itemStack -> itemStack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(itemStack.getItem())))
                     );
 
@@ -1847,17 +1889,28 @@ public class HighwayBuilderTHM extends Module {
                     return;
                 }
 
-                int restockSlots = -b.minEmpty.get();
+                int emptySlots = 0;
                 for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
-                    if (b.mc.player.getInventory().getStack(i).isEmpty()) restockSlots++;
+                    if (b.mc.player.getInventory().getStack(i).isEmpty()) emptySlots++;
                 }
 
-                if (restockSlots <= 0) {
-                    b.error("No empty slots for restocking items.");
-                    return;
-                }
+                if (b.restockTask.pickaxes) {
+                    int pickaxeRestockSlots = emptySlots - 1;
+                    if (pickaxeRestockSlots <= 0) {
+                        b.error("Not enough empty slots to restock pickaxes.");
+                        return;
+                    }
 
-                minimumSlots = b.restockTask.materials ? restockSlots : 1;
+                    minimumSlots = Math.min(pickaxeRestockSlots, b.restockPickaxesAmount.get());
+                } else {
+                    int restockSlots = emptySlots - b.minEmpty.get();
+                    if (restockSlots <= 0) {
+                        b.error("No empty slots for restocking items.");
+                        return;
+                    }
+
+                    minimumSlots = b.restockTask.materials ? restockSlots : 1;
+                }
 
                 HorizontalDirection dir = b.dir.diagonal ? b.dir.rotateLeft().rotateLeftSkipOne() : b.dir.opposite();
                 pos.set(b.mc.player).offset(dir);
@@ -1910,7 +1963,10 @@ public class HighwayBuilderTHM extends Module {
                     slotsPulled += countSlots(b, itemStack -> itemStack.getItem() instanceof BlockItem bi && b.blocksToPlace.get().contains(bi.getBlock()));
                     if (b.blocksToPlace.get().contains(Blocks.OBSIDIAN)) slotsPulled += ((countItem(b, itemStack -> itemStack.getItem() == Items.ENDER_CHEST) - b.saveEchests.get()) * 8) / 64;
                 }
-                if (b.restockTask.pickaxes) slotsPulled += countSlots(b, itemStack -> itemStack.isIn(ItemTags.PICKAXES)) - b.savePickaxes.get();
+                if (b.restockTask.pickaxes) {
+                    int pickaxesPulled = countItem(b, itemStack -> itemStack.isIn(ItemTags.PICKAXES)) - restockPickaxesStartCount;
+                    slotsPulled += Math.max(pickaxesPulled, 0);
+                }
                 if (b.restockTask.food) slotsPulled += countSlots(b, itemStack -> itemStack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(itemStack.getItem()));
                 // whether we have pulled the minimum amount of items we want
                 if (slotsPulled >= minimumSlots && !indicateStopping) {
@@ -2006,8 +2062,21 @@ public class HighwayBuilderTHM extends Module {
                     }
 
                     // the only valid blocks should be air, a shulker box, or an ender chest
-                    // if there is another type of block, assume something has gone wrong and error out (e.g. lava flowed in)
-                    default -> b.error("Invalid block at container restocking position?");
+                    // if there is another type of block, attempt one full recovery:
+                    // break invalid block -> mine blockade -> retry full restock
+                    default -> {
+                        if (b.invalidRestockRecoveryRetries < INVALID_RESTOCK_RECOVERY_MAX_RETRIES) {
+                            b.invalidRestockRecoveryRetries++;
+                            b.invalidRestockRecoveryPending = true;
+                            b.warning("Invalid block at container restocking position. Recovery attempt (" + b.invalidRestockRecoveryRetries + "/" + INVALID_RESTOCK_RECOVERY_MAX_RETRIES + ").");
+
+                            breakContainer = true;
+                            handleContainerBlock(b, blockPos);
+                            b.setState(MineShulkerBlockade, this);
+                        } else {
+                            b.error("Invalid block at container restocking position after recovery retry.");
+                        }
+                    }
                 }
             }
 
@@ -2125,7 +2194,12 @@ public class HighwayBuilderTHM extends Module {
                 else {
                     stopTimer--;
                     if (stopTimer <= 0) {
-                        b.setState(ThrowOutTrash, Forward);
+                        if (b.invalidRestockRecoveryPending) {
+                            b.invalidRestockRecoveryPending = false;
+                            b.setState(Restock, Restock);
+                        } else {
+                            b.setState(ThrowOutTrash, Forward);
+                        }
                     }
                 }
             }
@@ -2636,64 +2710,9 @@ public class HighwayBuilderTHM extends Module {
         }
     }
 
-    private static class MBPIteratorChain implements MBPIterator {
-        private final MBPIterator first;
-        private final Supplier<MBPIterator> secondFactory;
-        private MBPIterator second;
-        private boolean usingFirst = true;
-        private boolean previousUsingFirst = true;
-
-        public MBPIteratorChain(MBPIterator first, Supplier<MBPIterator> secondFactory) {
-            this.first = first;
-            this.secondFactory = secondFactory;
-        }
-
-        private MBPIterator second() {
-            if (second == null) second = secondFactory.get();
-            return second;
-        }
-
-        @Override
-        public void save() {
-            first.save();
-            if (second != null) second.save();
-            previousUsingFirst = usingFirst;
-            usingFirst = true;
-        }
-
-        @Override
-        public void restore() {
-            first.restore();
-            if (second != null) second.restore();
-            usingFirst = previousUsingFirst;
-        }
-
-        @Override
-        public boolean hasNext() {
-            if (usingFirst) {
-                if (first.hasNext()) return true;
-                usingFirst = false;
-            }
-
-            return second().hasNext();
-        }
-
-        @Override
-        public MBlockPos next() {
-            if (usingFirst && !first.hasNext()) usingFirst = false;
-            return usingFirst ? first.next() : second().next();
-        }
-
-        @Override
-        public int placementsPerTick(HighwayBuilderTHM b) {
-            return first.placementsPerTick(b);
-        }
-    }
-
     private interface IBlockPosProvider {
         MBPIterator getFront();
         MBPIterator getFloor();
-        MBPIterator getFloor(boolean includeBehind);
 
         /**
          * state:
@@ -2702,7 +2721,6 @@ public class HighwayBuilderTHM extends Module {
          *  -1 for the block under the railings
          */
         MBPIterator getRailings(int state);
-        MBPIterator getRailings(int state, boolean includeBehind);
 
         MBPIterator getLiquids();
         MBPIterator getBlockade(boolean mine, BlockadeType type);
@@ -2785,45 +2803,6 @@ public class HighwayBuilderTHM extends Module {
         }
 
         @Override
-        public MBPIterator getFloor(boolean includeBehind) {
-            if (!includeBehind) return getFloor();
-            return new MBPIteratorChain(getFloor(), this::getFloorBehind);
-        }
-
-        private MBPIterator getFloorBehind() {
-            HorizontalDirection backward = dir.opposite();
-            HorizontalDirection backwardLeft = backward.rotateLeftSkipOne();
-            HorizontalDirection backwardRight = backwardLeft.opposite();
-            pos.coerceBlockLevel(mc.player).offset(backward).offset(backwardLeft, getWidthLeft()).add(0, -1, 0);
-
-            return new MBPIterator() {
-                private int w;
-                private int pw;
-
-                @Override
-                public boolean hasNext() {
-                    return w < width.get();
-                }
-
-                @Override
-                public MBlockPos next() {
-                    return pos2.set(pos).offset(backwardRight, w++);
-                }
-
-                @Override
-                public void save() {
-                    pw = w;
-                    w = 0;
-                }
-
-                @Override
-                public void restore() {
-                    w = pw;
-                }
-            };
-        }
-
-        @Override
         public MBPIterator getRailings(int state) {
             pos.coerceBlockLevel(mc.player).offset(dir);
 
@@ -2843,57 +2822,6 @@ public class HighwayBuilderTHM extends Module {
                 public MBlockPos next() {
                     if (i == 0) pos2.set(pos).offset(leftDir, getWidthLeft() + 1).add(0, y, 0);
                     else pos2.set(pos).offset(rightDir, getWidthRight() + 1).add(0, y, 0);
-
-                    y++;
-                    if (y >= (state == 1 ? height.get() : state + 1)) {
-                        y = state;
-                        i++;
-                    }
-
-                    return pos2;
-                }
-
-                @Override
-                public void save() {
-                    pi = i;
-                    py = y;
-                    i = 0;
-                    y = state;
-                }
-
-                @Override
-                public void restore() {
-                    i = pi;
-                    y = py;
-                }
-            };
-        }
-
-        @Override
-        public MBPIterator getRailings(int state, boolean includeBehind) {
-            if (!includeBehind) return getRailings(state);
-            return new MBPIteratorChain(getRailings(state), () -> getRailingsBehind(state));
-        }
-
-        private MBPIterator getRailingsBehind(int state) {
-            HorizontalDirection backward = dir.opposite();
-            HorizontalDirection backwardLeft = backward.rotateLeftSkipOne();
-            HorizontalDirection backwardRight = backwardLeft.opposite();
-            pos.coerceBlockLevel(mc.player).offset(backward);
-
-            return new MBPIterator() {
-                private int i, y = state;
-                private int pi, py;
-
-                @Override
-                public boolean hasNext() {
-                    return i < 2 && y < (state == 1 ? height.get() : state + 1);
-                }
-
-                @Override
-                public MBlockPos next() {
-                    if (i == 0) pos2.set(pos).offset(backwardLeft, getWidthLeft() + 1).add(0, y, 0);
-                    else pos2.set(pos).offset(backwardRight, getWidthRight() + 1).add(0, y, 0);
 
                     y++;
                     if (y >= (state == 1 ? height.get() : state + 1)) {
@@ -3140,64 +3068,6 @@ public class HighwayBuilderTHM extends Module {
         }
 
         @Override
-        public MBPIterator getFloor(boolean includeBehind) {
-            if (!includeBehind) return getFloor();
-            return new MBPIteratorChain(getFloor(), this::getFloorBehind);
-        }
-
-        private MBPIterator getFloorBehind() {
-            HorizontalDirection backward = dir.opposite();
-            HorizontalDirection backwardLeft = backward.rotateLeftSkipOne();
-            HorizontalDirection backwardRight = backwardLeft.opposite();
-            pos.coerceBlockLevel(mc.player).add(0, -1, 0).offset(backward.rotateLeft()).offset(backwardLeft, getWidthLeft() - 1);
-
-            return new MBPIterator() {
-                private int i, w;
-                private int pi, pw;
-
-                @Override
-                public boolean hasNext() {
-                    return i < 2 && w < width.get();
-                }
-
-                @Override
-                public MBlockPos next() {
-                    pos2.set(pos).offset(backwardRight, w++);
-
-                    if (w >= (i == 0 ? width.get() - 1 : width.get())) {
-                        w = 0;
-                        i++;
-
-                        pos.coerceBlockLevel(mc.player).add(0, -1, 0).offset(backward).offset(backwardLeft, getWidthLeft());
-                    }
-                    return pos2;
-                }
-
-                private void initPos() {
-                    if (i == 0) pos.coerceBlockLevel(mc.player).add(0, -1, 0).offset(backward.rotateLeft()).offset(backwardLeft, getWidthLeft() - 1);
-                    else pos.coerceBlockLevel(mc.player).add(0, -1, 0).offset(backward).offset(backwardLeft, getWidthLeft());
-                }
-
-                @Override
-                public void save() {
-                    pi = i;
-                    pw = w;
-                    i = w = 0;
-
-                    initPos();
-                }
-
-                @Override
-                public void restore() {
-                    i = pi;
-                    w = pw;
-
-                    initPos();
-                }
-            };
-        }
-
-        @Override
         public MBPIterator getRailings(int state) {
             pos.coerceBlockLevel(mc.player).offset(dir.rotateLeft()).offset(leftDir, getWidthLeft());
 
@@ -3227,66 +3097,6 @@ public class HighwayBuilderTHM extends Module {
                 private void initPos() {
                     if (i == 0) pos.coerceBlockLevel(mc.player).offset(dir.rotateLeft()).offset(leftDir, getWidthLeft());
                     else pos.coerceBlockLevel(mc.player).offset(dir.rotateRight()).offset(rightDir, getWidthRight());
-                }
-
-                @Override
-                public void save() {
-                    pi = i;
-                    py = y;
-                    i = 0;
-                    y = state;
-
-                    initPos();
-                }
-
-                @Override
-                public void restore() {
-                    i = pi;
-                    y = py;
-
-                    initPos();
-                }
-            };
-        }
-
-        @Override
-        public MBPIterator getRailings(int state, boolean includeBehind) {
-            if (!includeBehind) return getRailings(state);
-            return new MBPIteratorChain(getRailings(state), () -> getRailingsBehind(state));
-        }
-
-        private MBPIterator getRailingsBehind(int state) {
-            HorizontalDirection backward = dir.opposite();
-            HorizontalDirection backwardLeft = backward.rotateLeftSkipOne();
-            HorizontalDirection backwardRight = backwardLeft.opposite();
-            pos.coerceBlockLevel(mc.player).offset(backward.rotateLeft()).offset(backwardLeft, getWidthLeft());
-
-            return new MBPIterator() {
-                private int i, y = state;
-                private int pi, py;
-
-                @Override
-                public boolean hasNext() {
-                    return i < 2 && y < (state == 1 ? height.get() : state + 1);
-                }
-
-                @Override
-                public MBlockPos next() {
-                    pos2.set(pos).add(0, y++, 0);
-
-                    if (y >= (state == 1 ? height.get() : state + 1)) {
-                        y = state;
-                        i++;
-
-                        pos.coerceBlockLevel(mc.player).offset(backward.rotateRight()).offset(backwardRight, getWidthRight());
-                    }
-
-                    return pos2;
-                }
-
-                private void initPos() {
-                    if (i == 0) pos.coerceBlockLevel(mc.player).offset(backward.rotateLeft()).offset(backwardLeft, getWidthLeft());
-                    else pos.coerceBlockLevel(mc.player).offset(backward.rotateRight()).offset(backwardRight, getWidthRight());
                 }
 
                 @Override
