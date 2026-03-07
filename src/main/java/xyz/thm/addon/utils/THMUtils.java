@@ -11,12 +11,26 @@ import net.minecraft.world.Difficulty;
 import org.jetbrains.annotations.Nullable;
 import xyz.thm.addon.THMAddon;
 
+import java.awt.*;
+import java.awt.image.BufferedImage;
+import java.io.InputStream;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.Locale;
+import javax.imageio.ImageIO;
+
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 import static meteordevelopment.meteorclient.utils.world.BlockUtils.canPlace;
 
 
 public class THMUtils {
     private THMUtils() {}
+    private static TrayIcon trayIcon;
+    private static boolean trayInitialized;
+    private static Image notificationImage;
+    private static String notificationIconPath;
 
     // Block Pos
 
@@ -82,7 +96,159 @@ public class THMUtils {
         return -1;
     }
 
-    // TODO: Add toast notifications system (reference Baritone?)
+    public static void Notify(String heading, String description) {
+        String title = (heading == null || heading.isBlank()) ? "THM Addon" : heading;
+        String body = description == null ? "" : description;
+
+        try {
+            initSystemTray();
+            if (trayIcon != null) {
+                trayIcon.displayMessage(title, body, TrayIcon.MessageType.NONE);
+                return;
+            }
+        } catch (Throwable t) {
+            THMAddon.LOG.warn("Desktop notification failed: {}", t.getMessage());
+        }
+
+        if (sendNativeNotification(title, body)) return;
+
+        THMAddon.LOG.info("[Notify] {} - {}", title, body);
+    }
+
+    private static boolean sendNativeNotification(String title, String body) {
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+
+        if (os.contains("win")) return sendWindowsNotification(title, body);
+        if (os.contains("linux")) return sendLinuxNotification(title, body);
+        if (os.contains("mac")) return sendMacNotification(title, body);
+
+        return false;
+    }
+
+    private static boolean sendLinuxNotification(String title, String body) {
+        String iconPath = getNotificationIconPath();
+
+        if (iconPath != null && runCommand("notify-send", "-i", iconPath, title, body)) return true;
+        if (runCommand("notify-send", title, body)) return true;
+
+        if (iconPath != null && runCommand("zenity", "--notification", "--window-icon=" + iconPath, "--text=" + title + " - " + body)) return true;
+        if (runCommand("zenity", "--notification", "--text=" + title + " - " + body)) return true;
+
+        if (iconPath != null && runCommand("kdialog", "--title", title, "--icon", iconPath, "--passivepopup", body, "5")) return true;
+        return runCommand("kdialog", "--title", title, "--passivepopup", body, "5");
+    }
+
+    private static boolean sendWindowsNotification(String title, String body) {
+        String script = buildWindowsToastScript(title, body);
+        if (runCommand("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)) return true;
+        return runCommand("pwsh", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script);
+    }
+
+    private static boolean sendMacNotification(String title, String body) {
+        String escapedTitle = escapeAppleScript(title);
+        String escapedBody = escapeAppleScript(body);
+        return runCommand("osascript", "-e", "display notification \"" + escapedBody + "\" with title \"" + escapedTitle + "\"");
+    }
+
+    private static String buildWindowsToastScript(String title, String body) {
+        String escapedTitle = escapePowerShell(title);
+        String escapedBody = escapePowerShell(body);
+
+        return "$title='" + escapedTitle + "';" +
+            "$body='" + escapedBody + "';" +
+            "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null;" +
+            "$template=[Windows.UI.Notifications.ToastTemplateType]::ToastText02;" +
+            "$xml=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent($template);" +
+            "$xml.GetElementsByTagName('text').Item(0).AppendChild($xml.CreateTextNode($title)) > $null;" +
+            "$xml.GetElementsByTagName('text').Item(1).AppendChild($xml.CreateTextNode($body)) > $null;" +
+            "$toast=[Windows.UI.Notifications.ToastNotification]::new($xml);" +
+            "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('THM Addon').Show($toast);";
+    }
+
+    private static String escapePowerShell(String s) {
+        return s.replace("'", "''");
+    }
+
+    private static String escapeAppleScript(String s) {
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private static boolean runCommand(String... command) {
+        try {
+            Process process = new ProcessBuilder(command).start();
+            int exitCode = process.waitFor();
+            return exitCode == 0;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static void initSystemTray() {
+        if (trayInitialized) return;
+        trayInitialized = true;
+
+        if (!SystemTray.isSupported()) return;
+
+        try {
+            Image image = getNotificationImage();
+            if (image == null) return;
+
+            trayIcon = new TrayIcon(image, "THM Addon");
+            trayIcon.setImageAutoSize(true);
+            SystemTray.getSystemTray().add(trayIcon);
+        } catch (Throwable t) {
+            trayIcon = null;
+            THMAddon.LOG.warn("Unable to initialize system tray notifications: {}", t.getMessage());
+        }
+    }
+
+    private static Image getNotificationImage() {
+        if (notificationImage != null) return notificationImage;
+
+        try (InputStream input = THMUtils.class.getClassLoader().getResourceAsStream("assets/icon/icon.png")) {
+            if (input != null) {
+                notificationImage = ImageIO.read(input);
+                if (notificationImage != null) return notificationImage;
+            }
+        } catch (Throwable ignored) {
+            // Falls back to generated placeholder icon below.
+        }
+
+        BufferedImage fallback = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = fallback.createGraphics();
+        g.setColor(new java.awt.Color(41, 128, 185));
+        g.fillRect(0, 0, 16, 16);
+        g.setColor(java.awt.Color.WHITE);
+        g.fillRect(4, 4, 8, 8);
+        g.dispose();
+        notificationImage = fallback;
+        return notificationImage;
+    }
+
+    private static String getNotificationIconPath() {
+        if (notificationIconPath != null) return notificationIconPath;
+
+        try {
+            URL resource = THMUtils.class.getClassLoader().getResource("assets/icon/icon.png");
+            if (resource == null) return null;
+
+            if ("file".equalsIgnoreCase(resource.getProtocol())) {
+                notificationIconPath = Path.of(resource.toURI()).toAbsolutePath().toString();
+                return notificationIconPath;
+            }
+
+            try (InputStream in = resource.openStream()) {
+                Path tempIcon = Files.createTempFile("thm-notify-icon-", ".png");
+                Files.copy(in, tempIcon, StandardCopyOption.REPLACE_EXISTING);
+                tempIcon.toFile().deleteOnExit();
+                notificationIconPath = tempIcon.toAbsolutePath().toString();
+                return notificationIconPath;
+            }
+        } catch (Throwable t) {
+            THMAddon.LOG.warn("Unable to resolve notification icon path: {}", t.getMessage());
+            return null;
+        }
+    }
 
     public static boolean isNot6B6T() {
         assert mc.world != null;

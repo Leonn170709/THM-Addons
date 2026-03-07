@@ -125,9 +125,10 @@ public class HighwayBuilderTHM extends Module {
     private final SettingGroup sgDigging = settings.createGroup("Digging");
     private final SettingGroup sgPaving = settings.createGroup("Paving");
     private final SettingGroup sgInventory = settings.createGroup("Inventory");
+    private final SettingGroup sgStatistics = settings.createGroup("Logging");
+    private final SettingGroup sgNotifies = settings.createGroup("Notifies");
     private final SettingGroup sgRenderDigging = settings.createGroup("Render Digging");
     private final SettingGroup sgRenderPaving = settings.createGroup("Render Paving");
-    private final SettingGroup sgStatistics = settings.createGroup("Logging");
 
     public final Setting<Integer> width = sgGeneral.add(new IntSetting.Builder()
         .name("width")
@@ -265,6 +266,16 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+    private final Setting<Integer> restockPickaxesAmount = sgDigging.add(new IntSetting.Builder()
+        .name("restock-pickaxes-amount")
+        .description("How many pickaxes to pull per pickaxe restock task.")
+        .defaultValue(1)
+        .range(1, 36)
+        .sliderRange(1, 9)
+        .visible(() -> !dontBreakTools.get())
+        .build()
+    );
+
     private final Setting<Integer> breakDelay = sgDigging.add(new IntSetting.Builder()
         .name("break-delay")
         .description("The delay between breaking blocks.")
@@ -333,6 +344,15 @@ public class HighwayBuilderTHM extends Module {
             Items.GLOWSTONE, Items.BLACKSTONE, Items.BASALT, Items.GHAST_TEAR, Items.SOUL_SAND, Items.SOUL_SOIL,
             Items.ROTTEN_FLESH, Items.MAGMA_BLOCK
         )
+        .build()
+    );
+
+    private final Setting<Integer> keepTrashBlockStacks = sgInventory.add(new IntSetting.Builder()
+        .name("keep-trash-block-stacks")
+        .description("How many trash block stacks to keep before dropping the rest.")
+        .defaultValue(1)
+        .range(1, 10)
+        .sliderRange(1, 10)
         .build()
     );
 
@@ -538,6 +558,45 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+    private final Setting<Boolean> desktopNotifies = sgNotifies.add(new BoolSetting.Builder()
+        .name("desktop-notifies")
+        .description("Sends desktop notifications while Highway Builder is running.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> notifyDisconnect = sgNotifies.add(new BoolSetting.Builder()
+        .name("disconnect")
+        .description("Notify when Highway Builder disconnects you.")
+        .defaultValue(true)
+        .visible(desktopNotifies::get)
+        .build()
+    );
+
+    private final Setting<Boolean> notifyRestockIssues = sgNotifies.add(new BoolSetting.Builder()
+        .name("restock-issues")
+        .description("Notify when restocking fails (materials, slots, or restock container issues).")
+        .defaultValue(true)
+        .visible(desktopNotifies::get)
+        .build()
+    );
+
+    private final Setting<Boolean> notifyOutOfBlocks = sgNotifies.add(new BoolSetting.Builder()
+        .name("out-of-blocks")
+        .description("Notify when there are no placeable blocks left.")
+        .defaultValue(true)
+        .visible(desktopNotifies::get)
+        .build()
+    );
+
+    private final Setting<Boolean> notifyPickaxeShortage = sgNotifies.add(new BoolSetting.Builder()
+        .name("pickaxe-shortage")
+        .description("Notify when there are not enough pickaxes to continue.")
+        .defaultValue(true)
+        .visible(desktopNotifies::get)
+        .build()
+    );
+
     public final Setting<Boolean> togglePerspective = sgGeneral.add(new BoolSetting.Builder()
         .name("toggle-perspective")
         .description("Changes your perspective on toggle.")
@@ -566,6 +625,8 @@ public class HighwayBuilderTHM extends Module {
     private boolean suspended = true, inventory = true;
     private int placeTimer, breakTimer, count, syncId, statusLogTimer;
     private final RestockTask restockTask = new RestockTask(this);
+    private int invalidRestockRecoveryRetries;
+    private boolean invalidRestockRecoveryPending;
     private final ArrayList<EndCrystalEntity> ignoreCrystals = new ArrayList<>();
     public boolean drawingBow;
     public DoubleMineBlock normalMining, packetMining;
@@ -987,6 +1048,7 @@ public class HighwayBuilderTHM extends Module {
 
     @EventHandler
     private void onGameLeave(GameLeftEvent event) {
+        notifyDesktop(notifyDisconnect, "THM Highway Builder", "Disconnected while Highway Builder was active.");
         suspended = true;
         inventory = false;
     }
@@ -1116,6 +1178,8 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private void disconnect(String message, Object... args) {
+        notifyDesktop(notifyDisconnect, "THM Highway Builder", "Disconnected: " + String.format(message, args));
+
         MutableText text = Text.literal("[")
         .styled(style -> style.withColor(Formatting.WHITE))
         .append(Text.literal(title).styled(style -> style.withColor(Formatting.BLUE)))
@@ -1137,6 +1201,11 @@ public class HighwayBuilderTHM extends Module {
         }
 
         return text;
+    }
+
+    private void notifyDesktop(Setting<Boolean> eventToggle, String heading, String description) {
+        if (!desktopNotifies.get() || !eventToggle.get()) return;
+        Notify(heading, description);
     }
 
     private void tickDoubleMine() {
@@ -1487,27 +1556,30 @@ public class HighwayBuilderTHM extends Module {
         },
 
         ThrowOutTrash {
-            private int skipSlot;
+            private final Set<Integer> keepSlots = new HashSet<>();
             private boolean timerEnabled, firstTick, threwItems;
             private int timer;
             private static final ItemStack[] ITEMS = new ItemStack[27];
 
             @Override
             protected void start(HighwayBuilderTHM b) {
-                int biggestCount = 0;
+                keepSlots.clear();
+                List<Integer> trashBlockSlots = new ArrayList<>();
 
                 for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
                     ItemStack itemStack = b.mc.player.getInventory().getStack(i);
 
-                    if (itemStack.getItem() instanceof BlockItem && b.trashItems.get().contains(itemStack.getItem()) && itemStack.getCount() > biggestCount) {
-                        biggestCount = itemStack.getCount();
-                        skipSlot = i;
-
-                        if (biggestCount >= 64) break;
-                    }
+                    if (itemStack.getItem() instanceof BlockItem && b.trashItems.get().contains(itemStack.getItem())) trashBlockSlots.add(i);
                 }
 
-                if (biggestCount == 0) skipSlot = -1;
+                trashBlockSlots.sort((a, c) -> Integer.compare(
+                    b.mc.player.getInventory().getStack(c).getCount(),
+                    b.mc.player.getInventory().getStack(a).getCount()
+                ));
+
+                int keepCount = Math.min(b.keepTrashBlockStacks.get(), trashBlockSlots.size());
+                for (int i = 0; i < keepCount; i++) keepSlots.add(trashBlockSlots.get(i));
+
                 timerEnabled = false;
                 firstTick = true;
                 threwItems = false;
@@ -1536,9 +1608,10 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
-                    if (i == skipSlot) continue;
+                    if (keepSlots.contains(i)) continue;
 
                     ItemStack itemStack = b.mc.player.getInventory().getStack(i);
+                    if (itemStack.getItem() == Items.OBSIDIAN && !b.trashItems.get().contains(Items.OBSIDIAN)) continue;
 
                     if (b.trashItems.get().contains(itemStack.getItem())) {
                         InvUtils.drop().slot(i);
@@ -1561,6 +1634,24 @@ public class HighwayBuilderTHM extends Module {
                             if (stack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(stack.getItem())) {
                                 eject = false;
                                 break;
+                            }
+                        }
+
+                        if (eject) {
+                            // Redundant safety pass: before dropping, verify again that no useful items exist.
+                            for (ItemStack stack : ITEMS) {
+                                if (stack.getItem() instanceof BlockItem bi && (b.blocksToPlace.get().contains(bi.getBlock()) || (b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && bi == Items.ENDER_CHEST))) {
+                                    eject = false;
+                                    break;
+                                }
+                                if (stack.isIn(ItemTags.PICKAXES)) {
+                                    eject = false;
+                                    break;
+                                }
+                                if (stack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(stack.getItem())) {
+                                    eject = false;
+                                    break;
+                                }
                             }
                         }
 
@@ -1622,6 +1713,7 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 if (emptySlots == 0) {
+                    b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", "No empty inventory slots to continue e-chest mining.");
                     b.error("No empty slots.");
                     return;
                 }
@@ -1764,8 +1856,10 @@ public class HighwayBuilderTHM extends Module {
         Restock {
             private static final MBlockPos pos = new MBlockPos();
             private static final ItemStack[] ITEMS = new ItemStack[27];
+            private static final int INVALID_RESTOCK_RECOVERY_MAX_RETRIES = 1;
             private int minimumSlots, stopTimer, delayTimer;
             private boolean breakContainer, indicateStopping;
+            private int restockPickaxesStartCount;
             private Predicate<ItemStack> shulkerPredicate;
 
             // if this is ever not -1 when we expect it to be, things break a lot
@@ -1773,6 +1867,12 @@ public class HighwayBuilderTHM extends Module {
 
             @Override
             protected void start(HighwayBuilderTHM b) {
+                if (b.lastState != this) {
+                    restockPickaxesStartCount = countItem(b, itemStack -> itemStack.isIn(ItemTags.PICKAXES));
+                    b.invalidRestockRecoveryRetries = 0;
+                    b.invalidRestockRecoveryPending = false;
+                }
+
                 slot = -1; // :ptsd:
 
                 // set the predicate to test for shulker boxes
@@ -1836,28 +1936,45 @@ public class HighwayBuilderTHM extends Module {
                 if (slot == -1) {
                     boolean restockOccurred = (
                         (b.restockTask.materials && (hasItem(b, stack -> stack.getItem() instanceof BlockItem bi && b.blocksToPlace.get().contains(bi.getBlock())) || b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && countItem(b, itemStack -> itemStack.getItem() == Items.ENDER_CHEST) > b.saveEchests.get())) ||
-                            (b.restockTask.pickaxes && countItem(b, itemStack -> itemStack.isIn(ItemTags.PICKAXES)) > b.savePickaxes.get()) ||
+                            (b.restockTask.pickaxes && countItem(b, itemStack -> itemStack.isIn(ItemTags.PICKAXES)) > restockPickaxesStartCount) ||
                             (b.restockTask.food && hasItem(b, itemStack -> itemStack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(itemStack.getItem())))
                     );
 
                     if (restockOccurred) {
                         b.setState(ThrowOutTrash, Forward);
-                    } else b.error("Unable to perform restock for '" + b.restockTask.item() + "'.");
+                    } else {
+                        b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", "Unable to perform restock for '" + b.restockTask.item() + "'.");
+                        b.error("Unable to perform restock for '" + b.restockTask.item() + "'.");
+                    }
 
                     return;
                 }
 
-                int restockSlots = -b.minEmpty.get();
+                int emptySlots = 0;
                 for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
-                    if (b.mc.player.getInventory().getStack(i).isEmpty()) restockSlots++;
+                    if (b.mc.player.getInventory().getStack(i).isEmpty()) emptySlots++;
                 }
 
-                if (restockSlots <= 0) {
-                    b.error("No empty slots for restocking items.");
-                    return;
-                }
+                if (b.restockTask.pickaxes) {
+                    int pickaxeRestockSlots = emptySlots - 1;
+                    if (pickaxeRestockSlots <= 0) {
+                        b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", "Not enough empty slots to restock pickaxes.");
+                        b.error("Not enough empty slots to restock pickaxes.");
+                        return;
+                    }
 
-                minimumSlots = b.restockTask.materials ? restockSlots : 1;
+                    minimumSlots = Math.min(pickaxeRestockSlots, b.restockPickaxesAmount.get());
+                }
+                else {
+                    int restockSlots = emptySlots - b.minEmpty.get();
+                    if (restockSlots <= 0) {
+                        b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", "No empty slots available for restocking items.");
+                        b.error("No empty slots for restocking items.");
+                        return;
+                    }
+
+                    minimumSlots = b.restockTask.materials ? restockSlots : 1;
+                }
 
                 HorizontalDirection dir = b.dir.diagonal ? b.dir.rotateLeft().rotateLeftSkipOne() : b.dir.opposite();
                 pos.set(b.mc.player).offset(dir);
@@ -1876,6 +1993,7 @@ public class HighwayBuilderTHM extends Module {
             protected void tick(HighwayBuilderTHM b) {
                 // this should only tick if there's a valid slot we can restock from
                 if (slot == -1) {
+                    b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", "Invalid restocking action.");
                     b.error("Invalid restocking action.");
                     return;
                 }
@@ -1910,7 +2028,10 @@ public class HighwayBuilderTHM extends Module {
                     slotsPulled += countSlots(b, itemStack -> itemStack.getItem() instanceof BlockItem bi && b.blocksToPlace.get().contains(bi.getBlock()));
                     if (b.blocksToPlace.get().contains(Blocks.OBSIDIAN)) slotsPulled += ((countItem(b, itemStack -> itemStack.getItem() == Items.ENDER_CHEST) - b.saveEchests.get()) * 8) / 64;
                 }
-                if (b.restockTask.pickaxes) slotsPulled += countSlots(b, itemStack -> itemStack.isIn(ItemTags.PICKAXES)) - b.savePickaxes.get();
+                if (b.restockTask.pickaxes) {
+                    int pickaxesPulled = countItem(b, itemStack -> itemStack.isIn(ItemTags.PICKAXES)) - restockPickaxesStartCount;
+                    slotsPulled += Math.max(pickaxesPulled, 0);
+                }
                 if (b.restockTask.food) slotsPulled += countSlots(b, itemStack -> itemStack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(itemStack.getItem()));
                 // whether we have pulled the minimum amount of items we want
                 if (slotsPulled >= minimumSlots && !indicateStopping) {
@@ -2006,8 +2127,22 @@ public class HighwayBuilderTHM extends Module {
                     }
 
                     // the only valid blocks should be air, a shulker box, or an ender chest
-                    // if there is another type of block, assume something has gone wrong and error out (e.g. lava flowed in)
-                    default -> b.error("Invalid block at container restocking position?");
+                    // if there is another type of block, attempt one full recovery:
+                    // break invalid block -> mine blockade -> retry full restock
+                    default -> {
+                        if (b.invalidRestockRecoveryRetries < INVALID_RESTOCK_RECOVERY_MAX_RETRIES) {
+                            b.invalidRestockRecoveryRetries++;
+                            b.invalidRestockRecoveryPending = true;
+                            b.warning("Invalid block at container restocking position. Recovery attempt (" + b.invalidRestockRecoveryRetries + "/" + INVALID_RESTOCK_RECOVERY_MAX_RETRIES + ").");
+
+                            breakContainer = true;
+                            handleContainerBlock(b, blockPos);
+                            b.setState(MineShulkerBlockade, this);
+                        } else {
+                            b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", "Invalid block at restock position after recovery retry.");
+                            b.error("Invalid block at container restocking position after recovery retry.");
+                        }
+                    }
                 }
             }
 
@@ -2125,7 +2260,12 @@ public class HighwayBuilderTHM extends Module {
                 else {
                     stopTimer--;
                     if (stopTimer <= 0) {
-                        b.setState(ThrowOutTrash, Forward);
+                        if (b.invalidRestockRecoveryPending) {
+                            b.invalidRestockRecoveryPending = false;
+                            b.setState(Restock, Restock);
+                        } else {
+                            b.setState(ThrowOutTrash, Forward);
+                        }
                     }
                 }
             }
@@ -2516,6 +2656,7 @@ public class HighwayBuilderTHM extends Module {
                         b.restockTask.setPickaxes();
                     }
                     else {
+                        b.notifyDesktop(b.notifyPickaxeShortage, "THM Highway Builder", "Found less than required pickaxes: " + count + "/" + (b.savePickaxes.get() + 1));
                         b.error("Found less than the minimum amount of pickaxes required: " + count + "/" + (b.savePickaxes.get() + 1));
                     }
 
@@ -2551,6 +2692,7 @@ public class HighwayBuilderTHM extends Module {
                     b.restockTask.setMaterials();
                 }
                 else {
+                    b.notifyDesktop(b.notifyOutOfBlocks, "THM Highway Builder", "Out of blocks to place.");
                     b.error("Out of blocks to place.");
                 }
 

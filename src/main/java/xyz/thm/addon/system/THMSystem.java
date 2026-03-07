@@ -101,7 +101,7 @@ public class THMSystem extends System<THMSystem> {
                 hwBuilder.railings.set(false);
             }
         }
-        if (toggleModules.get()) {
+        if (toggleModules.get() && !hwBuilder.isActive()) {
             hwBuilder.toggle();
         }
     }
