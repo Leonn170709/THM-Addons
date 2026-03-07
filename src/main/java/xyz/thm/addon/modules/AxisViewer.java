@@ -95,7 +95,7 @@ public class AxisViewer extends Module {
     private final Setting<Boolean> highwayCenterMode = sgNether.add(new BoolSetting.Builder()
         .name("Draw True Center: ")
         .description("This will move the axis line to the center of the middle block instead of the block edge.")
-        .defaultValue(false)
+        .defaultValue(true)
         .build()
     );
 
