@@ -6,7 +6,10 @@
     "defaultRequire": 1
   },
   "mixins": [
+    "HighwayBuilderCameraMixin",
+    "HighwayBuilderEntityMixin",
     "SystemsMixin",
+    "accessor.CameraAccessor",
     "accessor.ExplosionS2CPacketAccessor",
     "accessor.PlayerInventoryAccessor",
     "accessor.UpdateSelectedSlotS2CPacketAccessor",
@@ -17,4 +20,3 @@
     "meteor.TimerMixin"
   ]
 }
-
