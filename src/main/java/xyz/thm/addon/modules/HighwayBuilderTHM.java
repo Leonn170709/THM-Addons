@@ -90,6 +90,7 @@ import static xyz.thm.addon.utils.password.*;
 
 @SuppressWarnings("ConstantConditions")
 public class HighwayBuilderTHM extends Module {
+    private static final int HARD_FAIL_DISCONNECT_DELAY_MS = 3000;
     public enum Floor {
         Replace,
         PlaceMissing
@@ -1003,11 +1004,32 @@ public class HighwayBuilderTHM extends Module {
         toggle();
 
         if (disconnectOnToggle.get()) {
-            disconnect(message, args);
+            THMHwyMonitor.signalNonRestartHardFailFromHighwayBuilder();
+            scheduleDelayedHardFailDisconnect(message, args);
         }
     }
 
-        private void errorEarly(String message, Object... args) {
+    private void scheduleDelayedHardFailDisconnect(String message, Object... args) {
+        Object[] argsCopy = args == null ? new Object[0] : Arrays.copyOf(args, args.length);
+        Thread disconnectThread = new Thread(() -> {
+            try {
+                Thread.sleep(HARD_FAIL_DISCONNECT_DELAY_MS);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+
+            if (mc == null) return;
+            mc.execute(() -> {
+                if (mc == null || mc.getNetworkHandler() == null || mc.getNetworkHandler().getConnection() == null) return;
+                disconnect(message, argsCopy);
+            });
+        }, "thm-hb-hardfail-disconnect");
+        disconnectThread.setDaemon(true);
+        disconnectThread.start();
+    }
+
+    private void errorEarly(String message, Object... args) {
         super.error(message, args);
 
         displayInfo = false;
