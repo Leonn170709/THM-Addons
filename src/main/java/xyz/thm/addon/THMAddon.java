@@ -76,7 +76,6 @@ public class THMAddon extends MeteorAddon {
         Modules.get().add(new AutoPortal());
         Modules.get().add(new DiscordRPC());
         Modules.get().add(new TunnelMinerModule());
-        Modules.get().add(new THMHwyMonitor());
         Modules.get().add(new SignRender());
         Modules.get().add(new AfkLogout());
         Modules.get().add(new FlightBypass());
