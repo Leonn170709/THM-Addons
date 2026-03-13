@@ -869,7 +869,7 @@ public class HighwayBuilderTHM extends Module {
         displayInfo = true;
         sentLagMessage = false;
         suspended = false;
-        statusLogTimer = 0;
+        statusLogTimer = 6000;
 
         restockTask.complete();
 
@@ -3862,3 +3862,4 @@ public class HighwayBuilderTHM extends Module {
         }
     }
 }
+
