@@ -256,8 +256,12 @@ public class THMUtils {
         if (mc.isIntegratedServerRunning()) return true;
         ServerInfo server = mc.getCurrentServerEntry();
         if (server == null) return false;
-        if (mc.world.getDifficulty() != Difficulty.HARD) return true;
-        return !server.address.endsWith("6b6t.org");
+        String address = server.address == null ? "" : server.address.trim().toLowerCase(Locale.ROOT);
+        if (address.isEmpty()) return false;
+        int colon = address.indexOf(':');
+        String host = colon >= 0 ? address.substring(0, colon) : address;
+        while (host.endsWith(".")) host = host.substring(0, host.length() - 1);
+        return !host.endsWith("6b6t.org");
     }
     public static void pickupAndReturn() {
         if (mc.player == null) return;

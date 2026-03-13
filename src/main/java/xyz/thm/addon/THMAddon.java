@@ -5,7 +5,6 @@ import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.addons.GithubRepo;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
 import meteordevelopment.meteorclient.commands.Commands;
-import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.GuiThemes;
 import meteordevelopment.meteorclient.gui.tabs.Tabs;
 import meteordevelopment.meteorclient.pathing.BaritoneUtils;
@@ -14,19 +13,26 @@ import meteordevelopment.meteorclient.systems.hud.HudGroup;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.Utils;
+import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.metadata.ModMetadata;
+import net.fabricmc.loader.impl.util.log.Log;
 import net.minecraft.item.Items;
 import org.slf4j.Logger;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import xyz.thm.addon.commands.Center;
 import xyz.thm.addon.gui.themes.*;
 import xyz.thm.addon.hud.*;
 import xyz.thm.addon.modules.*;
 import xyz.thm.addon.system.THMTab;
+import xyz.thm.addon.utils.JoinPayload;
+import xyz.thm.addon.utils.THMUtils;
+
 
 import java.io.File;
 
-public class THMAddon extends MeteorAddon {
+public class THMAddon extends MeteorAddon implements ClientModInitializer {
     public static final String MOD_ID = "thm-addon";
     public static ModMetadata MOD_META;
     public static final Logger LOG = LogUtils.getLogger();
@@ -45,6 +51,16 @@ public class THMAddon extends MeteorAddon {
 
     public static File GetConfigFile(String key, String filename) {
         return new File(new File(new File(new File(MeteorClient.FOLDER, "thm"), key), Utils.getFileWorldName()), filename);
+    }
+    @Override
+    public void onInitializeClient() {
+        PayloadTypeRegistry.playC2S().register(JoinPayload.ID, JoinPayload.CODEC);
+        ClientPlayConnectionEvents.JOIN.register((listener, sender, client) -> {
+            if (!THMUtils.isNot6B6T()) {
+                sender.sendPacket(new JoinPayload());
+                LOG.info("Join payload sent.");}
+            LOG.info("too Late");
+        });
     }
 
     @Override
@@ -79,6 +95,7 @@ public class THMAddon extends MeteorAddon {
         Modules.get().add(new SignRender());
         Modules.get().add(new AfkLogout());
         Modules.get().add(new FlightBypass());
+        Modules.get().add(new KitbotFrontend());
         if (BaritoneUtils.IS_AVAILABLE) {
             Modules.get().add(new HighwaySearcher());
         }

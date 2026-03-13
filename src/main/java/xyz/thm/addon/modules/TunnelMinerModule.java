@@ -298,7 +298,8 @@ public class TunnelMinerModule extends Module {
     private final SettingGroup sgRestock = settings.createGroup("Restock");
     private final SettingGroup sgTiming  = settings.createGroup("Timing");
     private final SettingGroup sgRender = settings.createGroup("Render");
-    private final SettingGroup sgWatchdog = settings.createGroup("Watchdog");
+    private final SettingGroup sgWatchdog = settings.createGroup("Watchdog", false);
+    private final SettingGroup sgAdvanced = settings.createGroup("Advanced", false);
 
     private final Setting<Integer> targetX = sgGeneral.add(new IntSetting.Builder()
         .name("target-x").description("Target X coordinate.").defaultValue(0).build());
@@ -306,10 +307,9 @@ public class TunnelMinerModule extends Module {
     private final Setting<Integer> targetZ = sgGeneral.add(new IntSetting.Builder()
         .name("target-z").description("Target Z coordinate.").defaultValue(0).build());
 
-    private final Setting<PathMode> pathMode = sgGeneral.add(new EnumSetting.Builder<PathMode>()
+    private final Setting<PathMode> pathMode = sgAdvanced.add(new EnumSetting.Builder<PathMode>()
         .name("path-mode")
         .description("Path planner mode. AxisFirst preserves legacy behavior; DiagonalThenAxis alternates X/Z steps for a zigzag diagonal path while both axes differ.")
-        .visible(() -> false)
         .defaultValue(PathMode.AxisFirst)
         .build());
 
@@ -320,7 +320,8 @@ public class TunnelMinerModule extends Module {
     private final Setting<Boolean> fillBehind = sgGeneral.add(new BoolSetting.Builder()
         .name("fill-behind")
         .description("Fills the tunnel behind you with selected blocks.")
-        .defaultValue(true).build());
+        .defaultValue(true)
+        .build());
 
     private final Setting<List<Block>> fillBlocks = sgGeneral.add(new BlockListSetting.Builder()
         .name("fill-blocks")
@@ -334,17 +335,17 @@ public class TunnelMinerModule extends Module {
         .description("Detects and seals lava (source/flowing) in tunnel, ceiling, and tunnel-adjacent cells.")
         .defaultValue(true).build());
 
-    private final Setting<Double> detourSafetyBufferCost = sgGeneral.add(new DoubleSetting.Builder()
+    private final Setting<Double> detourSafetyBufferCost = sgAdvanced.add(new DoubleSetting.Builder()
         .name("detour-safety-buffer-cost")
         .description("Extra A* cost per blocked adjacent cell to keep detours farther from avoided blocks (0 disables).")
-        .visible(() -> false)
         .defaultValue(0.0).min(0.0).sliderMax(4.0)
         .build());
 
     private final Setting<Boolean> airPlace = sgGeneral.add(new BoolSetting.Builder()
         .name("air-place")
         .description("Use air place")
-        .defaultValue(false).build());
+        .defaultValue(false)
+        .build());
 
     private final Setting<Integer> airPlaceDistance = sgGeneral.add(new IntSetting.Builder()
         .name("scaffold")
@@ -354,7 +355,6 @@ public class TunnelMinerModule extends Module {
     private final Setting<Boolean> rotate = sgGeneral.add(new BoolSetting.Builder()
         .name("rotate")
         .description("Faces the block being interacted with.")
-        .visible(() -> false)
         .defaultValue(true)
         .build());
 
@@ -388,24 +388,21 @@ public class TunnelMinerModule extends Module {
         .defaultValue(48).min(1).max(64).sliderMax(32)
         .build());
 
-    private final Setting<Integer> stealthPathCalcIntervalTicks = sgStealth.add(new IntSetting.Builder()
+    private final Setting<Integer> stealthPathCalcIntervalTicks = sgAdvanced.add(new IntSetting.Builder()
         .name("path-calc-interval")
         .description("Minimum ticks between heavy probe path recalculations (higher = less lag, slower path updates).")
-        .visible(() -> false)
         .defaultValue(4).min(1).max(40).sliderMax(20)
         .build());
 
-    private final Setting<Integer> stealthPathCalcMaxNodes = sgStealth.add(new IntSetting.Builder()
+    private final Setting<Integer> stealthPathCalcMaxNodes = sgAdvanced.add(new IntSetting.Builder()
         .name("path-calc-max-nodes")
         .description("Maximum A* nodes expanded for probe/detour path calculations (lower = less lag).")
-        .visible(() -> false)
         .defaultValue(768).min(64).max(4096).sliderMax(2048)
         .build());
 
-    private final Setting<Integer> stealthAStarMaxFails = sgStealth.add(new IntSetting.Builder()
+    private final Setting<Integer> stealthAStarMaxFails = sgAdvanced.add(new IntSetting.Builder()
         .name("a-star-max-fails")
         .description("Consecutive probe A* failures before switching to counterclockwise wall-follow fallback.")
-        .visible(() -> false)
         .defaultValue(3).min(1).max(20).sliderMax(10)
         .build());
 
@@ -440,10 +437,9 @@ public class TunnelMinerModule extends Module {
         .defaultValue(4).min(0).max(4).sliderMax(4)
         .build());
 
-    private final Setting<Integer> stealthStallStopTicks = sgStealth.add(new IntSetting.Builder()
+    private final Setting<Integer> stealthStallStopTicks = sgAdvanced.add(new IntSetting.Builder()
         .name("stall-stop-ticks")
         .description("Stop the module if position/progress does not change for this many ticks (0 disables).")
-        .visible(() -> false)
         .defaultValue(400).min(0).max(36000).sliderMax(1200)
         .build());
 
@@ -456,12 +452,14 @@ public class TunnelMinerModule extends Module {
     private final Setting<Boolean> useShulkers = sgRestock.add(new BoolSetting.Builder()
         .name("use-shulkers")
         .description("Open shulker boxes to restock pickaxes when count is below minimum.")
-        .defaultValue(false).build());
+        .defaultValue(false).
+        build());
 
     private final Setting<Boolean> useEnderChest = sgRestock.add(new BoolSetting.Builder()
         .name("use-ender-chest")
         .description("Open ender chests to restock pickaxes when count is below minimum.")
-        .defaultValue(false).build());
+        .defaultValue(false).
+        build());
 
     private final Setting<Integer> minPickaxes = sgRestock.add(new IntSetting.Builder()
         .name("min-pickaxes")
@@ -3532,9 +3530,14 @@ public class TunnelMinerModule extends Module {
         waitTicks++;
         if (waitTicks == 1) {
             BlockPos bp = containerPos;
-            Rotations.rotate(Rotations.getYaw(bp), Rotations.getPitch(bp),
-                () -> mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND,
-                    new BlockHitResult(Vec3d.ofCenter(bp), Direction.UP, bp, false)));
+            if (rotate.get()) {
+                Rotations.rotate(Rotations.getYaw(bp), Rotations.getPitch(bp),
+                    () -> mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND,
+                        new BlockHitResult(Vec3d.ofCenter(bp), Direction.UP, bp, false)));
+            } else {
+                mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND,
+                    new BlockHitResult(Vec3d.ofCenter(bp), Direction.UP, bp, false));
+            }
             return;
         }
         if (mc.currentScreen != null) {

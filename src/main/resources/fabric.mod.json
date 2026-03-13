@@ -15,6 +15,9 @@
   "entrypoints": {
     "meteor": [
       "xyz.thm.addon.THMAddon"
+    ],
+    "client": [
+      "xyz.thm.addon.THMAddon"
     ]
   },
   "mixins": [

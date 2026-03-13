@@ -1,10 +1,11 @@
 [versions]
-mod-version = "0.1.9"
+mod-version = "0.2"
 
 # Fabric (https://fabricmc.net/develop)
 minecraft = "1.21.11"
 yarn-mappings = "1.21.11+build.4"
 fabric-loader = "0.18.2"
+fabric-api = "0.141.3+1.21.11"
 
 # Loom (https://github.com/FabricMC/fabric-loom)
 loom = "1.14-SNAPSHOT"
@@ -19,6 +20,7 @@ meteor = "1.21.11-SNAPSHOT"
 minecraft = { module = "com.mojang:minecraft", version.ref = "minecraft" }
 yarn = { module = "net.fabricmc:yarn", version.ref = "yarn-mappings" }
 fabric-loader = { module = "net.fabricmc:fabric-loader", version.ref = "fabric-loader" }
+fabric-api = { module = "net.fabricmc.fabric-api:fabric-api", version.ref = "fabric-api" }
 
 # Meteor client
 meteor-client = { module = "meteordevelopment:meteor-client", version.ref = "meteor" }
