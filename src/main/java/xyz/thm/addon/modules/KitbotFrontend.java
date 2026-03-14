@@ -1,11 +1,14 @@
 package xyz.thm.addon.modules;
 
+import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
+import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
+import meteordevelopment.orbit.EventHandler;
 import xyz.thm.addon.THMAddon;
 
 import java.util.Locale;
@@ -61,6 +64,16 @@ public class KitbotFrontend extends Module {
         .build()
     );
 
+    private final Setting<Boolean> autoTp = sgGeneral.add(new BoolSetting.Builder()
+        .name("auto-tp")
+        .description("Automatically handles teleport requests for kitbot commands.")
+        .defaultValue(true)
+        .visible(() -> mode.get() == Mode.Kit || mode.get() == Mode.Goto || mode.get() == Mode.Update)
+        .build()
+    );
+
+    private boolean tpaHandled = false;
+
     @Override
     public void onActivate() {
         switch (mode.get()) {
@@ -68,7 +81,37 @@ public class KitbotFrontend extends Module {
             case Goto -> sendGoto(gotoDirection.get());
             case Kit -> kitOrder(kitName.get(), kitAmount.get());
         }
+
+        if (autoTp.get() && (mode.get() == Mode.Kit || mode.get() == Mode.Goto || mode.get() == Mode.Update)) {
+            tpaHandled = false;
+            return;
+        }
+
         toggle();
+    }
+
+    @EventHandler
+    private void onMessageReceive(ReceiveMessageEvent event) {
+        if (!isActive()) return;
+        if (!autoTp.get() || tpaHandled) return;
+
+        String msg = event.getMessage().getString();
+        if ((mode.get() == Mode.Kit || mode.get() == Mode.Update)
+            && msg.contains("KitBot1 wants to teleport to you")) {
+            ChatUtils.sendPlayerMsg("/tpy " + KITBOT_NAME);
+            info("Accepted KitBot1 teleport request.");
+            tpaHandled = true;
+            toggle();
+        }
+
+        if (mode.get() == Mode.Goto
+            && msg.contains("KitBot1 whispers: Bot has arrived at highway")
+            && msg.contains("you may teleport")) {
+            ChatUtils.sendPlayerMsg("/tpa " + KITBOT_NAME);
+            info("TPA has been sent.");
+            tpaHandled = true;
+            toggle();
+        }
     }
 
     public static void sendUpdate(Direction direction) {

@@ -6,6 +6,7 @@
 package xyz.thm.addon.modules;
 
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.render.Render2DEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
@@ -181,6 +182,13 @@ public class HighwayBuilderTHM extends Module {
         .name("rotation")
         .description("Mode of rotation.")
         .defaultValue(Rotation.None)
+        .build()
+    );
+
+    private final Setting<Boolean> kitbotRestock = sgInventory.add(new BoolSetting.Builder()
+        .name("kitbot-restock")
+        .description("Order a kit from KitBot1 when out of building blocks.")
+        .defaultValue(false)
         .build()
     );
 
@@ -450,24 +458,6 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Boolean> rebreakUseTimer = sgInventory.add(new BoolSetting.Builder()
-        .name("rebreak-use-timer")
-        .description("Uses Timer override while instant rebreak is active.")
-        .defaultValue(false)
-        .visible(() -> mineEnderChests.get() && rebreakEchests.get())
-        .build()
-    );
-
-    private final Setting<Double> rebreakTimerSpeed = sgInventory.add(new DoubleSetting.Builder()
-        .name("rebreak-timer-speed")
-        .description("Timer override speed used during instant rebreak.")
-        .defaultValue(2.0)
-        .range(0.1, 10.0)
-        .sliderRange(0.1, 5.0)
-        .visible(() -> mineEnderChests.get() && rebreakEchests.get() && rebreakUseTimer.get())
-        .build()
-    );
-
     private final Setting<Boolean> silentRebreakSwap = sgInventory.add(new BoolSetting.Builder()
         .name("silent-rebreak-swap")
         .description("Silently swaps to the best pick for instant rebreak packets, then restores your selected slot.")
@@ -653,6 +643,7 @@ public class HighwayBuilderTHM extends Module {
     private final RestockTask restockTask = new RestockTask(this);
     private int invalidRestockRecoveryRetries;
     private boolean invalidRestockRecoveryPending;
+    private boolean kitbotTpHandled;
     private boolean previousPauseOnLostFocus;
     private boolean pauseOnLostFocusChanged;
     private Perspective previousPerspective;
@@ -1089,6 +1080,19 @@ public class HighwayBuilderTHM extends Module {
         }
     }
 
+
+    @EventHandler
+    private void onMessageReceive(ReceiveMessageEvent event) {
+        if (state != State.KitbotOrder || kitbotTpHandled) return;
+
+        String msg = event.getMessage().getString();
+        if (msg.contains("KitBot1 wants to teleport to you")) {
+            ChatUtils.sendPlayerMsg("/tpy " + KitbotFrontend.KITBOT_NAME);
+            info("Accepted KitBot1 teleport request.");
+            kitbotTpHandled = true;
+        }
+    }
+
     @EventHandler
     private void onGameLeave(GameLeftEvent event) {
         notifyDesktop(notifyDisconnect, "THM Highway Builder", "Disconnected while Highway Builder was active.");
@@ -1117,6 +1121,7 @@ public class HighwayBuilderTHM extends Module {
                 if (floor.get() == Floor.Replace) render(event, blockPosProvider.getBehindFloor(), mBlockPos -> canMine(mBlockPos, false), true);
                 if (railings.get()) render(event, blockPosProvider.getBehindRailings(0), mBlockPos -> canMine(mBlockPos, false), true);
                 if (mineAboveRailings.get()) render(event, blockPosProvider.getBehindRailings(1), mBlockPos -> canMine(mBlockPos, true), true);
+                render(event, blockPosProvider.getBehindFront(), mBlockPos -> canMine(mBlockPos, true), true);
             }
             if (state == State.MineEChestBlockade) render(event, blockPosProvider.getBlockade(true, blockadeType.get()), mBlockPos -> canMine(mBlockPos, true), true);
         }
@@ -1397,6 +1402,7 @@ public class HighwayBuilderTHM extends Module {
                 if (b.destroyCrystalTraps.get() && isCrystalTrap(b)) b.setState(DefuseCrystalTraps); // Destroy crystal traps
                 else if (needsToPlace(b, b.blockPosProvider.getLiquids(), true)) b.setState(FillLiquids); // Fill Liquids
                 else if (needsToMine(b, b.blockPosProvider.getFront(), true)) b.setState(MineFront); // Mine Front
+                else if (b.checkBehind.get() && needsToMine(b, b.blockPosProvider.getBehindFront(), true)) b.setState(MineBehind); // Mine Behind
                 else if (b.floor.get() == Floor.Replace && needsToMine(b, b.blockPosProvider.getFloor(), false)) b.setState(MineFloor); // Mine Floor
                 else if (b.railings.get() && needsToMine(b, b.blockPosProvider.getRailings(0), false)) b.setState(MineRailings); // Mine Railings
                 else if (b.mineAboveRailings.get() && needsToMine(b, b.blockPosProvider.getRailings(1), true)) b.setState(MineAboveRailings); // Mine above railings
@@ -1540,6 +1546,18 @@ public class HighwayBuilderTHM extends Module {
             @Override
             protected void tick(HighwayBuilderTHM b) {
                 mine(b, b.blockPosProvider.getFront(), true, Forward, this);
+            }
+        },
+
+        MineBehind {
+            @Override
+            protected void start(HighwayBuilderTHM b) {
+                mine(b, b.blockPosProvider.getBehindFront(), true, Forward, this);
+            }
+
+            @Override
+            protected void tick(HighwayBuilderTHM b) {
+                mine(b, b.blockPosProvider.getBehindFront(), true, Forward, this);
             }
         },
 
@@ -1785,30 +1803,8 @@ public class HighwayBuilderTHM extends Module {
             private boolean first, primed;
             private boolean stopTimerEnabled;
             private int stopTimer, moveTimer, rebreakTimer, timeout;
-            private boolean rebreakTimerOverrideActive;
-
-            private void updateRebreakTimerOverride(HighwayBuilderTHM b, boolean active) {
-                if (!b.rebreakUseTimer.get()) {
-                    if (rebreakTimerOverrideActive) {
-                        Modules.get().get(Timer.class).setOverride(Timer.OFF);
-                        rebreakTimerOverrideActive = false;
-                    }
-                    return;
-                }
-
-                if (active) {
-                    Modules.get().get(Timer.class).setOverride(b.rebreakTimerSpeed.get());
-                    rebreakTimerOverrideActive = true;
-                } else if (rebreakTimerOverrideActive) {
-                    Modules.get().get(Timer.class).setOverride(Timer.OFF);
-                    rebreakTimerOverrideActive = false;
-                }
-            }
-
             @Override
             protected void start(HighwayBuilderTHM b) {
-                updateRebreakTimerOverride(b, false);
-
                 if (b.lastState != Center && b.lastState != ThrowOutTrash && b.lastState != PlaceEChestBlockade) {
                     b.setState(Center);
                     return;
@@ -1844,8 +1840,6 @@ public class HighwayBuilderTHM extends Module {
 
             @Override
             protected void tick(HighwayBuilderTHM b) {
-                updateRebreakTimerOverride(b, false);
-
                 if (stopTimerEnabled) {
                     if (stopTimer > 0) stopTimer--;
                     else b.setState(MineEChestBlockade);
@@ -1924,8 +1918,6 @@ public class HighwayBuilderTHM extends Module {
                     boolean swappedForRebreak = false;
 
                     if (b.rebreakEchests.get() && primed) {
-                        updateRebreakTimerOverride(b, true);
-
                         timeout++;
                         if (timeout > 60) {
                             primed = false;
@@ -1985,6 +1977,120 @@ public class HighwayBuilderTHM extends Module {
             }
         },
 
+        KitbotOrder {
+            private static final ItemStack[] ITEMS = new ItemStack[27];
+            private static final int[][] CAGE_OFFSETS = new int[][]{
+                {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1},
+                {1, 1, 0}, {-1, 1, 0}, {0, 1, 1}, {0, 1, -1},
+                {0, 2, 0}
+            };
+            private final BlockPos.Mutable cagePos = new BlockPos.Mutable();
+            private boolean orderSent;
+            private boolean cageReady;
+
+            @Override
+            protected void start(HighwayBuilderTHM b) {
+                orderSent = false;
+                cageReady = false;
+                b.kitbotTpHandled = false;
+                b.input.stop();
+            }
+
+            @Override
+            protected void tick(HighwayBuilderTHM b) {
+                b.input.stop();
+
+                if (!b.kitbotRestock.get()) {
+                    b.setState(Forward);
+                    return;
+                }
+
+                if (!cageReady) {
+                    cageReady = buildCage(b);
+                    return;
+                }
+
+                if (!orderSent) {
+                    KitbotFrontend.kitOrder(KitbotFrontend.KitName.Highway, 4);
+                    b.info("Ordering kit '%s' x%d from %s.", KitbotFrontend.KitName.Highway, 4, KitbotFrontend.KITBOT_NAME);
+                    orderSent = true;
+                    return;
+                }
+
+                if (hasPlaceableBlocks(b)) {
+                    if (breakCageTop(b)) return;
+                    b.setState(Forward);
+                }
+            }
+
+            private boolean buildCage(HighwayBuilderTHM b) {
+                int slot = findAndMoveToHotbar(b, itemStack -> itemStack.getItem() instanceof BlockItem bi && bi.getBlock() == Blocks.NETHERRACK);
+                if (slot == -1) {
+                    b.error("No netherrack available to encase before kit order.");
+                    return false;
+                }
+
+                BlockPos base = b.mc.player.getBlockPos();
+                boolean allPlaced = true;
+
+                for (int[] offset : CAGE_OFFSETS) {
+                    cagePos.set(base.getX() + offset[0], base.getY() + offset[1], base.getZ() + offset[2]);
+                    BlockState state = b.mc.world.getBlockState(cagePos);
+                    if (!state.isAir() && state.getFluidState().isEmpty()) continue;
+
+                    allPlaced = false;
+                    if (b.placeTimer > 0) break;
+
+                    if (BlockUtils.place(cagePos, Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, true)) {
+                        b.placeTimer = b.placeDelay.get();
+                    }
+                    break;
+                }
+
+                return allPlaced;
+            }
+
+            private boolean hasPlaceableBlocks(HighwayBuilderTHM b) {
+                if (hasShulkerWithMaterials(b)) return true;
+                if (hasItem(b, stack -> stack.getItem() instanceof BlockItem bi && b.blocksToPlace.get().contains(bi.getBlock()))) return true;
+                if (b.restockTask.pickaxes && hasItem(b, stack -> stack.isIn(ItemTags.PICKAXES))) return true;
+                return b.blocksToPlace.get().contains(Blocks.OBSIDIAN)
+                    && countItem(b, stack -> stack.getItem() == Items.ENDER_CHEST) > b.saveEchests.get();
+            }
+
+            private boolean breakCageTop(HighwayBuilderTHM b) {
+                BlockPos top = b.mc.player.getBlockPos().up(2);
+                if (b.mc.world.getBlockState(top).getBlock() != Blocks.NETHERRACK) return false;
+                if (b.breakTimer > 0) return true;
+
+                Runnable breakBlock = () -> BlockUtils.breakBlock(top, true);
+                if (b.rotation.get().mine) Rotations.rotate(Rotations.getYaw(top), Rotations.getPitch(top), breakBlock);
+                else breakBlock.run();
+
+                b.breakTimer = b.breakDelay.get();
+                return true;
+            }
+
+            private boolean hasShulkerWithMaterials(HighwayBuilderTHM b) {
+                for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
+                    ItemStack itemStack = b.mc.player.getInventory().getStack(i);
+                    if (!Utils.isShulker(itemStack.getItem())) continue;
+
+                    Utils.getItemsInContainerItem(itemStack, ITEMS);
+                    for (ItemStack stack : ITEMS) {
+                        if (stack.getItem() instanceof BlockItem bi) {
+                            if (b.blocksToPlace.get().contains(bi.getBlock())
+                                || (b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && bi == Items.ENDER_CHEST)) {
+                                return true;
+                            }
+                        }
+                        if (b.restockTask.pickaxes && stack.isIn(ItemTags.PICKAXES)) return true;
+                    }
+                }
+                return false;
+            }
+        },
+
         // this one was rough to do
         Restock {
             private static final MBlockPos pos = new MBlockPos();
@@ -2032,6 +2138,13 @@ public class HighwayBuilderTHM extends Module {
                     if (slot != -1 && b.lastState != PlaceShulkerBlockade) {
                         b.setState(PlaceShulkerBlockade);
                     }
+                }
+
+                if (slot == -1 && b.kitbotRestock.get()
+                    && (b.restockTask.materials || b.restockTask.pickaxes)
+                    && !hasShulkerInInventory(b)) {
+                    b.setState(KitbotOrder);
+                    return;
                 }
 
                 // next search your ender chest for raw items and shulkers containing items
@@ -2336,6 +2449,13 @@ public class HighwayBuilderTHM extends Module {
 
                     return false;
                 };
+            }
+
+            private boolean hasShulkerInInventory(HighwayBuilderTHM b) {
+                for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
+                    if (shulkerPredicate.test(b.mc.player.getInventory().getStack(i))) return true;
+                }
+                return false;
             }
 
             private void handleContainerBlock(HighwayBuilderTHM b, BlockPos bp) {
@@ -2834,6 +2954,9 @@ public class HighwayBuilderTHM extends Module {
                     // start restocking if we're allowed
                     b.restockTask.setMaterials();
                 }
+                else if (b.kitbotRestock.get()) {
+                    b.setState(KitbotOrder);
+                }
                 else {
                     b.notifyDesktop(b.notifyOutOfBlocks, "THM Highway Builder", "Out of blocks to place.");
                     b.error("Out of blocks to place.");
@@ -2977,6 +3100,7 @@ public class HighwayBuilderTHM extends Module {
 
     private interface IBlockPosProvider {
         MBPIterator getFront();
+        MBPIterator getBehindFront();
         MBPIterator getFloor();
         MBPIterator getFloor(boolean includeBehind);
         MBPIterator getBehindFloor();
@@ -3015,6 +3139,50 @@ public class HighwayBuilderTHM extends Module {
                 @Override
                 public MBlockPos next() {
                     pos2.set(pos).offset(rightDir, w).add(0, y, 0);
+
+                    w++;
+                    if (w >= width.get()) {
+                        w = 0;
+                        y++;
+                    }
+
+                    return pos2;
+                }
+
+                @Override
+                public void save() {
+                    pw = w;
+                    py = y;
+                    w = y = 0;
+                }
+
+                @Override
+                public void restore() {
+                    w = pw;
+                    y = py;
+                }
+            };
+        }
+
+        @Override
+        public MBPIterator getBehindFront() {
+            HorizontalDirection backward = dir.opposite();
+            HorizontalDirection backwardLeft = backward.rotateLeftSkipOne();
+            HorizontalDirection backwardRight = backwardLeft.opposite();
+            pos.coerceBlockLevel(mc.player).offset(backward).offset(backwardLeft, getWidthLeft());
+
+            return new MBPIterator() {
+                private int w, y;
+                private int pw, py;
+
+                @Override
+                public boolean hasNext() {
+                    return w < width.get() && y < height.get();
+                }
+
+                @Override
+                public MBlockPos next() {
+                    pos2.set(pos).offset(backwardRight, w).add(0, y, 0);
 
                     w++;
                     if (w >= width.get()) {
@@ -3355,6 +3523,67 @@ public class HighwayBuilderTHM extends Module {
                 private void initPos() {
                     if (i == 0) pos.coerceBlockLevel(mc.player).offset(dir.rotateLeft()).offset(leftDir, getWidthLeft() - 1);
                     else pos.coerceBlockLevel(mc.player).offset(dir).offset(leftDir, getWidthLeft());
+                }
+
+                @Override
+                public void save() {
+                    pi = i;
+                    pw = w;
+                    py = y;
+                    i = w = y = 0;
+
+                    initPos();
+                }
+
+                @Override
+                public void restore() {
+                    i = pi;
+                    w = pw;
+                    y = py;
+
+                    initPos();
+                }
+            };
+        }
+
+        @Override
+        public MBPIterator getBehindFront() {
+            HorizontalDirection backward = dir.opposite();
+            HorizontalDirection backwardLeft = backward.rotateLeftSkipOne();
+            HorizontalDirection backwardRight = backwardLeft.opposite();
+            pos.coerceBlockLevel(mc.player).offset(backward.rotateLeft()).offset(backwardLeft, getWidthLeft() - 1);
+
+            return new MBPIterator() {
+                private int i, w, y;
+                private int pi, pw, py;
+
+                @Override
+                public boolean hasNext() {
+                    return i < 2 && w < width.get() && y < height.get();
+                }
+
+                @Override
+                public MBlockPos next() {
+                    pos2.set(pos).offset(backwardRight, w).add(0, y++, 0);
+
+                    if (y >= height.get()) {
+                        y = 0;
+                        w++;
+
+                        if (w >= (i == 0 ? width.get() - 1 : width.get())) {
+                            w = 0;
+                            i++;
+
+                            pos.coerceBlockLevel(mc.player).offset(backward).offset(backwardLeft, getWidthLeft());
+                        }
+                    }
+
+                    return pos2;
+                }
+
+                private void initPos() {
+                    if (i == 0) pos.coerceBlockLevel(mc.player).offset(backward.rotateLeft()).offset(backwardLeft, getWidthLeft() - 1);
+                    else pos.coerceBlockLevel(mc.player).offset(backward).offset(backwardLeft, getWidthLeft());
                 }
 
                 @Override
