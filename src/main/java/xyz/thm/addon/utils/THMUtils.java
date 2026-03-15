@@ -5,6 +5,8 @@ import baritone.api.IBaritone;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.network.ServerInfo;
 import net.minecraft.item.ItemStack;
+import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
+import net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.Difficulty;
@@ -372,5 +374,45 @@ public class THMUtils {
         boolean onDiagonal = Math.abs(Math.abs(playerX) - Math.abs(playerZ)) < 5;
 
         return onXAxis || onZAxis || onDiagonal;
+    }
+    public static String GetVerbatim(String text)
+    {
+        int idx = 0;
+        var data = new char[text.length()];
+
+        for ( int i = 0; i < text.length(); i++ )
+            if ( text.charAt(i) != '§' &&  text.charAt(i) != '&')
+                data[idx++] = text.charAt(i);
+            else
+                i++;
+
+        return new String(data, 0, idx);
+    }
+    public static String GetVerbatimAll(String text)
+    {
+        int idx = 0;
+        var data = new char[text.length()];
+
+        for ( int i = 0; i < text.length(); i++ )
+            if ( text.charAt(i) != '§' && text.charAt(i) != '&' )
+                data[idx++] = text.charAt(i);
+            else
+                i++;
+
+        return new String(data, 0, idx);
+    }
+    public static void startFly() {
+        if (mc.player != null && mc.player.networkHandler != null) {
+            mc.player.networkHandler.sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_FALL_FLYING));
+        }
+    }
+
+    public static void fakeInventoryOpen(boolean open) {
+        if (mc.player != null && mc.player.networkHandler != null) {
+            if (open)
+                mc.player.networkHandler.sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.OPEN_INVENTORY));
+            else
+                mc.player.networkHandler.sendPacket(new CloseHandledScreenC2SPacket(0));
+        }
     }
 }

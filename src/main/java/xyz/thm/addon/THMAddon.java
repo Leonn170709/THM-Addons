@@ -22,9 +22,11 @@ import org.slf4j.Logger;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import xyz.thm.addon.commands.Center;
+import xyz.thm.addon.commands.EclipCommand;
 import xyz.thm.addon.gui.themes.*;
 import xyz.thm.addon.hud.*;
 import xyz.thm.addon.modules.*;
+import xyz.thm.addon.modules.chesttracker.ChestTrackerModule;
 import xyz.thm.addon.system.THMTab;
 import xyz.thm.addon.utils.JoinPayload;
 import xyz.thm.addon.utils.THMUtils;
@@ -96,6 +98,8 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new AfkLogout());
         Modules.get().add(new FlightBypass());
         Modules.get().add(new KitbotFrontend());
+        Modules.get().add(new ElytraSwap());
+        Modules.get().add(new ChestTrackerModule());
         if (BaritoneUtils.IS_AVAILABLE) {
             Modules.get().add(new HighwaySearcher());
         }
@@ -103,6 +107,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
 
         //Commands
         Commands.add(new Center());
+        Commands.add(new EclipCommand());
 
 
         //Hud
