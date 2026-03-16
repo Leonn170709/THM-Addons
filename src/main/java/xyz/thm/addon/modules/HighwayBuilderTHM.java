@@ -44,8 +44,8 @@ import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
 import net.minecraft.client.gui.screen.ingame.ShulkerBoxScreen;
 import net.minecraft.client.input.Input;
 import net.minecraft.client.network.ClientPlayerInteractionManager;
-import net.minecraft.client.option.GameOptions;
 import net.minecraft.client.option.Perspective;
+import net.minecraft.client.option.GameOptions;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.Entity;
@@ -83,8 +83,8 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
-import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.function.Predicate;
 
 import static xyz.thm.addon.utils.THMUtils.*;
 import static xyz.thm.addon.utils.password.*;
@@ -546,7 +546,6 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-
     private final Setting<Boolean> sendStatisticsWebhhok = sgStatistics.add(new BoolSetting.Builder()
         .name("sends-statistics(Webhook)")
         .description("Sends Highway Builder statistics to a webhook when the module is disabled.")
@@ -636,8 +635,6 @@ public class HighwayBuilderTHM extends Module {
     private CustomPlayerInput input;
 
     private State state, lastState;
-    private boolean inStateStart;
-    private State pendingState, pendingLastState;
     private IBlockPosProvider blockPosProvider;
 
     public Vec3d start;
@@ -664,35 +661,35 @@ public class HighwayBuilderTHM extends Module {
         runInMainMenu = true;
     }
 
-        // AES-256 encryption with SHA-256 key derivation
-        private String decryptWebhook(String encryptedWebhook, String password) {
-            try {
-                // Derive a 256-bit (32 byte) key from the password using SHA-256
-                MessageDigest digest = MessageDigest.getInstance("SHA-256");
-                byte[] keyBytes = digest.digest(password.getBytes(StandardCharsets.UTF_8));
+    // AES-256 encryption with SHA-256 key derivation
+    private String decryptWebhook(String encryptedWebhook, String password) {
+        try {
+            // Derive a 256-bit (32 byte) key from the password using SHA-256
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] keyBytes = digest.digest(password.getBytes(StandardCharsets.UTF_8));
 
-                // Add proper Base64 padding for encrypted webhook if needed
-                String padded = encryptedWebhook;
-                int padding = padded.length() % 4;
-                if (padding > 0) {
-                    padded += "=".repeat(4 - padding);
-                }
-
-                byte[] encryptedBytes = Base64.getDecoder().decode(padded);
-
-                // Create AES-256 cipher
-                SecretKeySpec secretKey = new SecretKeySpec(keyBytes, 0, keyBytes.length, "AES");
-                Cipher cipher = Cipher.getInstance("AES");
-                cipher.init(Cipher.DECRYPT_MODE, secretKey);
-
-                byte[] decrypted = cipher.doFinal(encryptedBytes);
-                return new String(decrypted, StandardCharsets.UTF_8);
-            } catch (Exception e) {
-                // If decryption fails, treat the webhook as unencrypted
-                THMAddon.LOG.warn("Failed to decrypt webhook, treating as unencrypted: " + e.getMessage());
-                return encryptedWebhook;
+            // Add proper Base64 padding for encrypted webhook if needed
+            String padded = encryptedWebhook;
+            int padding = padded.length() % 4;
+            if (padding > 0) {
+                padded += "=".repeat(4 - padding);
             }
+
+            byte[] encryptedBytes = Base64.getDecoder().decode(padded);
+
+            // Create AES-256 cipher
+            SecretKeySpec secretKey = new SecretKeySpec(keyBytes, 0, keyBytes.length, "AES");
+            Cipher cipher = Cipher.getInstance("AES");
+            cipher.init(Cipher.DECRYPT_MODE, secretKey);
+
+            byte[] decrypted = cipher.doFinal(encryptedBytes);
+            return new String(decrypted, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            // If decryption fails, treat the webhook as unencrypted
+            THMAddon.LOG.warn("Failed to decrypt webhook, treating as unencrypted: " + e.getMessage());
+            return encryptedWebhook;
         }
+    }
 
     // AES-256 encryption with SHA-256 key derivation
     private String decryptAPI(String encryptedapi, String password) {
@@ -731,37 +728,37 @@ public class HighwayBuilderTHM extends Module {
         }
     }
 
-        private void sendToWebhook(String webhookUrl, String message) {
-            new Thread(() -> {
-                try {
-                    @SuppressWarnings("deprecation") URL url = new URL(webhookUrl);
-                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("POST");
-                    conn.setRequestProperty("Content-Type", "application/json");
-                    conn.setDoOutput(true);
+    private void sendToWebhook(String webhookUrl, String message) {
+        new Thread(() -> {
+            try {
+                @SuppressWarnings("deprecation") URL url = new URL(webhookUrl);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setDoOutput(true);
 
-                    // Create JSON payload for Discord webhook
-                    String json = "{\"content\": \"" + message.replace("\"", "\\\"") + "\"}";
+                // Create JSON payload for Discord webhook
+                String json = "{\"content\": \"" + message.replace("\"", "\\\"") + "\"}";
 
-                    try (OutputStream os = conn.getOutputStream()) {
-                        byte[] input = json.getBytes(StandardCharsets.UTF_8);
-                        os.write(input, 0, input.length);
-                    }
-
-                    int responseCode = conn.getResponseCode();
-                    if (responseCode == 204 || responseCode == 200) {
-                        info("Successfully sent statistics to webhook!");
-                    } else {
-                        THMAddon.LOG.warn("Webhook response code: " + responseCode);
-                        warning("Failed to send to Webhook");
-                    }
-
-                    conn.disconnect();
-                } catch (Exception e) {
-                    THMAddon.LOG.warn("Failed to send to webhook: " + e.getMessage());
+                try (OutputStream os = conn.getOutputStream()) {
+                    byte[] input = json.getBytes(StandardCharsets.UTF_8);
+                    os.write(input, 0, input.length);
                 }
-            }).start();
-        }
+
+                int responseCode = conn.getResponseCode();
+                if (responseCode == 204 || responseCode == 200) {
+                    info("Successfully sent statistics to webhook!");
+                } else {
+                    THMAddon.LOG.warn("Webhook response code: " + responseCode);
+                    warning("Failed to send to Webhook");
+                }
+
+                conn.disconnect();
+            } catch (Exception e) {
+                THMAddon.LOG.warn("Failed to send to webhook: " + e.getMessage());
+            }
+        }).start();
+    }
     private void sendToAPI(String message, String password, String EncryptedAPI, String logType) {
         new Thread(() -> {
             HttpURLConnection conn = null;
@@ -941,29 +938,29 @@ public class HighwayBuilderTHM extends Module {
         if (Modules.get().get(HotbarManager.class).isActive() && hotbarmanager.get()) { Modules.get().get(HotbarManager.class).toggle();}
         if (Modules.get().get(AntiDrop.class).isActive() && antidrop.get()) { Modules.get().get(AntiDrop.class).toggle();}
 
-            if (displayInfo && printStatistics.get()) {
-                info("Distance: (highlight)%.0f", PlayerUtils.distanceTo(start));
-                info("Blocks broken: (highlight)%d", blocksBroken);
-                info("Blocks placed: (highlight)%d", blocksPlaced);
-            }
-                //webhook send stats part
-            if (sendStatisticsWebhhok.get()) {
-                String webhookUrl = decryptWebhook(encryptedWebhook.get(), decryptkey.get());
-                if (webhookUrl != null) {
-                    double distance = PlayerUtils.distanceTo(start);
+        if (displayInfo && printStatistics.get()) {
+            info("Distance: (highlight)%.0f", PlayerUtils.distanceTo(start));
+            info("Blocks broken: (highlight)%d", blocksBroken);
+            info("Blocks placed: (highlight)%d", blocksPlaced);
+        }
+        //webhook send stats part
+        if (sendStatisticsWebhhok.get()) {
+            String webhookUrl = decryptWebhook(encryptedWebhook.get(), decryptkey.get());
+            if (webhookUrl != null) {
+                double distance = PlayerUtils.distanceTo(start);
 
-                    // Don't send if distance it's smaller than 1
-                    if (distance > 1) {
-                        String playerName = mc.player.getName().getLiteralString();
-                        String statsMessage = String.format("Player: %s , Distance: %.0f , Blocks broken: %d , Blocks placed: %d",
-                            playerName, distance, blocksBroken, blocksPlaced);
-                        sendToWebhook(webhookUrl, statsMessage);
+                // Don't send if distance it's smaller than 1
+                if (distance > 1) {
+                    String playerName = mc.player.getName().getLiteralString();
+                    String statsMessage = String.format("Player: %s , Distance: %.0f , Blocks broken: %d , Blocks placed: %d",
+                        playerName, distance, blocksBroken, blocksPlaced);
+                    sendToWebhook(webhookUrl, statsMessage);
 
-                    }else {
-                        warning("Statistics NOT sent to webhook! Distance too small: (highlight)%.0f", distance);
-                    }
+                }else {
+                    warning("Statistics NOT sent to webhook! Distance too small: (highlight)%.0f", distance);
                 }
             }
+        }
         if (sendStatisticsapi.get()) {
             //Somone please make this code better please
             double distance = PlayerUtils.distanceTo(start);
@@ -1004,7 +1001,7 @@ public class HighwayBuilderTHM extends Module {
         }
     }
 
-        private void errorEarly(String message, Object... args) {
+    private void errorEarly(String message, Object... args) {
         super.error(message, args);
 
         displayInfo = false;
@@ -1067,14 +1064,6 @@ public class HighwayBuilderTHM extends Module {
         }
 
         count = 0;
-
-        if (pendingState != null) {
-            State next = pendingState;
-            State nextLast = pendingLastState;
-            pendingState = null;
-            pendingLastState = null;
-            setState(next, nextLast);
-        }
 
         if (mc.player.getY() < start.y - 0.5) setState(State.ReLevel); // don't let the current state keep ticking, switch to re-levelling straight away
         tickDoubleMine();
@@ -1239,19 +1228,11 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private void setState(State state, State lastState) {
-        if (inStateStart) {
-            pendingState = state;
-            pendingLastState = lastState;
-            return;
-        }
-
         this.lastState = lastState;
         this.state = state;
 
         input.stop();
-        inStateStart = true;
-        this.state.start(this);
-        inStateStart = false;
+        state.start(this);
     }
 
     private int getWidthLeft() {
@@ -1286,12 +1267,12 @@ public class HighwayBuilderTHM extends Module {
         notifyDesktop(notifyDisconnect, "THM Highway Builder", "Disconnected: " + String.format(message, args));
 
         MutableText text = Text.literal("[")
-        .styled(style -> style.withColor(Formatting.WHITE))
-        .append(Text.literal(title).styled(style -> style.withColor(Formatting.BLUE)))
-        .append(Text.literal("] ").styled(style -> style.withColor(Formatting.WHITE)))
-        .append(Text.literal(String.format(message, args)).styled(style -> style.withColor(Formatting.RED)))
-        .append("\n")
-        .append(getStatsText());
+            .styled(style -> style.withColor(Formatting.WHITE))
+            .append(Text.literal(title).styled(style -> style.withColor(Formatting.BLUE)))
+            .append(Text.literal("] ").styled(style -> style.withColor(Formatting.WHITE)))
+            .append(Text.literal(String.format(message, args)).styled(style -> style.withColor(Formatting.RED)))
+            .append("\n")
+            .append(getStatsText());
 
         mc.getNetworkHandler().getConnection().disconnect(text);
     }
@@ -1424,23 +1405,15 @@ public class HighwayBuilderTHM extends Module {
                 if (b.destroyCrystalTraps.get() && isCrystalTrap(b)) b.setState(DefuseCrystalTraps); // Destroy crystal traps
                 else if (needsToPlace(b, b.blockPosProvider.getLiquids(), true)) b.setState(FillLiquids); // Fill Liquids
                 else if (needsToMine(b, b.blockPosProvider.getFront(), true)) b.setState(MineFront); // Mine Front
+                else if (b.checkBehind.get() && needsToMine(b, b.blockPosProvider.getBehindFront(), true)) b.setState(MineBehind); // Mine Behind
                 else if (b.floor.get() == Floor.Replace && needsToMine(b, b.blockPosProvider.getFloor(), false)) b.setState(MineFloor); // Mine Floor
                 else if (b.railings.get() && needsToMine(b, b.blockPosProvider.getRailings(0), false)) b.setState(MineRailings); // Mine Railings
                 else if (b.mineAboveRailings.get() && needsToMine(b, b.blockPosProvider.getRailings(1), true)) b.setState(MineAboveRailings); // Mine above railings
-                else if (b.railings.get() && needsToPlace(b, b.blockPosProvider.getRailings(0), false)) {
-                    if (b.cornerBlock.get() && needsToPlace(b, b.blockPosProvider.getRailings(-1), false)) b.setState(PlaceCornerBlock); // Place corner support block
+                else if (b.railings.get() && needsToPlace(b, b.blockPosProvider.getRailings(0, b.checkBehind.get()), false)) {
+                    if (b.cornerBlock.get() && needsToPlace(b, b.blockPosProvider.getRailings(-1, b.checkBehind.get()), false)) b.setState(PlaceCornerBlock); // Place corner support block
                     else b.setState(PlaceRailings); // Place Railings
                 }
-                else if (needsToPlace(b, b.blockPosProvider.getFloor(), false)) b.setState(PlaceFloor); // Place Floor
-                // Behind checks intentionally run after forward tasks so we never stop extending the highway.
-                else if (b.checkBehind.get() && b.floor.get() == Floor.Replace && needsToMine(b, b.blockPosProvider.getBehindFloor(), false)) b.setState(MineBehindFloor); // Mine behind floor
-                else if (b.checkBehind.get() && b.railings.get() && needsToMine(b, b.blockPosProvider.getBehindRailings(0), false)) b.setState(MineBehindRailings); // Mine behind railings
-                else if (b.checkBehind.get() && b.mineAboveRailings.get() && needsToMine(b, b.blockPosProvider.getBehindRailings(1), true)) b.setState(MineBehindAboveRailings); // Mine above behind railings
-                else if (b.checkBehind.get() && b.railings.get() && needsToPlace(b, b.blockPosProvider.getBehindRailings(0), false)) {
-                    if (b.cornerBlock.get() && needsToPlace(b, b.blockPosProvider.getBehindRailings(-1), false)) b.setState(PlaceBehindCornerBlock); // Place behind corner support block
-                    else b.setState(PlaceBehindRailings); // Place behind railings
-                }
-                else if (b.checkBehind.get() && needsToPlace(b, b.blockPosProvider.getBehindFloor(), false)) b.setState(PlaceBehindFloor); // Place behind floor
+                else if (needsToPlace(b, b.blockPosProvider.getFloor(b.checkBehind.get()), false)) b.setState(PlaceFloor); // Place Floor
             }
 
             private boolean needsToMine(HighwayBuilderTHM b, MBPIterator it, boolean mineBlocksToPlace) {
@@ -1570,66 +1543,12 @@ public class HighwayBuilderTHM extends Module {
         MineFront {
             @Override
             protected void start(HighwayBuilderTHM b) {
-                if (shouldMergeFrontRailings(b)) {
-                    mineFrontRailings(b);
-                } else {
-                    mine(b, b.blockPosProvider.getFront(), true, Forward, this);
-                }
+                mine(b, b.blockPosProvider.getFront(), true, Forward, this);
             }
 
             @Override
             protected void tick(HighwayBuilderTHM b) {
-                if (shouldMergeFrontRailings(b)) {
-                    mineFrontRailings(b);
-                } else {
-                    mine(b, b.blockPosProvider.getFront(), true, Forward, this);
-                }
-            }
-
-            private boolean shouldMergeFrontRailings(HighwayBuilderTHM b) {
-                if (b.blocksPerTick.get() <= 1) return false;
-                if (!frontAllInsta(b)) return false;
-                int frontCapacity = b.width.get() * b.height.get();
-                return b.blocksPerTick.get() > frontCapacity;
-            }
-
-            private boolean frontAllInsta(HighwayBuilderTHM b) {
-                for (MBlockPos pos : b.blockPosProvider.getFront()) {
-                    BlockState state = pos.getState();
-                    if (!b.canMine(pos, true)) continue;
-                    if (!isInstaMineBlock(state.getBlock())) return false;
-                }
-                return true;
-            }
-
-            private void mineFrontRailings(HighwayBuilderTHM b) {
-                boolean broke = false;
-                broke |= minePartialInsta(b, b.blockPosProvider.getFront(), true);
-                if (b.railings.get()) broke |= minePartialInsta(b, b.blockPosProvider.getRailings(0), false);
-                if (b.mineAboveRailings.get()) broke |= minePartialInsta(b, b.blockPosProvider.getRailings(1), true);
-
-                if (broke) return;
-
-                int instaRemaining = countInstaMineable(b, b.blockPosProvider.getFront(), true);
-                if (b.railings.get()) instaRemaining += countInstaMineable(b, b.blockPosProvider.getRailings(0), false);
-                if (b.mineAboveRailings.get()) instaRemaining += countInstaMineable(b, b.blockPosProvider.getRailings(1), true);
-                if (instaRemaining > 0) return;
-
-                // No insta blocks mined this tick, fall back to normal mining state for non-insta blocks.
-                if (countMineable(b, b.blockPosProvider.getFront(), true) > 0) {
-                    b.setState(MineFront);
-                    return;
-                }
-                if (b.railings.get() && countMineable(b, b.blockPosProvider.getRailings(0), false) > 0) {
-                    b.setState(MineRailings);
-                    return;
-                }
-                if (b.mineAboveRailings.get() && countMineable(b, b.blockPosProvider.getRailings(1), true) > 0) {
-                    b.setState(MineAboveRailings);
-                    return;
-                }
-
-                b.setState(Forward);
+                mine(b, b.blockPosProvider.getFront(), true, Forward, this);
             }
         },
 
@@ -1681,42 +1600,6 @@ public class HighwayBuilderTHM extends Module {
             }
         },
 
-        MineBehindFloor {
-            @Override
-            protected void start(HighwayBuilderTHM b) {
-                mine(b, b.blockPosProvider.getBehindFloor(), false, Forward, this);
-            }
-
-            @Override
-            protected void tick(HighwayBuilderTHM b) {
-                mine(b, b.blockPosProvider.getBehindFloor(), false, Forward, this);
-            }
-        },
-
-        MineBehindRailings {
-            @Override
-            protected void start(HighwayBuilderTHM b) {
-                mine(b, b.blockPosProvider.getBehindRailings(0), false, Forward, this);
-            }
-
-            @Override
-            protected void tick(HighwayBuilderTHM b) {
-                mine(b, b.blockPosProvider.getBehindRailings(0), false, Forward, this);
-            }
-        },
-
-        MineBehindAboveRailings {
-            @Override
-            protected void start(HighwayBuilderTHM b) {
-                mine(b, b.blockPosProvider.getBehindRailings(1), true, Forward, this);
-            }
-
-            @Override
-            protected void tick(HighwayBuilderTHM b) {
-                mine(b, b.blockPosProvider.getBehindRailings(1), true, Forward, this);
-            }
-        },
-
         PlaceCornerBlock {
             @Override
             protected void start(HighwayBuilderTHM b) {
@@ -1728,7 +1611,7 @@ public class HighwayBuilderTHM extends Module {
                 int slot = findBlocksToPlacePrioritizeTrash(b);
                 if (slot == -1) return;
 
-                place(b, new MBPIteratorFilter(b.blockPosProvider.getRailings(-1), pos -> {
+                place(b, new MBPIteratorFilter(b.blockPosProvider.getRailings(-1, b.checkBehind.get()), pos -> {
                     if (!b.canPlace(pos, false)) return false;
                     return b.mc.world.getBlockState(pos.getBlockPos().up()).isReplaceable();
                 }), slot, Forward);
@@ -1744,7 +1627,7 @@ public class HighwayBuilderTHM extends Module {
                 int slot = findBlocksToPlacePrioritizeTrash(b);
                 if (slot == -1) return;
 
-                place(b, new MBPIteratorFilter(b.blockPosProvider.getRailings(-1), pos -> {
+                place(b, new MBPIteratorFilter(b.blockPosProvider.getRailings(-1, b.checkBehind.get()), pos -> {
                     if (!b.canPlace(pos, false)) return false;
                     return b.mc.world.getBlockState(pos.getBlockPos().up()).isReplaceable();
                 }), slot, Forward);
@@ -1757,7 +1640,7 @@ public class HighwayBuilderTHM extends Module {
                 int slot = findBlocksToPlace(b);
                 if (slot == -1) return;
 
-                place(b, b.blockPosProvider.getRailings(0), slot, Forward);
+                place(b, b.blockPosProvider.getRailings(0, b.checkBehind.get()), slot, Forward);
             }
 
             @Override
@@ -1765,7 +1648,7 @@ public class HighwayBuilderTHM extends Module {
                 int slot = findBlocksToPlace(b);
                 if (slot == -1) return;
 
-                place(b, b.blockPosProvider.getRailings(0), slot, Forward);
+                place(b, b.blockPosProvider.getRailings(0, b.checkBehind.get()), slot, Forward);
             }
         },
 
@@ -1775,7 +1658,7 @@ public class HighwayBuilderTHM extends Module {
                 int slot = findBlocksToPlace(b);
                 if (slot == -1) return;
 
-                place(b, b.blockPosProvider.getFloor(), slot, Forward);
+                place(b, b.blockPosProvider.getFloor(b.checkBehind.get()), slot, Forward);
             }
 
             @Override
@@ -1783,61 +1666,7 @@ public class HighwayBuilderTHM extends Module {
                 int slot = findBlocksToPlace(b);
                 if (slot == -1) return;
 
-                place(b, b.blockPosProvider.getFloor(), slot, Forward);
-            }
-        },
-
-        PlaceBehindCornerBlock {
-            @Override
-            protected void start(HighwayBuilderTHM b) {
-                int slot = findBlocksToPlacePrioritizeTrash(b);
-                if (slot == -1) return;
-
-                place(b, b.blockPosProvider.getBehindRailings(-1), slot, Forward);
-            }
-
-            @Override
-            protected void tick(HighwayBuilderTHM b) {
-                int slot = findBlocksToPlacePrioritizeTrash(b);
-                if (slot == -1) return;
-
-                place(b, b.blockPosProvider.getBehindRailings(-1), slot, Forward);
-            }
-        },
-
-        PlaceBehindRailings {
-            @Override
-            protected void start(HighwayBuilderTHM b) {
-                int slot = findBlocksToPlace(b);
-                if (slot == -1) return;
-
-                place(b, b.blockPosProvider.getBehindRailings(0), slot, Forward);
-            }
-
-            @Override
-            protected void tick(HighwayBuilderTHM b) {
-                int slot = findBlocksToPlace(b);
-                if (slot == -1) return;
-
-                place(b, b.blockPosProvider.getBehindRailings(0), slot, Forward);
-            }
-        },
-
-        PlaceBehindFloor {
-            @Override
-            protected void start(HighwayBuilderTHM b) {
-                int slot = findBlocksToPlace(b);
-                if (slot == -1) return;
-
-                place(b, b.blockPosProvider.getBehindFloor(), slot, Forward);
-            }
-
-            @Override
-            protected void tick(HighwayBuilderTHM b) {
-                int slot = findBlocksToPlace(b);
-                if (slot == -1) return;
-
-                place(b, b.blockPosProvider.getBehindFloor(), slot, Forward);
+                place(b, b.blockPosProvider.getFloor(b.checkBehind.get()), slot, Forward);
             }
         },
 
@@ -2198,18 +2027,9 @@ public class HighwayBuilderTHM extends Module {
             }
 
             private boolean buildCage(HighwayBuilderTHM b) {
-                int slot = findAndMoveToHotbar(b, itemStack -> {
-                    if (!(itemStack.getItem() instanceof BlockItem)) return false;
-                    return b.trashItems.get().contains(itemStack.getItem());
-                });
+                int slot = findAndMoveToHotbar(b, itemStack -> itemStack.getItem() instanceof BlockItem bi && bi.getBlock() == Blocks.NETHERRACK);
                 if (slot == -1) {
-                    slot = findAndMoveToHotbar(b, itemStack -> {
-                        if (!(itemStack.getItem() instanceof BlockItem blockItem)) return false;
-                        return b.blocksToPlace.get().contains(blockItem.getBlock());
-                    });
-                }
-                if (slot == -1) {
-                    b.error("No suitable blocks available to encase before kit order.");
+                    b.error("No netherrack available to encase before kit order.");
                     return false;
                 }
 
@@ -2243,8 +2063,7 @@ public class HighwayBuilderTHM extends Module {
 
             private boolean breakCageTop(HighwayBuilderTHM b) {
                 BlockPos top = b.mc.player.getBlockPos().up(2);
-                Block topBlock = b.mc.world.getBlockState(top).getBlock();
-                if (!b.blocksToPlace.get().contains(topBlock) && !b.trashItems.get().contains(topBlock.asItem())) return false;
+                if (b.mc.world.getBlockState(top).getBlock() != Blocks.NETHERRACK) return false;
                 if (b.breakTimer > 0) return true;
 
                 Runnable breakBlock = () -> BlockUtils.breakBlock(top, true);
@@ -2849,19 +2668,15 @@ public class HighwayBuilderTHM extends Module {
             // extract all candidates for double mining and enqueue them to be mined. After those we can break the remaining
             // blocks normally
             if (b.doubleMine.get()) {
-                // todo hold the best mining tool before performing the double mining checks so we dont double mine blocks unnecessarily
                 ArrayDeque<BlockPos> toDoubleMine = new ArrayDeque<>();
 
                 it.save();
                 it.forEach(pos -> {
-                    BlockState state = pos.getState();
-                    Block block = state.getBlock();
                     // only want to double mine blocks that we can mine, that are not instamined, and we are not already mining
                     if (
-                        BlockUtils.canBreak(pos.getBlockPos(), state)
-                            && (mineBlocksToPlace || !b.blocksToPlace.get().contains(block))
-                            && !isInstaMineBlock(block)
-                            && (!Modules.get().get(SpeedMine.class).instamine() || state.calcBlockBreakingDelta(b.mc.player, b.mc.world, pos.getBlockPos()) <= 0.5)
+                        BlockUtils.canBreak(pos.getBlockPos(), pos.getState())
+                            && (mineBlocksToPlace || !b.blocksToPlace.get().contains(pos.getState().getBlock()))
+                            && !BlockUtils.canInstaBreak(pos.getBlockPos()) && (!Modules.get().get(SpeedMine.class).instamine() || pos.getState().calcBlockBreakingDelta(b.mc.player, b.mc.world, pos.getBlockPos()) <= 0.5)
                             && (b.normalMining == null || !pos.getBlockPos().equals(b.normalMining.blockPos))
                             && (b.packetMining == null || !pos.getBlockPos().equals(b.packetMining.blockPos))
                     ) {
@@ -2897,8 +2712,7 @@ public class HighwayBuilderTHM extends Module {
                 if (b.breakTimer > 0) return;
 
                 BlockState state = pos.getState();
-                Block block = state.getBlock();
-                if (state.isAir() || (!mineBlocksToPlace && b.blocksToPlace.get().contains(block))) continue;
+                if (state.isAir() || (!mineBlocksToPlace && b.blocksToPlace.get().contains(state.getBlock()))) continue;
 
                 int slot = findAndMoveBestToolToHotbar(b, state, false);
                 if (slot == -1) return;
@@ -2925,7 +2739,7 @@ public class HighwayBuilderTHM extends Module {
                     if (!multiBreak) break;
                 }
 
-                if (!it.hasNext() && isInstaMineBlock(block)) finishedBreaking = true;
+                if (!it.hasNext() && BlockUtils.canInstaBreak(mcPos)) finishedBreaking = true;
             }
 
             // we quickly jump to the next state, to remove micro delays in the process and allow us to break blocks
@@ -2933,109 +2747,6 @@ public class HighwayBuilderTHM extends Module {
             if (finishedBreaking || !breaking) {
                 b.setState(nextState, lastState);
             }
-        }
-
-        protected int countMineable(HighwayBuilderTHM b, MBPIterator it, boolean mineBlocksToPlace) {
-            int count = 0;
-            for (MBlockPos pos : it) {
-                if (b.canMine(pos, mineBlocksToPlace)) count++;
-            }
-            return count;
-        }
-
-        protected boolean minePartial(HighwayBuilderTHM b, MBPIterator it, boolean mineBlocksToPlace) {
-            boolean breaking = false;
-
-            for (MBlockPos pos : it) {
-                if (b.count >= b.blocksPerTick.get()) return breaking;
-                if (b.breakTimer > 0) return breaking;
-
-                BlockState state = pos.getState();
-                Block block = state.getBlock();
-                if (state.isAir() || (!mineBlocksToPlace && b.blocksToPlace.get().contains(block))) continue;
-
-                int slot = findAndMoveBestToolToHotbar(b, state, false);
-                if (slot == -1) return breaking;
-
-                if (slot != b.mc.player.getInventory().getSelectedSlot()) InvUtils.swap(slot, false);
-
-                BlockPos mcPos = pos.getBlockPos();
-                boolean multiBreak = b.blocksPerTick.get() > 1 && isInstaMineBlock(block) && !b.rotation.get().mine;
-                if (BlockUtils.canBreak(mcPos)) {
-                    if (b.rotation.get().mine) Rotations.rotate(Rotations.getYaw(mcPos), Rotations.getPitch(mcPos), () -> BlockUtils.breakBlock(mcPos, true));
-                    else BlockUtils.breakBlock(mcPos, true);
-                    breaking = true;
-
-                    b.breakTimer = b.breakDelay.get();
-
-                    if (!b.lastBreakingPos.equals(pos)) {
-                        b.lastBreakingPos.set(pos);
-                        b.blocksBroken++;
-                    }
-
-                    b.count++;
-
-                    if (!multiBreak) return true;
-                }
-            }
-
-            return breaking;
-        }
-
-        protected boolean minePartialInsta(HighwayBuilderTHM b, MBPIterator it, boolean mineBlocksToPlace) {
-            boolean breaking = false;
-
-            for (MBlockPos pos : it) {
-                if (b.count >= b.blocksPerTick.get()) return breaking;
-                if (b.breakTimer > 0) return breaking;
-
-                BlockState state = pos.getState();
-                Block block = state.getBlock();
-                if (!isInstaMineBlock(block)) continue;
-                if (state.isAir() || (!mineBlocksToPlace && b.blocksToPlace.get().contains(block))) continue;
-
-                int slot = findAndMoveBestToolToHotbar(b, state, false);
-                if (slot == -1) return breaking;
-
-                if (slot != b.mc.player.getInventory().getSelectedSlot()) InvUtils.swap(slot, false);
-
-                BlockPos mcPos = pos.getBlockPos();
-                boolean multiBreak = b.blocksPerTick.get() > 1 && !b.rotation.get().mine;
-                if (BlockUtils.canBreak(mcPos)) {
-                    if (b.rotation.get().mine) Rotations.rotate(Rotations.getYaw(mcPos), Rotations.getPitch(mcPos), () -> BlockUtils.breakBlock(mcPos, true));
-                    else BlockUtils.breakBlock(mcPos, true);
-                    breaking = true;
-
-                    b.breakTimer = b.breakDelay.get();
-
-                    if (!b.lastBreakingPos.equals(pos)) {
-                        b.lastBreakingPos.set(pos);
-                        b.blocksBroken++;
-                    }
-
-                    b.count++;
-
-                    if (!multiBreak) return true;
-                }
-            }
-
-            return breaking;
-        }
-
-        protected int countInstaMineable(HighwayBuilderTHM b, MBPIterator it, boolean mineBlocksToPlace) {
-            int count = 0;
-            for (MBlockPos pos : it) {
-                BlockState state = pos.getState();
-                Block block = state.getBlock();
-                if (!isInstaMineBlock(block)) continue;
-                if (state.isAir() || (!mineBlocksToPlace && b.blocksToPlace.get().contains(block))) continue;
-                if (BlockUtils.canBreak(pos.getBlockPos(), state)) count++;
-            }
-            return count;
-        }
-
-        protected boolean isInstaMineBlock(Block block) {
-            return block == Blocks.NETHERRACK || block == Blocks.STONE;
         }
 
         private void doubleMine(HighwayBuilderTHM b, ArrayDeque<BlockPos> blocks) {
@@ -4325,11 +4036,7 @@ public class HighwayBuilderTHM extends Module {
         }
 
         public boolean isReady() {
-            if (!b.fastBreak.get()) return progress() >= 1.0;
-            double threshold = 0.7;
-            if (block == Blocks.BASALT) threshold = 0.5;
-            if (block == Blocks.BLACKSTONE) threshold = 0.5;
-            return progress() >= threshold;
+            return progress() >= (b.fastBreak.get() ? 0.7 : 1.0);
         }
 
         public boolean shouldRemove() {
@@ -4416,4 +4123,3 @@ public class HighwayBuilderTHM extends Module {
         }
     }
 }
-

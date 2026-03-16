@@ -1,6 +1,8 @@
 package xyz.thm.addon.mixin;
 
 import meteordevelopment.meteorclient.systems.modules.Modules;
+import meteordevelopment.meteorclient.systems.modules.render.FreeLook;
+import meteordevelopment.meteorclient.systems.modules.render.Freecam;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.Camera;
 import net.minecraft.entity.Entity;
@@ -21,6 +23,12 @@ public abstract class HighwayBuilderEntityMixin {
 
         HighwayBuilderTHM highwayBuilder = Modules.get().get(HighwayBuilderTHM.class);
         if (highwayBuilder == null || !highwayBuilder.isActive()) return;
+
+        FreeLook freeLook = Modules.get().get(FreeLook.class);
+        if (freeLook != null && freeLook.isActive()) return;
+
+        Freecam freecam = Modules.get().get(Freecam.class);
+        if (freecam != null && freecam.isActive()) return;
 
         Camera camera = mc.gameRenderer.getCamera();
         float nextYaw = MathHelper.wrapDegrees((float) (camera.getYaw() + cursorDeltaX * 0.15));

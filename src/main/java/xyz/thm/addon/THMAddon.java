@@ -98,7 +98,6 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new AfkLogout());
         Modules.get().add(new FlightBypass());
         Modules.get().add(new KitbotFrontend());
-        Modules.get().add(new ElytraSwap());
         Modules.get().add(new ChestTrackerModule());
         if (BaritoneUtils.IS_AVAILABLE) {
             Modules.get().add(new HighwaySearcher());
