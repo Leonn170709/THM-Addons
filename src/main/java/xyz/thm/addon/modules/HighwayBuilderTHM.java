@@ -134,6 +134,18 @@ public class HighwayBuilderTHM extends Module {
     private final SettingGroup sgRenderDigging = settings.createGroup("Render Digging");
     private final SettingGroup sgRenderPaving = settings.createGroup("Render Paving");
 
+    private final Setting<Boolean> manageThmHwyMonitor = sgGeneral.add(new BoolSetting.Builder()
+        .name("manage-thm-hwy-monitor")
+        .description("Manages HighwayBuilder to reduce highway-building drift and auto-aligns the user on the current highway when HighwayBuilder is on.")
+        .defaultValue(false)
+        .onChanged(value -> {
+            if (!isActive()) return;
+            if (value) syncThmHwyMonitorOnActivate();
+            else syncThmHwyMonitorOnDeactivate();
+        })
+        .build()
+    );
+
     public final Setting<Integer> width = sgGeneral.add(new IntSetting.Builder()
         .name("width")
         .description("Width of the highway.")
@@ -845,6 +857,9 @@ public class HighwayBuilderTHM extends Module {
     public void onActivate() {
         if (mc.player == null || mc.world == null) return;
         if (!Utils.canUpdate()) return;
+
+        syncThmHwyMonitorOnActivate();
+
         previousPauseOnLostFocus = mc.options.pauseOnLostFocus;
         pauseOnLostFocusChanged = previousPauseOnLostFocus;
         if (pauseOnLostFocusChanged) togglePauseOnLostFocus(false);
@@ -919,6 +934,8 @@ public class HighwayBuilderTHM extends Module {
     }
     @Override
     public void onDeactivate() {
+        syncThmHwyMonitorOnDeactivate();
+
         Modules.get().get(Timer.class).setOverride(Timer.OFF);
 
         if (pauseOnLostFocusChanged) {
@@ -991,6 +1008,29 @@ public class HighwayBuilderTHM extends Module {
         }
 
     }
+
+    private void syncThmHwyMonitorOnActivate() {
+        if (!manageThmHwyMonitor.get()) return;
+
+        THMHwyMonitor monitor = Modules.get().get(THMHwyMonitor.class);
+        if (monitor == null || monitor.isActive()) return;
+
+        monitor.toggle();
+    }
+
+    private void syncThmHwyMonitorOnDeactivate() {
+        if (!manageThmHwyMonitor.get()) return;
+
+        THMHwyMonitor monitor = Modules.get().get(THMHwyMonitor.class);
+        if (monitor == null || !monitor.isActive()) return;
+
+        monitor.toggle();
+    }
+
+    public void disableWithoutMonitorSync(String reason) {
+        if (isActive()) toggle();
+    }
+
     @Override
     public void error(String message, Object... args) {
         super.error(message, args);
