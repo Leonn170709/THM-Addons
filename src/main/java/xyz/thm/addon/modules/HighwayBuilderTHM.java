@@ -91,6 +91,8 @@ import static xyz.thm.addon.utils.password.*;
 
 @SuppressWarnings("ConstantConditions")
 public class HighwayBuilderTHM extends Module {
+    private boolean suppressThmHwyMonitorSync;
+
     public enum Floor {
         Replace,
         PlaceMissing
@@ -133,6 +135,18 @@ public class HighwayBuilderTHM extends Module {
     private final SettingGroup sgNotifies = settings.createGroup("Notifies");
     private final SettingGroup sgRenderDigging = settings.createGroup("Render Digging");
     private final SettingGroup sgRenderPaving = settings.createGroup("Render Paving");
+
+    private final Setting<Boolean> manageThmHwyMonitor = sgGeneral.add(new BoolSetting.Builder()
+        .name("manage-thm-hwy-monitor")
+        .description("Manages HighwayBuilder to reduce highway-building drift and auto-aligns the user on the current highway when HighwayBuilder is on.")
+        .defaultValue(false)
+        .onChanged(value -> {
+            if (!isActive()) return;
+            if (value) syncThmHwyMonitorOnActivate();
+            else syncThmHwyMonitorOnDeactivate();
+        })
+        .build()
+    );
 
     public final Setting<Integer> width = sgGeneral.add(new IntSetting.Builder()
         .name("width")
@@ -845,6 +859,9 @@ public class HighwayBuilderTHM extends Module {
     public void onActivate() {
         if (mc.player == null || mc.world == null) return;
         if (!Utils.canUpdate()) return;
+
+        if (!suppressThmHwyMonitorSync) syncThmHwyMonitorOnActivate();
+
         previousPauseOnLostFocus = mc.options.pauseOnLostFocus;
         pauseOnLostFocusChanged = previousPauseOnLostFocus;
         if (pauseOnLostFocusChanged) togglePauseOnLostFocus(false);
@@ -919,6 +936,8 @@ public class HighwayBuilderTHM extends Module {
     }
     @Override
     public void onDeactivate() {
+        if (!suppressThmHwyMonitorSync) syncThmHwyMonitorOnDeactivate();
+
         Modules.get().get(Timer.class).setOverride(Timer.OFF);
 
         if (pauseOnLostFocusChanged) {
@@ -991,6 +1010,36 @@ public class HighwayBuilderTHM extends Module {
         }
 
     }
+
+    private void syncThmHwyMonitorOnActivate() {
+        if (!manageThmHwyMonitor.get()) return;
+
+        THMHwyMonitor monitor = Modules.get().get(THMHwyMonitor.class);
+        if (monitor == null || monitor.isActive()) return;
+
+        monitor.toggle();
+    }
+
+    private void syncThmHwyMonitorOnDeactivate() {
+        if (!manageThmHwyMonitor.get()) return;
+
+        THMHwyMonitor monitor = Modules.get().get(THMHwyMonitor.class);
+        if (monitor == null || !monitor.isActive()) return;
+
+        monitor.toggle();
+    }
+
+    public void disableForMonitorRealignPause() {
+        if (!isActive()) return;
+
+        suppressThmHwyMonitorSync = true;
+        try {
+            toggle();
+        } finally {
+            suppressThmHwyMonitorSync = false;
+        }
+    }
+
     @Override
     public void error(String message, Object... args) {
         super.error(message, args);

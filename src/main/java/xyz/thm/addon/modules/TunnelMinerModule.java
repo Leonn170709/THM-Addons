@@ -3,38 +3,45 @@ package xyz.thm.addon.modules;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
+import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
+import meteordevelopment.meteorclient.systems.modules.movement.speed.Speed;
+import meteordevelopment.meteorclient.systems.modules.movement.speed.SpeedModes;
 import meteordevelopment.meteorclient.systems.modules.player.AutoEat;
 import meteordevelopment.meteorclient.systems.modules.player.AutoGap;
 import meteordevelopment.meteorclient.systems.modules.player.Reach;
 import meteordevelopment.meteorclient.systems.modules.render.FreeLook;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.Rotations;
-import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
+import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.*;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.ContainerComponent;
 import net.minecraft.entity.ItemEntity;
-import net.minecraft.item.BlockItem;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
+import net.minecraft.entity.EntityPose;
+import net.minecraft.item.*;
+import net.minecraft.nbt.NbtCompound;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.FluidTags;
+import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.Formatting;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.*;
 import xyz.thm.addon.THMAddon;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -65,6 +72,14 @@ public class TunnelMinerModule extends Module {
     private static final int PROBE_LOOP_VISIT_REPLAN_THRESHOLD = 6;
     private static final int PROBE_REPLAN_COOLDOWN_TICKS = 8;
     private static final int PROBE_EMPTY_REPLAN_COOLDOWN_TICKS = 20;
+    private static final int PROBE_NO_STEPS_FORCE_REPLAN_TICKS = 35;
+    private static final int WALL_FOLLOW_PREFIX_FALLBACK_STEPS = 4;
+    private static final int WALL_FOLLOW_MAX_REROUTE_BLOCKS = 200;
+    private static final int WALL_FOLLOW_MIN_REJOIN_DISTANCE_BLOCKS = 5;
+    private static final int EMERGENCY_AIR_FALLBACK_MAX_TICKS = 40;
+    private static final int EMERGENCY_AIR_FALLBACK_MAX_BLOCKS = 5;
+    private static final int HAZARD_RECOVERY_MAX_TICKS = 40;
+    private static final boolean HAZARD_RECOVERY_FORCE_HARD_FAIL = true;
     private static final int NON_STEALTH_PROBE_MAX = 16;
     private static final double WALL_FOLLOW_MLINE_EPSILON = 0.75;
     private static final double GREEDY_BACKTRACK_PENALTY = 1000.0;
@@ -80,7 +95,10 @@ public class TunnelMinerModule extends Module {
     private static final boolean HARD_WATCHDOG_VERBOSE = true;
     private static final boolean HARD_WATCHDOG_HOTPATH_CALCULATIONS = false;
     private static final int HARD_WATCHDOG_MAX_FILE_MB = 256;
+    private static final int GOAL_FALLBACK_RADIUS = 47;
+    private static final int GOAL_FALLBACK_MAX_NODES = 4096;
     private static final String RESUME_CACHE_MAGIC = "THM_TUNNEL_RESUME_V1";
+    private static final String SPEED_SNAPSHOT_MAGIC = "THM_TUNNEL_SPEED_SNAPSHOT_V1";
     private static final String[] EMBEDDED_STATE_CHANGE_BLOCK_IDS = new String[] {
         "minecraft:stone",
         "minecraft:deepslate",
@@ -293,6 +311,219 @@ public class TunnelMinerModule extends Module {
     }
     private static final PathMode HARD_PATH_MODE = PathMode.DiagonalThenAxis;
 
+    public enum SettingsSource {
+        MANUAL("manual"),
+        API("api");
+
+        private final String id;
+
+        SettingsSource(String id) {
+            this.id = id;
+        }
+    }
+
+    public static final int API_STEALTH_OFF = 0;
+    public static final int API_STEALTH_ON = 1;
+
+    private record ApiGoToRequest(int x, int z, int stealthMode, boolean renderingEnabled) {}
+
+    private record EffectiveOptions(
+        int targetX,
+        int targetZ,
+        int tunnelHeight,
+        boolean fillBehind,
+        List<Block> fillBlocks,
+        boolean lavaAvoidance,
+        boolean airPlace,
+        int airPlaceDistance,
+        boolean autoFreeLook,
+        boolean resumeCacheOnReactivate,
+        boolean debugMessages,
+        boolean stealthMode,
+        int stealthProbeDistance,
+        int stealthMineAheadDistance,
+        double stealthStopRange,
+        boolean stealthDoubleMine,
+        boolean stealthFastBreak,
+        int stealthRestoreLagDistance,
+        boolean strictStealthExactRestore,
+        boolean watchdogEnabled,
+        boolean useShulkers,
+        boolean useEnderChest,
+        int minPickaxes,
+        int breaksPerTick,
+        int stealthBreakDelay,
+        int placesPerTick,
+        int placeDelay,
+        int invDelay,
+        ShapeMode shapeMode,
+        boolean renderMining,
+        boolean renderPlacing,
+        SettingColor breakSideColor,
+        SettingColor breakLineColor,
+        SettingColor placeSideColor,
+        SettingColor placeLineColor
+    ) {}
+
+    private record ApiModePreset(
+        int tunnelHeight,
+        boolean fillBehind,
+        List<Block> fillBlocks,
+        boolean lavaAvoidance,
+        boolean airPlace,
+        int airPlaceDistance,
+        boolean autoFreeLook,
+        boolean resumeCacheOnReactivate,
+        boolean debugMessages,
+        int stealthProbeDistance,
+        int stealthMineAheadDistance,
+        double stealthStopRange,
+        boolean stealthDoubleMine,
+        boolean stealthFastBreak,
+        int stealthRestoreLagDistance,
+        boolean strictStealthExactRestore,
+        boolean watchdogEnabled,
+        boolean useShulkers,
+        boolean useEnderChest,
+        int minPickaxes,
+        int breaksPerTick,
+        int stealthBreakDelay,
+        int placesPerTick,
+        int placeDelay,
+        int invDelay,
+        ShapeMode shapeMode,
+        SettingColor breakSideColor,
+        SettingColor breakLineColor,
+        SettingColor placeSideColor,
+        SettingColor placeLineColor
+    ) {}
+
+    private record SpeedSnapshot(
+        String speedModeName,
+        double vanillaSpeed,
+        double ncpSpeed,
+        boolean ncpSpeedLimit,
+        double timer,
+        boolean inLiquids,
+        boolean whenSneaking,
+        boolean vanillaOnGround,
+        boolean wasActive
+    ) {}
+
+    private static final Set<String> EFFECTIVE_OPTION_SETTING_FIELDS = Set.of(
+        "targetX",
+        "targetZ",
+        "tunnelHeight",
+        "fillBehind",
+        "fillBlocks",
+        "lavaAvoidance",
+        "airPlace",
+        "airPlaceDistance",
+        "autoFreeLook",
+        "resumeCacheOnReactivate",
+        "debugMessages",
+        "stealthMode",
+        "stealthProbeDistance",
+        "stealthMineAheadDistance",
+        "stealthStopRange",
+        "stealthDoubleMine",
+        "stealthFastBreak",
+        "stealthRestoreLagDistance",
+        "strictStealthExactRestore",
+        "watchdogEnabled",
+        "useShulkers",
+        "useEnderChest",
+        "minPickaxes",
+        "breaksPerTick",
+        "stealthBreakDelay",
+        "placesPerTick",
+        "placeDelay",
+        "invDelay",
+        "shapeMode",
+        "renderMining",
+        "renderPlacing",
+        "breakSideColor",
+        "breakLineColor",
+        "placeSideColor",
+        "placeLineColor"
+    );
+
+    private static final Set<String> NON_EFFECTIVE_OPTION_SETTING_FIELDS = Set.of(
+        "pathMode",
+        "detourSafetyBufferCost",
+        "rotate",
+        "stealthPathCalcIntervalTicks",
+        "stealthPathCalcMaxNodes",
+        "stealthAStarMaxFails",
+        "stealthStallStopTicks"
+    );
+
+    private static final ApiModePreset API_PRESET_STEALTH_ON = new ApiModePreset(
+        2,
+        true,
+        List.of(Blocks.NETHERRACK),
+        true,
+        true,
+        5,
+        true,
+        true,
+        false,
+        48,
+        4,
+        1.5,
+        true,
+        true,
+        4,
+        false,
+        false,
+        true,
+        false,
+        2,
+        2,
+        0,
+        1,
+        0,
+        3,
+        ShapeMode.Both,
+        new SettingColor(255, 0, 0, 35),
+        new SettingColor(255, 0, 0, 255),
+        new SettingColor(0, 0, 255, 35),
+        new SettingColor(0, 0, 255, 255)
+    );
+
+    private static final ApiModePreset API_PRESET_STEALTH_OFF = new ApiModePreset(
+        2,
+        false,
+        List.of(Blocks.NETHERRACK),
+        true,
+        true,
+        5,
+        true,
+        true,
+        false,
+        48,
+        4,
+        1.5,
+        true,
+        true,
+        4,
+        false,
+        false,
+        true,
+        false,
+        2,
+        2,
+        0,
+        1,
+        0,
+        3,
+        ShapeMode.Both,
+        new SettingColor(255, 0, 0, 35),
+        new SettingColor(255, 0, 0, 255),
+        new SettingColor(0, 0, 255, 35),
+        new SettingColor(0, 0, 255, 255)
+    );
+
     // ── Settings ──────────────────────────────────────────────────────────────
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -301,7 +532,6 @@ public class TunnelMinerModule extends Module {
     private final SettingGroup sgTiming  = settings.createGroup("Timing");
     private final SettingGroup sgRender = settings.createGroup("Render");
     private final SettingGroup sgWatchdog = settings.createGroup("Watchdog", false);
-    private final SettingGroup sgAdvanced = settings.createGroup("Advanced", false);
 
     private final Setting<Integer> targetX = sgGeneral.add(new IntSetting.Builder()
         .name("target-x").description("Target X coordinate.").defaultValue(0).build());
@@ -309,9 +539,10 @@ public class TunnelMinerModule extends Module {
     private final Setting<Integer> targetZ = sgGeneral.add(new IntSetting.Builder()
         .name("target-z").description("Target Z coordinate.").defaultValue(0).build());
 
-    private final Setting<PathMode> pathMode = sgAdvanced.add(new EnumSetting.Builder<PathMode>()
+    private final Setting<PathMode> pathMode = sgGeneral.add(new EnumSetting.Builder<PathMode>()
         .name("path-mode")
         .description("Path planner mode. AxisFirst preserves legacy behavior; DiagonalThenAxis alternates X/Z steps for a zigzag diagonal path while both axes differ.")
+        .visible(() -> false)
         .defaultValue(PathMode.AxisFirst)
         .build());
 
@@ -322,8 +553,7 @@ public class TunnelMinerModule extends Module {
     private final Setting<Boolean> fillBehind = sgGeneral.add(new BoolSetting.Builder()
         .name("fill-behind")
         .description("Fills the tunnel behind you with selected blocks.")
-        .defaultValue(true)
-        .build());
+        .defaultValue(true).build());
 
     private final Setting<List<Block>> fillBlocks = sgGeneral.add(new BlockListSetting.Builder()
         .name("fill-blocks")
@@ -337,17 +567,17 @@ public class TunnelMinerModule extends Module {
         .description("Detects and seals lava (source/flowing) in tunnel, ceiling, and tunnel-adjacent cells.")
         .defaultValue(true).build());
 
-    private final Setting<Double> detourSafetyBufferCost = sgAdvanced.add(new DoubleSetting.Builder()
+    private final Setting<Double> detourSafetyBufferCost = sgGeneral.add(new DoubleSetting.Builder()
         .name("detour-safety-buffer-cost")
         .description("Extra A* cost per blocked adjacent cell to keep detours farther from avoided blocks (0 disables).")
+        .visible(() -> false)
         .defaultValue(0.0).min(0.0).sliderMax(4.0)
         .build());
 
     private final Setting<Boolean> airPlace = sgGeneral.add(new BoolSetting.Builder()
         .name("air-place")
         .description("Use air place")
-        .defaultValue(false)
-        .build());
+        .defaultValue(true).build());
 
     private final Setting<Integer> airPlaceDistance = sgGeneral.add(new IntSetting.Builder()
         .name("scaffold")
@@ -357,6 +587,7 @@ public class TunnelMinerModule extends Module {
     private final Setting<Boolean> rotate = sgGeneral.add(new BoolSetting.Builder()
         .name("rotate")
         .description("Faces the block being interacted with.")
+        .visible(() -> false)
         .defaultValue(true)
         .build());
 
@@ -381,7 +612,7 @@ public class TunnelMinerModule extends Module {
     private final Setting<Boolean> stealthMode = sgStealth.add(new BoolSetting.Builder()
         .name("stealth-mode")
         .description("Probe ahead, mine ahead while moving, restore exact block types behind, and auto-enable all stealth avoidance rules.")
-        .defaultValue(false)
+        .defaultValue(true)
         .build());
 
     private final Setting<Integer> stealthProbeDistance = sgStealth.add(new IntSetting.Builder()
@@ -390,28 +621,31 @@ public class TunnelMinerModule extends Module {
         .defaultValue(48).min(1).max(64).sliderMax(32)
         .build());
 
-    private final Setting<Integer> stealthPathCalcIntervalTicks = sgAdvanced.add(new IntSetting.Builder()
+    private final Setting<Integer> stealthPathCalcIntervalTicks = sgStealth.add(new IntSetting.Builder()
         .name("path-calc-interval")
         .description("Minimum ticks between heavy probe path recalculations (higher = less lag, slower path updates).")
+        .visible(() -> false)
         .defaultValue(4).min(1).max(40).sliderMax(20)
         .build());
 
-    private final Setting<Integer> stealthPathCalcMaxNodes = sgAdvanced.add(new IntSetting.Builder()
+    private final Setting<Integer> stealthPathCalcMaxNodes = sgStealth.add(new IntSetting.Builder()
         .name("path-calc-max-nodes")
         .description("Maximum A* nodes expanded for probe/detour path calculations (lower = less lag).")
+        .visible(() -> false)
         .defaultValue(768).min(64).max(4096).sliderMax(2048)
         .build());
 
-    private final Setting<Integer> stealthAStarMaxFails = sgAdvanced.add(new IntSetting.Builder()
+    private final Setting<Integer> stealthAStarMaxFails = sgStealth.add(new IntSetting.Builder()
         .name("a-star-max-fails")
         .description("Consecutive probe A* failures before switching to counterclockwise wall-follow fallback.")
+        .visible(() -> false)
         .defaultValue(3).min(1).max(20).sliderMax(10)
         .build());
 
     private final Setting<Integer> stealthMineAheadDistance = sgStealth.add(new IntSetting.Builder()
         .name("mine-ahead-distance")
         .description("How many path steps ahead to actively mine while moving.")
-        .defaultValue(3).min(1).max(5).sliderMax(5)
+        .defaultValue(4).min(1).max(5).sliderMax(5)
         .build());
 
     private final Setting<Double> stealthStopRange = sgStealth.add(new DoubleSetting.Builder()
@@ -439,38 +673,44 @@ public class TunnelMinerModule extends Module {
         .defaultValue(4).min(0).max(4).sliderMax(4)
         .build());
 
-    private final Setting<Integer> stealthStallStopTicks = sgAdvanced.add(new IntSetting.Builder()
+    private final Setting<Boolean> strictStealthExactRestore = sgStealth.add(new BoolSetting.Builder()
+        .name("strict-exact-restore")
+        .description("Require exact original block restoration in stealth mode. If an exact restore block is missing from inventory, stop Tunnel Miner immediately.")
+        .defaultValue(false)
+        .build());
+
+    private final Setting<Integer> stealthStallStopTicks = sgStealth.add(new IntSetting.Builder()
         .name("stall-stop-ticks")
         .description("Stop the module if position/progress does not change for this many ticks (0 disables).")
+        .visible(() -> false)
         .defaultValue(400).min(0).max(36000).sliderMax(1200)
         .build());
 
     private final Setting<Boolean> watchdogEnabled = sgWatchdog.add(new BoolSetting.Builder()
         .name("watchdog-enabled")
         .description("Write Tunnel Miner execution watchdog logs to file. For Bug Reporting only.")
+        .visible(() -> false)
         .defaultValue(false)
         .build());
 
     private final Setting<Boolean> useShulkers = sgRestock.add(new BoolSetting.Builder()
         .name("use-shulkers")
         .description("Open shulker boxes to restock pickaxes when count is below minimum.")
-        .defaultValue(false).
-        build());
+        .defaultValue(true).build());
 
     private final Setting<Boolean> useEnderChest = sgRestock.add(new BoolSetting.Builder()
         .name("use-ender-chest")
         .description("Open ender chests to restock pickaxes when count is below minimum.")
-        .defaultValue(false).
-        build());
+        .defaultValue(false).build());
 
     private final Setting<Integer> minPickaxes = sgRestock.add(new IntSetting.Builder()
         .name("min-pickaxes")
-        .description("How many pickaxes to grab from the container before closing it.")
-        .defaultValue(3).min(1).max(10).sliderMax(10).build());
+        .description("How many pickaxes to keep in inventory.")
+        .defaultValue(2).min(1).max(10).sliderMax(10).build());
 
     private final Setting<Integer> breaksPerTick = sgTiming.add(new IntSetting.Builder()
         .name("breaks-per-tick").description("Block break attempts sent per tick.")
-        .defaultValue(1).min(1).max(5).sliderMax(5).build());
+        .defaultValue(2).min(1).max(5).sliderMax(5).build());
 
     private final Setting<Integer> stealthBreakDelay = sgTiming.add(new IntSetting.Builder()
         .name("break-delay")
@@ -484,7 +724,7 @@ public class TunnelMinerModule extends Module {
 
     private final Setting<Integer> placeDelay = sgTiming.add(new IntSetting.Builder()
         .name("place-delay").description("Ticks to wait between fill placements.")
-        .defaultValue(1).min(0).sliderMax(10).build());
+        .defaultValue(0).min(0).sliderMax(10).build());
 
     private final Setting<Integer> invDelay = sgTiming.add(new IntSetting.Builder()
         .name("inventory-delay").description("Ticks to wait between inventory actions.")
@@ -500,13 +740,13 @@ public class TunnelMinerModule extends Module {
     private final Setting<Boolean> renderMining = sgRender.add(new BoolSetting.Builder()
         .name("render-mining")
         .description("Render blocks currently queued/active for mining.")
-        .defaultValue(true)
+        .defaultValue(false)
         .build());
 
     private final Setting<Boolean> renderPlacing = sgRender.add(new BoolSetting.Builder()
         .name("render-placing")
         .description("Render blocks queued for restoration/placing.")
-        .defaultValue(true)
+        .defaultValue(false)
         .build());
 
     private final Setting<SettingColor> breakSideColor = sgRender.add(new ColorSetting.Builder()
@@ -551,13 +791,55 @@ public class TunnelMinerModule extends Module {
         DONE
     }
 
+    private enum HazardCondition {
+        NONE("none"),
+        SUFFOCATING("suffocating"),
+        SWIMMING("swimming"),
+        DROWNING("drowning"),
+        BURNING("burning");
+
+        private final String id;
+
+        HazardCondition(String id) {
+            this.id = id;
+        }
+    }
+
+    private enum GoalMode {
+        EXACT("exact"),
+        FALLBACK("fallback"),
+        UNREACHABLE("unreachable");
+
+        private final String id;
+
+        GoalMode(String id) {
+            this.id = id;
+        }
+    }
+
     private Phase phase;
 
     private record PathStep(int fromX, int fromZ, int toX, int toZ, int stepX, int stepZ) {}
     private record RestockPlacement(BlockPos containerPos, int forwardStepX, int forwardStepZ) {}
+    private record GoalResolution(int x, int z, GoalMode mode, String reason) {}
 
-    // Where we are going
+    // Requested destination (identity) and active navigation goal.
+    private int requestedDestX, requestedDestZ;
     private int destX, destZ, totalBlocks;
+    private int activeGoalX, activeGoalZ;
+    private GoalMode goalMode = GoalMode.EXACT;
+    private String goalReason = "";
+    private int fallbackSearchCachedPx = Integer.MIN_VALUE;
+    private int fallbackSearchCachedPz = Integer.MIN_VALUE;
+    private int fallbackSearchCachedPy = Integer.MIN_VALUE;
+    private int fallbackSearchCachedDestX = Integer.MIN_VALUE;
+    private int fallbackSearchCachedDestZ = Integer.MIN_VALUE;
+    private boolean fallbackSearchCachedRejectAirGaps;
+    private int fallbackSearchCachedAge = Integer.MIN_VALUE;
+    private int fallbackSearchResultX = Integer.MIN_VALUE;
+    private int fallbackSearchResultZ = Integer.MIN_VALUE;
+    private GoalMode fallbackSearchResultMode = GoalMode.UNREACHABLE;
+    private String fallbackSearchResultReason = "";
     private int tunnelY;
 
     // Which axis we are currently on (X first, then Z)
@@ -634,13 +916,20 @@ public class TunnelMinerModule extends Module {
     private int cachedProbeLastEmptyReplanAge = Integer.MIN_VALUE;
     private boolean cachedProbeOnXAxis;
     private boolean cachedProbeRejectAirGaps;
+    private boolean cachedProbeEmergencyNoScaffold;
     private PathMode cachedProbePathMode = HARD_PATH_MODE;
+    private int noProbePauseTicks;
+    private int emergencyAirFallbackTicksLeft;
+    private int emergencyAirFallbackBlocksLeft;
     private int probeAStarFailStreak;
     private boolean probeWallFollowActive;
     private int wallFollowMLineStartX = Integer.MIN_VALUE;
     private int wallFollowMLineStartZ = Integer.MIN_VALUE;
     private double wallFollowHitDistance = Double.POSITIVE_INFINITY;
     private int wallFollowHeading = 0;
+    private int wallFollowRerouteBlocks;
+    private HazardCondition hazardRecoveryCondition = HazardCondition.NONE;
+    private int hazardRecoveryTicks;
     private int proactiveAStarCacheFromX = Integer.MIN_VALUE;
     private int proactiveAStarCacheFromZ = Integer.MIN_VALUE;
     private int proactiveAStarCachePy = Integer.MIN_VALUE;
@@ -664,12 +953,404 @@ public class TunnelMinerModule extends Module {
     private boolean resumeStealthMode;
     private int resumeTunnelHeight;
     private int resumeTunnelY;
+    private boolean resumeFromCompletedRun;
+    private SettingsSource settingsSource = SettingsSource.MANUAL;
+    private boolean apiModeActive;
+    private EffectiveOptions effectiveOptions;
+    private ApiGoToRequest pendingApiGoToRequest;
+    private SpeedSnapshot speedSnapshot;
+    private boolean speedSnapshotOwned;
+    private boolean speedOverrideActive;
+    private boolean stealthSpeedWasEnabled;
+    private String speedSnapshotLastReason = "";
     // ── Constructor ───────────────────────────────────────────────────────────
 
     public TunnelMinerModule() {
         super(THMAddon.MAIN, "tunnel-miner",
             "Mines a tunnel block-by-block to target XZ coordinates at the same Y.");
         INSTANCE = this;
+        verifyEffectiveOptionsCoverage();
+        installManualEffectiveOptions();
+        loadSpeedSnapshotFromDisk();
+    }
+
+    private void verifyEffectiveOptionsCoverage() {
+        Set<String> discovered = new HashSet<>();
+        for (Field field : TunnelMinerModule.class.getDeclaredFields()) {
+            if (Setting.class.isAssignableFrom(field.getType())) discovered.add(field.getName());
+        }
+
+        Set<String> unmapped = new TreeSet<>(discovered);
+        unmapped.removeAll(EFFECTIVE_OPTION_SETTING_FIELDS);
+        unmapped.removeAll(NON_EFFECTIVE_OPTION_SETTING_FIELDS);
+        if (!unmapped.isEmpty()) {
+            throw new IllegalStateException("TunnelMiner EffectiveOptions mapping missing settings: " + unmapped);
+        }
+
+        Set<String> expected = new HashSet<>(EFFECTIVE_OPTION_SETTING_FIELDS);
+        expected.addAll(NON_EFFECTIVE_OPTION_SETTING_FIELDS);
+        Set<String> stale = new TreeSet<>(expected);
+        stale.removeAll(discovered);
+        if (!stale.isEmpty()) {
+            throw new IllegalStateException("TunnelMiner EffectiveOptions mapping references unknown settings: " + stale);
+        }
+    }
+
+    private void installManualEffectiveOptions() {
+        settingsSource = SettingsSource.MANUAL;
+        apiModeActive = false;
+        effectiveOptions = buildManualEffectiveOptions();
+    }
+
+    private void installApiEffectiveOptions(int x, int z, int stealthMode, boolean renderingEnabled) {
+        settingsSource = SettingsSource.API;
+        apiModeActive = true;
+        effectiveOptions = buildApiEffectiveOptions(x, z, stealthMode, renderingEnabled);
+    }
+
+    private void resetApiOwnershipAfterStop() {
+        pendingApiGoToRequest = null;
+        apiModeActive = false;
+        settingsSource = SettingsSource.MANUAL;
+        effectiveOptions = null;
+    }
+
+    private EffectiveOptions getEffectiveOptions() {
+        if (effectiveOptions == null) {
+            installManualEffectiveOptions();
+        } else if (!apiModeActive && !isActive()) {
+            // Keep manual previews/HUD reads current while the module is idle.
+            effectiveOptions = buildManualEffectiveOptions();
+        }
+        return effectiveOptions;
+    }
+
+    private EffectiveOptions buildManualEffectiveOptions() {
+        return new EffectiveOptions(
+            targetX.get(),
+            targetZ.get(),
+            tunnelHeight.get(),
+            fillBehind.get(),
+            List.copyOf(fillBlocks.get()),
+            lavaAvoidance.get(),
+            airPlace.get(),
+            airPlaceDistance.get(),
+            autoFreeLook.get(),
+            resumeCacheOnReactivate.get(),
+            debugMessages.get(),
+            stealthMode.get(),
+            stealthProbeDistance.get(),
+            stealthMineAheadDistance.get(),
+            stealthStopRange.get(),
+            stealthDoubleMine.get(),
+            stealthFastBreak.get(),
+            stealthRestoreLagDistance.get(),
+            strictStealthExactRestore.get(),
+            watchdogEnabled.get(),
+            useShulkers.get(),
+            useEnderChest.get(),
+            minPickaxes.get(),
+            breaksPerTick.get(),
+            stealthBreakDelay.get(),
+            placesPerTick.get(),
+            placeDelay.get(),
+            invDelay.get(),
+            shapeMode.get(),
+            renderMining.get(),
+            renderPlacing.get(),
+            copyColor(breakSideColor.get()),
+            copyColor(breakLineColor.get()),
+            copyColor(placeSideColor.get()),
+            copyColor(placeLineColor.get())
+        );
+    }
+
+    private static boolean isSupportedApiStealthMode(int stealthMode) {
+        return stealthMode == API_STEALTH_OFF || stealthMode == API_STEALTH_ON;
+    }
+
+    private static boolean resolveApiStealthEnabled(int stealthMode) {
+        return stealthMode == API_STEALTH_ON;
+    }
+
+    private EffectiveOptions buildApiEffectiveOptions(int x, int z, int stealthMode, boolean renderingEnabled) {
+        boolean stealthEnabled = resolveApiStealthEnabled(stealthMode);
+        ApiModePreset preset = stealthEnabled ? API_PRESET_STEALTH_ON : API_PRESET_STEALTH_OFF;
+        return new EffectiveOptions(
+            x,
+            z,
+            preset.tunnelHeight(),
+            preset.fillBehind(),
+            List.copyOf(preset.fillBlocks()),
+            preset.lavaAvoidance(),
+            preset.airPlace(),
+            preset.airPlaceDistance(),
+            preset.autoFreeLook(),
+            preset.resumeCacheOnReactivate(),
+            preset.debugMessages(),
+            stealthEnabled,
+            preset.stealthProbeDistance(),
+            preset.stealthMineAheadDistance(),
+            preset.stealthStopRange(),
+            preset.stealthDoubleMine(),
+            preset.stealthFastBreak(),
+            preset.stealthRestoreLagDistance(),
+            preset.strictStealthExactRestore(),
+            preset.watchdogEnabled(),
+            preset.useShulkers(),
+            preset.useEnderChest(),
+            preset.minPickaxes(),
+            preset.breaksPerTick(),
+            preset.stealthBreakDelay(),
+            preset.placesPerTick(),
+            preset.placeDelay(),
+            preset.invDelay(),
+            preset.shapeMode(),
+            renderingEnabled,
+            renderingEnabled,
+            copyColor(preset.breakSideColor()),
+            copyColor(preset.breakLineColor()),
+            copyColor(preset.placeSideColor()),
+            copyColor(preset.placeLineColor())
+        );
+    }
+
+    private static SettingColor copyColor(SettingColor color) {
+        return color == null ? new SettingColor(255, 255, 255, 255) : new SettingColor(color);
+    }
+
+    private int optTargetX() { return getEffectiveOptions().targetX(); }
+    private int optTargetZ() { return getEffectiveOptions().targetZ(); }
+    private int optTunnelHeight() { return getEffectiveOptions().tunnelHeight(); }
+    private boolean optFillBehind() { return getEffectiveOptions().fillBehind(); }
+    private List<Block> optFillBlocks() { return getEffectiveOptions().fillBlocks(); }
+    private boolean optLavaAvoidance() { return getEffectiveOptions().lavaAvoidance(); }
+    private boolean optAirPlace() { return getEffectiveOptions().airPlace(); }
+    private int optAirPlaceDistance() { return getEffectiveOptions().airPlaceDistance(); }
+    private boolean optAutoFreeLook() { return getEffectiveOptions().autoFreeLook(); }
+    private boolean optResumeCacheOnReactivate() { return getEffectiveOptions().resumeCacheOnReactivate(); }
+    private boolean optDebugMessages() { return getEffectiveOptions().debugMessages(); }
+    private boolean optStealthMode() { return getEffectiveOptions().stealthMode(); }
+    private int optStealthProbeDistance() { return getEffectiveOptions().stealthProbeDistance(); }
+    private int optStealthMineAheadDistance() { return getEffectiveOptions().stealthMineAheadDistance(); }
+    private double optStealthStopRange() { return getEffectiveOptions().stealthStopRange(); }
+    private boolean optStealthDoubleMine() { return getEffectiveOptions().stealthDoubleMine(); }
+    private boolean optStealthFastBreak() { return getEffectiveOptions().stealthFastBreak(); }
+    private int optStealthRestoreLagDistance() { return getEffectiveOptions().stealthRestoreLagDistance(); }
+    private boolean optStrictStealthExactRestore() { return getEffectiveOptions().strictStealthExactRestore(); }
+    private boolean optWatchdogEnabled() { return getEffectiveOptions().watchdogEnabled(); }
+    private boolean optUseShulkers() { return getEffectiveOptions().useShulkers(); }
+    private boolean optUseEnderChest() { return getEffectiveOptions().useEnderChest(); }
+    private int optMinPickaxes() { return getEffectiveOptions().minPickaxes(); }
+    private int optBreaksPerTick() { return getEffectiveOptions().breaksPerTick(); }
+    private int optStealthBreakDelay() { return getEffectiveOptions().stealthBreakDelay(); }
+    private int optPlacesPerTick() { return getEffectiveOptions().placesPerTick(); }
+    private int optPlaceDelay() { return getEffectiveOptions().placeDelay(); }
+    private int optInvDelay() { return getEffectiveOptions().invDelay(); }
+    private ShapeMode optShapeMode() { return getEffectiveOptions().shapeMode(); }
+    private boolean optRenderMining() { return getEffectiveOptions().renderMining(); }
+    private boolean optRenderPlacing() { return getEffectiveOptions().renderPlacing(); }
+    private SettingColor optBreakSideColor() { return getEffectiveOptions().breakSideColor(); }
+    private SettingColor optBreakLineColor() { return getEffectiveOptions().breakLineColor(); }
+    private SettingColor optPlaceSideColor() { return getEffectiveOptions().placeSideColor(); }
+    private SettingColor optPlaceLineColor() { return getEffectiveOptions().placeLineColor(); }
+
+    private boolean isStealthEnabledForSpeedOwnership() {
+        if (settingsSource == SettingsSource.API || apiModeActive) return optStealthMode();
+        return stealthMode.get();
+    }
+
+    private void tryApplyStealthSpeedControl(String reason) {
+        if (!isStealthEnabledForSpeedOwnership()) return;
+        if (!ensureSpeedSnapshotCapturedIfNeeded(reason)) return;
+        applyStealthSpeedOverride(reason);
+    }
+
+    private boolean ensureSpeedSnapshotCapturedIfNeeded(String reason) {
+        if (speedSnapshotOwned && speedSnapshot != null) return true;
+        if (speedSnapshotOwned && speedSnapshot == null) clearSpeedSnapshotState("owned-without-snapshot", true);
+
+        Speed speed = Modules.get().get(Speed.class);
+        if (speed == null) {
+            if (optDebugMessages()) warning("Speed snapshot capture skipped: Speed module not found.");
+            speedSnapshotLastReason = "capture-missing-speed:" + reason;
+            return false;
+        }
+
+        speedSnapshot = new SpeedSnapshot(
+            speed.speedMode.get().name(),
+            speed.vanillaSpeed.get(),
+            speed.ncpSpeed.get(),
+            speed.ncpSpeedLimit.get(),
+            speed.timer.get(),
+            speed.inLiquids.get(),
+            speed.whenSneaking.get(),
+            speed.vanillaOnGround.get(),
+            speed.isActive()
+        );
+        speedSnapshotOwned = true;
+        speedSnapshotLastReason = "captured:" + reason;
+        persistSpeedSnapshotToDisk();
+        return true;
+    }
+
+    private void applyStealthSpeedOverride(String reason) {
+        Speed speed = Modules.get().get(Speed.class);
+        if (speed == null) {
+            if (optDebugMessages()) warning("Speed override skipped: Speed module not found.");
+            speedSnapshotLastReason = "override-missing-speed:" + reason;
+            return;
+        }
+
+        speed.speedMode.set(SpeedModes.Vanilla);
+        speed.vanillaSpeed.set(4.0);
+        speed.timer.set(1.0);
+        speed.inLiquids.set(false);
+        speed.whenSneaking.set(false);
+        speed.vanillaOnGround.set(false);
+        if (!speed.isActive()) speed.toggle();
+        speedOverrideActive = true;
+        speedSnapshotLastReason = "override-applied:" + reason;
+    }
+
+    private void restoreSpeedFromSnapshotIfOwned(String reason) {
+        if (!speedSnapshotOwned || speedSnapshot == null) return;
+
+        Speed speed = Modules.get().get(Speed.class);
+        if (speed == null) {
+            if (optDebugMessages()) warning("Speed restore deferred: Speed module not found.");
+            speedSnapshotLastReason = "restore-missing-speed:" + reason;
+            return;
+        }
+
+        try {
+            speed.speedMode.set(parseSpeedModeOrDefault(speedSnapshot.speedModeName()));
+            speed.vanillaSpeed.set(speedSnapshot.vanillaSpeed());
+            speed.ncpSpeed.set(speedSnapshot.ncpSpeed());
+            speed.ncpSpeedLimit.set(speedSnapshot.ncpSpeedLimit());
+            speed.timer.set(speedSnapshot.timer());
+            speed.inLiquids.set(speedSnapshot.inLiquids());
+            speed.whenSneaking.set(speedSnapshot.whenSneaking());
+            speed.vanillaOnGround.set(speedSnapshot.vanillaOnGround());
+
+            boolean active = speed.isActive();
+            if (speedSnapshot.wasActive() && !active) speed.toggle();
+            else if (!speedSnapshot.wasActive() && active) speed.toggle();
+
+            clearSpeedSnapshotState("restored:" + reason, true);
+        } catch (Exception e) {
+            speedSnapshotLastReason = "restore-error:" + e.getClass().getSimpleName();
+            if (optDebugMessages()) warning("Speed restore failed; keeping snapshot for retry. " + e.getMessage());
+        }
+    }
+
+    private SpeedModes parseSpeedModeOrDefault(String value) {
+        if (value == null || value.isBlank()) return SpeedModes.Vanilla;
+        try {
+            return SpeedModes.valueOf(value.trim());
+        } catch (IllegalArgumentException ignored) {
+            return SpeedModes.Vanilla;
+        }
+    }
+
+    private void clearSpeedSnapshotState(String reason, boolean deleteFile) {
+        speedSnapshotOwned = false;
+        speedSnapshot = null;
+        speedOverrideActive = false;
+        speedSnapshotLastReason = reason == null ? "" : reason;
+        if (!deleteFile) return;
+
+        Path path = resolveSpeedSnapshotPath();
+        try {
+            if (Files.exists(path)) Files.delete(path);
+        } catch (IOException e) {
+            if (optDebugMessages()) warning("Failed deleting speed snapshot file (" + path + "): " + e.getMessage());
+        }
+    }
+
+    private void persistSpeedSnapshotToDisk() {
+        Path path = resolveSpeedSnapshotPath();
+        if (!speedSnapshotOwned || speedSnapshot == null) {
+            clearSpeedSnapshotState("persist-clear", true);
+            return;
+        }
+
+        try {
+            Path parent = path.getParent();
+            if (parent != null) Files.createDirectories(parent);
+
+            StringBuilder out = new StringBuilder(1024);
+            out.append(SPEED_SNAPSHOT_MAGIC).append('\n');
+            appendResumeMeta(out, "speedMode", speedSnapshot.speedModeName());
+            appendResumeMeta(out, "vanillaSpeed", speedSnapshot.vanillaSpeed());
+            appendResumeMeta(out, "ncpSpeed", speedSnapshot.ncpSpeed());
+            appendResumeMeta(out, "ncpSpeedLimit", speedSnapshot.ncpSpeedLimit());
+            appendResumeMeta(out, "timer", speedSnapshot.timer());
+            appendResumeMeta(out, "inLiquids", speedSnapshot.inLiquids());
+            appendResumeMeta(out, "whenSneaking", speedSnapshot.whenSneaking());
+            appendResumeMeta(out, "vanillaOnGround", speedSnapshot.vanillaOnGround());
+            appendResumeMeta(out, "wasActive", speedSnapshot.wasActive());
+            appendResumeMeta(out, "savedAt", System.currentTimeMillis());
+
+            Path tmp = path.resolveSibling(path.getFileName().toString() + ".tmp");
+            Files.writeString(tmp, out.toString(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+            try {
+                Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException ignored) {
+                Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException e) {
+            speedSnapshotLastReason = "persist-error";
+            if (optDebugMessages()) warning("Failed writing speed snapshot file (" + path + "): " + e.getMessage());
+        }
+    }
+
+    private void loadSpeedSnapshotFromDisk() {
+        Path path = resolveSpeedSnapshotPath();
+        if (!Files.exists(path)) return;
+
+        HashMap<String, String> meta = new HashMap<>();
+        try {
+            List<String> lines = Files.readAllLines(path);
+            if (lines.isEmpty() || !SPEED_SNAPSHOT_MAGIC.equals(lines.get(0).trim())) {
+                clearSpeedSnapshotState("load-invalid-magic", true);
+                return;
+            }
+
+            for (int i = 1; i < lines.size(); i++) {
+                String line = lines.get(i);
+                if (line == null) continue;
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("#")) continue;
+                String[] parts = line.split("\\|", 3);
+                if (parts.length < 3 || !"meta".equals(parts[0])) continue;
+                meta.put(parts[1], parts[2]);
+            }
+
+            speedSnapshot = new SpeedSnapshot(
+                meta.getOrDefault("speedMode", SpeedModes.Vanilla.name()),
+                parseDoubleSafe(meta.get("vanillaSpeed"), 5.6),
+                parseDoubleSafe(meta.get("ncpSpeed"), 1.6),
+                Boolean.parseBoolean(meta.getOrDefault("ncpSpeedLimit", "false")),
+                parseDoubleSafe(meta.get("timer"), 1.0),
+                Boolean.parseBoolean(meta.getOrDefault("inLiquids", "false")),
+                Boolean.parseBoolean(meta.getOrDefault("whenSneaking", "false")),
+                Boolean.parseBoolean(meta.getOrDefault("vanillaOnGround", "false")),
+                Boolean.parseBoolean(meta.getOrDefault("wasActive", "false"))
+            );
+            speedSnapshotOwned = true;
+            speedOverrideActive = false;
+            speedSnapshotLastReason = "loaded-disk";
+        } catch (Exception e) {
+            speedSnapshotLastReason = "load-error";
+            clearSpeedSnapshotState("load-error", true);
+        }
+    }
+
+    private Path resolveSpeedSnapshotPath() {
+        return MeteorClient.FOLDER.toPath()
+            .resolve("thm")
+            .resolve("tunnelminer-speed-snapshot.txt");
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -677,49 +1358,92 @@ public class TunnelMinerModule extends Module {
     @Override
     public void onActivate() {
         if (mc.player == null) return;
+        ApiGoToRequest pendingRequest = pendingApiGoToRequest;
+        pendingApiGoToRequest = null;
+        if (pendingRequest != null) {
+            installApiEffectiveOptions(
+                pendingRequest.x(),
+                pendingRequest.z(),
+                pendingRequest.stealthMode(),
+                pendingRequest.renderingEnabled()
+            );
+        } else {
+            installManualEffectiveOptions();
+        }
+        stealthSpeedWasEnabled = isStealthEnabledForSpeedOwnership();
+        if (stealthSpeedWasEnabled) tryApplyStealthSpeedControl("activate");
         flushWatchdogBuffer();
         watchdogWriteBuffer.setLength(0);
         watchdogWriteBufferLines = 0;
-        int requestedDestX = targetX.get();
-        int requestedDestZ = targetZ.get();
+        requestedDestX = optTargetX();
+        requestedDestZ = optTargetZ();
         int px = MathHelper.floor(mc.player.getX());
         int py = MathHelper.floor(mc.player.getY());
         int pz = MathHelper.floor(mc.player.getZ());
 
-        if (!resumeCacheOnReactivate.get()) {
-            clearResumeCacheFile();
-        } else if (!resumeStateAvailable) {
+        if (!optResumeCacheOnReactivate()) {
+            clearResumeCacheState("setting-disabled");
+        } else {
             loadResumeCacheFromDisk();
         }
 
-        boolean movedTooFarFromPause = resumePausePosValid
-            && (Math.abs(px - resumePauseX) > 4 || Math.abs(pz - resumePauseZ) > 4);
-
-        if (movedTooFarFromPause) {
-            fillLog.clear();
-            stealthCache.clear();
-            resumeStateAvailable = false;
-            clearResumeCacheFile();
-            if (debugMessages.get()) info("Cleared resume cache: moved more than 4 blocks from last pause position.");
-            watchdog("resume-cache-cleared", String.format(Locale.ROOT, "reason=distance,px=%d,pz=%d,pauseX=%d,pauseZ=%d", px, pz, resumePauseX, resumePauseZ));
+        boolean hasResumeEntries = resumeStateAvailable && (!fillLog.isEmpty() || !stealthCache.isEmpty());
+        boolean pendingRestoreInRange = true;
+        if (hasResumeEntries && shouldMaintainBehindParity()) {
+            pendingRestoreInRange = hasAnyPendingRestoreWithinDistance(4.5);
+            if (!pendingRestoreInRange) {
+                clearResumeCacheState("out-of-restore-range-4.5");
+                hasResumeEntries = false;
+            }
         }
 
-        boolean canResume = resumeCacheOnReactivate.get()
-            && resumeStateAvailable
-            && resumeDestX == requestedDestX
-            && resumeDestZ == requestedDestZ
-            && resumeStealthMode == stealthMode.get()
-            && resumeTunnelHeight == tunnelHeight.get()
-            && resumeTunnelY == py
-            && resumePausePosValid
-            && Math.abs(px - resumePauseX) <= 4
-            && Math.abs(pz - resumePauseZ) <= 4;
+        // Destination changes should not invalidate restore cache.
+        // We only treat core execution context (mode/shape/y/pause position) as mismatch.
+        boolean contextMatch = !hasResumeEntries || (
+            resumeStealthMode == optStealthMode()
+                && resumeTunnelHeight == optTunnelHeight()
+                && resumeTunnelY == py
+                && resumePausePosValid
+        );
+
+        boolean allowCompletedMismatchCarryover = hasResumeEntries
+            && !contextMatch
+            && resumeFromCompletedRun
+            && shouldMaintainBehindParity()
+            && pendingRestoreInRange;
+
+        if (hasResumeEntries && !contextMatch && !allowCompletedMismatchCarryover) {
+            clearResumeCacheState("mismatch");
+            hasResumeEntries = false;
+        }
+
+        boolean canResume = optResumeCacheOnReactivate()
+            && hasResumeEntries
+            && contextMatch
+            && resumePausePosValid;
+        boolean keepCarryoverCache = optResumeCacheOnReactivate()
+            && hasResumeEntries
+            && !contextMatch
+            && allowCompletedMismatchCarryover;
+        String resumeMode = canResume ? "resume-path" : (keepCarryoverCache ? "carryover-cache" : "fresh-start");
 
         destX = requestedDestX;
         destZ = requestedDestZ;
+        activeGoalX = destX;
+        activeGoalZ = destZ;
+        goalMode = GoalMode.EXACT;
+        goalReason = "activate";
+        fallbackSearchCachedPx = Integer.MIN_VALUE;
+        fallbackSearchCachedPz = Integer.MIN_VALUE;
+        fallbackSearchCachedPy = Integer.MIN_VALUE;
+        fallbackSearchCachedDestX = Integer.MIN_VALUE;
+        fallbackSearchCachedDestZ = Integer.MIN_VALUE;
+        fallbackSearchCachedAge = Integer.MIN_VALUE;
+        fallbackSearchResultMode = GoalMode.UNREACHABLE;
+        fallbackSearchResultReason = "";
         tunnelY = canResume ? resumeTunnelY : py;
         onXAxis = canResume ? resumeOnXAxis : true;
-        if (!canResume) {
+        if (!canResume && !keepCarryoverCache) {
             fillLog.clear();
             stealthCache.clear();
             resumeStateAvailable = false;
@@ -739,13 +1463,22 @@ public class TunnelMinerModule extends Module {
         cachedProbeLastEmptyReplanAge = Integer.MIN_VALUE;
         cachedProbeOnXAxis = onXAxis;
         cachedProbeRejectAirGaps = useStealthAvoidAirGapDetours();
+        cachedProbeEmergencyNoScaffold = false;
         cachedProbePathMode = hardPathMode();
+        noProbePauseTicks = 0;
+        emergencyAirFallbackTicksLeft = 0;
+        emergencyAirFallbackBlocksLeft = 0;
+        emergencyAirFallbackTicksLeft = 0;
+        emergencyAirFallbackBlocksLeft = 0;
         probeAStarFailStreak = 0;
         probeWallFollowActive = false;
         wallFollowMLineStartX = Integer.MIN_VALUE;
         wallFollowMLineStartZ = Integer.MIN_VALUE;
         wallFollowHitDistance = Double.POSITIVE_INFINITY;
         wallFollowHeading = 0;
+        wallFollowRerouteBlocks = 0;
+        hazardRecoveryCondition = HazardCondition.NONE;
+        hazardRecoveryTicks = 0;
         placeTimer = invTimer = waitTicks = 0;
         restockPlaceRetries = 0;
         stealthBreakTimer = 0;
@@ -776,18 +1509,19 @@ public class TunnelMinerModule extends Module {
         reloadAvoidanceBlockSets();
         managedFreeLook = false;
         freeLookModule = Modules.get().get(FreeLook.class);
-        if (autoFreeLook.get() && freeLookModule != null && !freeLookModule.isActive()) {
+        if (optAutoFreeLook() && freeLookModule != null && !freeLookModule.isActive()) {
             freeLookModule.toggle();
             managedFreeLook = freeLookModule.isActive();
         }
         clearStealthMining(false);
         totalBlocks = blocksLeftFrom(px, pz);
         phase = Phase.INIT;
-        if (debugMessages.get()) {
-            if (canResume) info("Resuming tunnel to X=" + destX + " Z=" + destZ + " (" + totalBlocks + " blocks left)");
-            else info("Start tunnel to X=" + destX + " Z=" + destZ + " (" + totalBlocks + " blocks)");
+        if (optDebugMessages()) {
+            if (canResume) info("Resuming tunnel to X=" + requestedDestX + " Z=" + requestedDestZ + " (" + totalBlocks + " blocks left)");
+            else if (keepCarryoverCache) info("Starting tunnel with carryover restore cache to X=" + requestedDestX + " Z=" + requestedDestZ + " (" + totalBlocks + " blocks)");
+            else info("Start tunnel to X=" + requestedDestX + " Z=" + requestedDestZ + " (" + totalBlocks + " blocks)");
         }
-        watchdog("onActivate", String.format(Locale.ROOT, "targetX=%d,targetZ=%d,targetY=%d,totalBlocks=%d", destX, destZ, tunnelY, totalBlocks));
+        watchdog("onActivate", String.format(Locale.ROOT, "targetX=%d,targetZ=%d,targetY=%d,totalBlocks=%d,resumeMode=%s", requestedDestX, requestedDestZ, tunnelY, totalBlocks, resumeMode));
 
     }
 
@@ -797,6 +1531,13 @@ public class TunnelMinerModule extends Module {
         renderBreakPositions.clear();
         activeProbePositions.clear();
         activeMineTargets.clear();
+        noProbePauseTicks = 0;
+        cachedProbeEmergencyNoScaffold = false;
+        wallFollowRerouteBlocks = 0;
+        emergencyAirFallbackTicksLeft = 0;
+        emergencyAirFallbackBlocksLeft = 0;
+        hazardRecoveryCondition = HazardCondition.NONE;
+        hazardRecoveryTicks = 0;
         containerPos = null;
         restockCleanupPos = null;
         resetRestockStageState();
@@ -807,19 +1548,23 @@ public class TunnelMinerModule extends Module {
             resumePauseZ = MathHelper.floor(mc.player.getZ());
             resumePausePosValid = true;
         }
-        resumeDestX = destX;
-        resumeDestZ = destZ;
+        resumeDestX = requestedDestX;
+        resumeDestZ = requestedDestZ;
         resumeOnXAxis = onXAxis;
-        resumeStealthMode = stealthMode.get();
-        resumeTunnelHeight = tunnelHeight.get();
+        resumeStealthMode = optStealthMode();
+        resumeTunnelHeight = optTunnelHeight();
         resumeTunnelY = tunnelY;
-        resumeStateAvailable = phase != Phase.DONE && (!fillLog.isEmpty() || !stealthCache.isEmpty());
+        resumeFromCompletedRun = phase == Phase.DONE;
+        resumeStateAvailable = (!fillLog.isEmpty() || !stealthCache.isEmpty());
         saveResumeCacheToDisk();
+        restoreSpeedFromSnapshotIfOwned(phase == Phase.DONE ? "done" : "stopped");
         if (managedFreeLook && freeLookModule != null && freeLookModule.isActive()) freeLookModule.toggle();
         managedFreeLook = false;
-        if (debugMessages.get()) {info("Stopped.");}
+        stealthSpeedWasEnabled = false;
+        if (optDebugMessages()) {info("Stopped.");}
         watchdog("onDeactivate");
         flushWatchdogBuffer();
+        resetApiOwnershipAfterStop();
 
     }
 
@@ -867,6 +1612,140 @@ public class TunnelMinerModule extends Module {
         return pause;
     }
 
+    private boolean handleHazardRecovery(long tickStartNs) {
+        HazardCondition hazard = detectCurrentHazard();
+        if (hazard == HazardCondition.NONE) {
+            if (hazardRecoveryCondition != HazardCondition.NONE || hazardRecoveryTicks > 0) {
+                watchdog(
+                    "hazard-recovery-cleared",
+                    String.format(
+                        Locale.ROOT,
+                        "lastHazard=%s,recoveryTicks=%d,air=%d,maxAir=%d",
+                        hazardRecoveryCondition.id,
+                        hazardRecoveryTicks,
+                        mc.player.getAir(),
+                        mc.player.getMaxAir()
+                    )
+                );
+            }
+            hazardRecoveryCondition = HazardCondition.NONE;
+            hazardRecoveryTicks = 0;
+            return false;
+        }
+
+        if (hazardRecoveryCondition != hazard) {
+            watchdog(
+                "hazard-recovery-switch",
+                String.format(
+                    Locale.ROOT,
+                    "from=%s,to=%s,air=%d,maxAir=%d",
+                    hazardRecoveryCondition.id,
+                    hazard.id,
+                    mc.player.getAir(),
+                    mc.player.getMaxAir()
+                )
+            );
+            hazardRecoveryCondition = hazard;
+            hazardRecoveryTicks = 0;
+        }
+
+        hazardRecoveryTicks++;
+        if (mc.options != null) mc.options.forwardKey.setPressed(false);
+        boolean swimming = mc.player.isSwimming();
+        boolean swimmingPose = mc.player.getPose() == EntityPose.SWIMMING;
+        watchdogStealthGate = "pause-hazard-recovery";
+        watchdogStealthGateDetails = String.format(
+            Locale.ROOT,
+            "hazard=%s,recoveryTick=%d,max=%d",
+            hazard.id,
+            hazardRecoveryTicks,
+            HAZARD_RECOVERY_MAX_TICKS
+        );
+        watchdog(
+            "hazard-detected",
+            String.format(
+                Locale.ROOT,
+                "hazard=%s,recoveryTick=%d,max=%d,air=%d,maxAir=%d,onFire=%s,inLava=%s,submergedWater=%s,isSwimming=%s,inSwimmingPose=%s",
+                hazard.id,
+                hazardRecoveryTicks,
+                HAZARD_RECOVERY_MAX_TICKS,
+                mc.player.getAir(),
+                mc.player.getMaxAir(),
+                mc.player.isOnFire(),
+                mc.player.isInLava(),
+                mc.player.isSubmergedInWater(),
+                swimming,
+                swimmingPose
+            )
+        );
+
+        if (HAZARD_RECOVERY_FORCE_HARD_FAIL) {
+            watchdog(
+                "hazard-recovery-auto-fail",
+                String.format(
+                    Locale.ROOT,
+                    "hazard=%s,recoveryTick=%d,reason=temporary-force-hard-fail",
+                    hazard.id,
+                    hazardRecoveryTicks
+                )
+            );
+            hardFailHazard(hazard, "auto-fail");
+            watchdogTick("onTick-hazard-auto-hard-fail", tickStartNs);
+            return true;
+        }
+
+        if (hazardRecoveryTicks < HAZARD_RECOVERY_MAX_TICKS) {
+            watchdogTick("onTick-skip-hazard-recovery", tickStartNs);
+            return true;
+        }
+
+        watchdog(
+            "hazard-recovery-fallback-stop",
+            String.format(
+                Locale.ROOT,
+                "hazard=%s,recoveryTicks=%d,max=%d,action=toggle",
+                hazard.id,
+                hazardRecoveryTicks,
+                HAZARD_RECOVERY_MAX_TICKS
+            )
+        );
+        if (optDebugMessages()) {
+            warning("Hazard persisted (" + hazard.id + ") for " + hazardRecoveryTicks + " ticks; stopping Tunnel Miner.");
+        }
+        hardFailHazard(hazard, "recovery-timeout");
+        watchdogTick("onTick-hazard-fallback-stop", tickStartNs);
+        return true;
+    }
+
+    private HazardCondition detectCurrentHazard() {
+        if (mc.player == null || mc.world == null) return HazardCondition.NONE;
+
+        boolean suffocating = isLikelySuffocating(BlockPos.ofFloored(mc.player.getX(), mc.player.getY(), mc.player.getZ()))
+            || isLikelySuffocating(BlockPos.ofFloored(mc.player.getX(), mc.player.getEyeY(), mc.player.getZ()));
+        if (suffocating) return HazardCondition.SUFFOCATING;
+
+        if (optTunnelHeight() >= 2) {
+            boolean swimming = mc.player.isSwimming();
+            boolean swimmingPose = mc.player.getPose() == EntityPose.SWIMMING;
+            if (swimming || swimmingPose) return HazardCondition.SWIMMING;
+        }
+
+        boolean drowning = mc.player.isSubmergedInWater() && mc.player.getAir() <= 40;
+        if (drowning) return HazardCondition.DROWNING;
+
+        boolean burning = mc.player.isOnFire() || mc.player.isInLava();
+        if (optStealthMode() && burning) return HazardCondition.BURNING;
+
+        return HazardCondition.NONE;
+    }
+
+    private boolean isLikelySuffocating(BlockPos pos) {
+        BlockState state = mc.world.getBlockState(pos);
+        if (state.isAir()) return false;
+        if (!state.getFluidState().isEmpty()) return false;
+        return state.isSolidBlock(mc.world, pos);
+    }
+
     private boolean isRestockPhase(Phase p) {
         if (p == null) return false;
         return p == Phase.RESTOCK_CLEAR
@@ -890,7 +1769,7 @@ public class TunnelMinerModule extends Module {
         int pickShulker = findInInv(this::shulkerContainsPickaxe);
         if (pickShulker != -1) return pickShulker;
         boolean forcedShulkerStage = restockPreferShulkerNext || restockEcExtractedPickShulker;
-        if (forcedShulkerStage || (useShulkers.get() && !useEnderChest.get())) {
+        if (forcedShulkerStage || (optUseShulkers() && !optUseEnderChest())) {
             return findInInv(TunnelMinerModule::isShulkerBox);
         }
         return -1;
@@ -898,7 +1777,7 @@ public class TunnelMinerModule extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        long tickStartNs = watchdogEnabled.get() && HARD_WATCHDOG_LOG_TICKS ? System.nanoTime() : 0L;
+        long tickStartNs = optWatchdogEnabled() && HARD_WATCHDOG_LOG_TICKS ? System.nanoTime() : 0L;
 
         if (mc.player == null || mc.world == null) {
             watchdogTick("onTick-skip-null-world-player", tickStartNs);
@@ -906,10 +1785,16 @@ public class TunnelMinerModule extends Module {
             return;
         }
 
+        boolean stealthNow = isStealthEnabledForSpeedOwnership();
+        if (stealthNow && !stealthSpeedWasEnabled) tryApplyStealthSpeedControl("stealth-enabled-mid-run");
+        stealthSpeedWasEnabled = stealthNow;
+
+        if (handleHazardRecovery(tickStartNs)) return;
+
         int currentY = MathHelper.floor(mc.player.getY());
         if (currentY != tunnelY) {
             mc.options.forwardKey.setPressed(false);
-            if (debugMessages.get()) warning("Y changed from " + tunnelY + " to " + currentY + "; stopping to preserve fixed-Y pathing.");
+            if (optDebugMessages()) warning("Y changed from " + tunnelY + " to " + currentY + "; stopping to preserve fixed-Y pathing.");
             watchdog("y-lock-stop", "lockedY=" + tunnelY + ",currentY=" + currentY);
             toggle();
             return;
@@ -955,9 +1840,15 @@ public class TunnelMinerModule extends Module {
             case RESTOCK_BREAK: restockBreak(); break;
             case RESTOCK_PICKUP: restockPickup(); break;
             case DONE:
-                if (debugMessages.get()) { info("Destination reached!");}
+                if (optDebugMessages()) {
+                    if (goalMode == GoalMode.FALLBACK) {
+                        warning("Requested destination unreachable; completed at fallback (" + activeGoalX + ", " + activeGoalZ + ") for requested (" + requestedDestX + ", " + requestedDestZ + ").");
+                    } else {
+                        info("Destination reached!");
+                    }
+                }
 
-                toggle();
+                disconnectOnSuccessfulCompletion();
                 break;
         }
 
@@ -968,24 +1859,24 @@ public class TunnelMinerModule extends Module {
     @EventHandler
     private void onRender(Render3DEvent event) {
         // Render blocks to break
-        if (renderMining.get()) {
+        if (optRenderMining()) {
             for (BlockPos pos : renderBreakPositions) {
-                event.renderer.box(pos, breakSideColor.get(), breakLineColor.get(), shapeMode.get(), 0);
+                event.renderer.box(pos, optBreakSideColor(), optBreakLineColor(), optShapeMode(), 0);
             }
         }
 
         // Render blocks to place
-        if (renderPlacing.get() && (fillBehind.get() || stealthMode.get())) {
+        if (optRenderPlacing() && (optFillBehind() || optStealthMode())) {
             int px = MathHelper.floor(mc.player.getX());
             int pz = MathHelper.floor(mc.player.getZ());
-            Collection<BlockPos> restorePositions = stealthMode.get() ? stealthCache.keySet() : fillLog.keySet();
+            Collection<BlockPos> restorePositions = optStealthMode() ? stealthCache.keySet() : fillLog.keySet();
 
             for (BlockPos pos : restorePositions) {
                 // Only render if it's a valid placement target (not too close)
                 if (Math.abs(pos.getX() - px) <= 1 && Math.abs(pos.getZ() - pz) <= 1) {
                     continue;
                 }
-                event.renderer.box(pos, placeSideColor.get(), placeLineColor.get(), shapeMode.get(), 0);
+                event.renderer.box(pos, optPlaceSideColor(), optPlaceLineColor(), optShapeMode(), 0);
             }
         }
     }
@@ -1005,17 +1896,80 @@ public class TunnelMinerModule extends Module {
             watchdogStealthGate,
             watchdogStealthGateDetails
         );
-        if (debugMessages.get()) warning("Stealth stall detected, stopping: " + details);
+
+        // Harden known no-probe deadlock: force a full planner reset/retry instead of auto-toggle.
+        if (optStealthMode() && "pause-no-probe-steps".equals(watchdogStealthGate)) {
+            if (mc.options != null) mc.options.forwardKey.setPressed(false);
+            recoverFromNoProbeStepsStall(details);
+            return;
+        }
+
+        if (optDebugMessages()) warning("Stealth stall detected, stopping: " + details);
         if (mc.options != null) mc.options.forwardKey.setPressed(false);
         watchdog("stall-stop", details);
         toggle();
+    }
+
+    private void recoverFromNoProbeStepsStall(String details) {
+        cachedProbePath.clear();
+        cachedProbeStartX = Integer.MIN_VALUE;
+        cachedProbeStartZ = Integer.MIN_VALUE;
+        cachedProbeY = Integer.MIN_VALUE;
+        cachedProbeDestX = Integer.MIN_VALUE;
+        cachedProbeDestZ = Integer.MIN_VALUE;
+        cachedProbeRadius = Integer.MIN_VALUE;
+        cachedProbeLastReplanAge = Integer.MIN_VALUE;
+        cachedProbeLastEmptyReplanAge = Integer.MIN_VALUE;
+        cachedProbeOnXAxis = onXAxis;
+        cachedProbeRejectAirGaps = useStealthAvoidAirGapDetours();
+        cachedProbeEmergencyNoScaffold = false;
+        cachedProbePathMode = hardPathMode();
+        noProbePauseTicks = 0;
+
+        proactiveAStarCacheFromX = Integer.MIN_VALUE;
+        proactiveAStarCacheFromZ = Integer.MIN_VALUE;
+        proactiveAStarCachePy = Integer.MIN_VALUE;
+        proactiveAStarCacheDestX = Integer.MIN_VALUE;
+        proactiveAStarCacheDestZ = Integer.MIN_VALUE;
+        proactiveAStarCacheAge = Integer.MIN_VALUE;
+        proactiveAStarCacheStepX = 0;
+        proactiveAStarCacheStepZ = 0;
+        proactiveAStarCacheSummary = "";
+
+        probeWallFollowActive = false;
+        probeAStarFailStreak = Math.max(probeAStarFailStreak, hardAStarMaxFails() + 1);
+        detourVisitCounts.clear();
+        committedMoveStep = null;
+
+        if (mc != null && mc.player != null) {
+            int px = MathHelper.floor(mc.player.getX());
+            int pz = MathHelper.floor(mc.player.getZ());
+            wallFollowHeading = chooseWallFollowHeading(px, pz);
+        } else {
+            wallFollowHeading = 0;
+        }
+        wallFollowRerouteBlocks = 0;
+
+        watchdogSamePosTicks = 0;
+        watchdogNoProgressTicks = 0;
+
+        watchdog(
+            "stall-recover-no-probe-steps",
+            String.format(
+                Locale.ROOT,
+                "%s,action=force-replan,failStreak=%d,wallHeading=%d",
+                sanitizeLogField(details),
+                probeAStarFailStreak,
+                wallFollowHeading
+            )
+        );
     }
 
     // ── INIT ──────────────────────────────────────────────────────────────────
 
     private void initPhase() {
         if (countPickaxes() == 0) {
-            if (debugMessages.get()) {warning("No pickaxes — stopping.");}
+            if (optDebugMessages()) {warning("No pickaxes — stopping.");}
             toggle();
             return;
         }
@@ -1038,7 +1992,7 @@ public class TunnelMinerModule extends Module {
             resetRestockStageState();
             watchdogStealthGate = "restock-required";
             watchdogStealthGateDetails = "needsRestock=true";
-            if (debugMessages.get()) info("Pickaxe low, starting restock.");
+            if (optDebugMessages()) info("Pickaxe low, starting restock.");
             setPhase(Phase.RESTOCK_CLEAR);
             return;
         }
@@ -1046,20 +2000,25 @@ public class TunnelMinerModule extends Module {
         int px = MathHelper.floor(mc.player.getX());
         int py = tunnelY;
         int pz = MathHelper.floor(mc.player.getZ());
+        tickEmergencyAirFallbackWindow();
+        if (!refreshActiveNavigationGoal(px, py, pz)) return;
+        boolean atGoalCoords = px == destX && pz == destZ;
+        boolean atGoalReady = atGoalCoords && isGoalCompletionCellLoaded();
 
         if (hardPathMode() == PathMode.AxisFirst && onXAxis && px == destX) {
             onXAxis = false;
-            if (debugMessages.get()) info("X axis done, now heading Z...");
+            if (optDebugMessages()) info("X axis done, now heading Z...");
         }
 
         if (stealthBreakTimer > 0) stealthBreakTimer--;
 
         int probeDistance = effectiveProbeDistance();
         List<PathStep> probeSteps = getOrBuildProbeSteps(px, pz, py, probeDistance);
+        boolean emergencyNoScaffold = cachedProbeEmergencyNoScaffold;
         activeProbePositions.clear();
         probeAhead(py, probeSteps);
 
-        int mineStepCount = Math.min(stealthMineAheadDistance.get(), probeSteps.size());
+        int mineStepCount = Math.min(optStealthMineAheadDistance(), probeSteps.size());
         List<PathStep> mineSteps = probeSteps.subList(0, mineStepCount);
         activeMineTargets.clear();
         activeMineTargets.addAll(collectMineTargets(py, mineSteps));
@@ -1085,7 +2044,7 @@ public class TunnelMinerModule extends Module {
         boolean lavaBlocked = false;
         boolean filledLava = false;
         boolean hasLava = false;
-        if (lavaAvoidance.get()) {
+        if (isAntiLavaActiveForCurrentMode()) {
             filledLava = tryFillStealthLava(py, mineSteps);
             hasLava = hasStealthLava(py, mineSteps);
             lavaBlocked = filledLava || hasLava;
@@ -1093,6 +2052,7 @@ public class TunnelMinerModule extends Module {
 
         boolean closeMineBlocked = hasCloseMineTarget(activeMineTargets) || hasCloseActiveMine();
         if (closeMineBlocked || lavaBlocked) {
+            noProbePauseTicks = 0;
             watchdogRestoreSummary = "skipped=true,reason=movement-gated";
             watchdogStealthGate = closeMineBlocked ? "pause-close-mine" : "pause-lava";
             watchdogStealthGateDetails = String.format(
@@ -1109,7 +2069,7 @@ public class TunnelMinerModule extends Module {
             mc.options.forwardKey.setPressed(false);
         } else {
             boolean maintainBehindParity = shouldMaintainBehindParity();
-            boolean finalizing = probeSteps.isEmpty() && px == destX && pz == destZ;
+            boolean finalizing = probeSteps.isEmpty() && atGoalReady;
             if (maintainBehindParity) {
                 restoreBehindFromCache(finalizing);
             } else {
@@ -1117,17 +2077,18 @@ public class TunnelMinerModule extends Module {
             }
 
             if (finalizing) {
+                noProbePauseTicks = 0;
                 if (!maintainBehindParity) {
-                    if (px == destX && pz == destZ) setPhase(Phase.DONE);
+                    if (atGoalReady) setPhase(Phase.DONE);
                     watchdogStealthGate = "finalizing-complete-no-restore";
-                    watchdogStealthGateDetails = "restoreDisabled=true,atDest=" + (px == destX && pz == destZ);
+                    watchdogStealthGateDetails = "restoreDisabled=true,atDestCoords=" + atGoalCoords + ",atDestReady=" + atGoalReady;
                     return;
                 }
                 // End-of-path: drain remaining restore work before finishing.
                 if (!hasAnyStealthRestorePending(true)) {
-                    if (px == destX && pz == destZ) setPhase(Phase.DONE);
+                    if (atGoalReady) setPhase(Phase.DONE);
                     watchdogStealthGate = "finalizing-complete";
-                    watchdogStealthGateDetails = "restorePending=false,atDest=" + (px == destX && pz == destZ);
+                    watchdogStealthGateDetails = "restorePending=false,atDestCoords=" + atGoalCoords + ",atDestReady=" + atGoalReady;
                     return;
                 }
                 if (!hasReachableStealthRestore(true)) {
@@ -1144,26 +2105,34 @@ public class TunnelMinerModule extends Module {
 
             // While moving, allow limited restore lag before pausing to catch up.
             if (maintainBehindParity) {
-                boolean restoreLagExceeded = hasStealthRestoreLagExceeded(stealthRestoreLagDistance.get());
+                boolean restoreLagExceeded = hasStealthRestoreLagExceeded(optStealthRestoreLagDistance());
                 if (restoreLagExceeded) {
                     boolean reachableRestore = hasReachableStealthRestore(false);
                     if (reachableRestore) {
                         watchdogStealthGate = "pause-restore-lag";
-                        watchdogStealthGateDetails = "maxLag=" + stealthRestoreLagDistance.get() + ",reachable=true";
+                        watchdogStealthGateDetails = "maxLag=" + optStealthRestoreLagDistance() + ",reachable=true";
                         mc.options.forwardKey.setPressed(false);
                         return;
                     } else {
                         watchdogStealthGate = "lag-unreachable-continue";
-                        watchdogStealthGateDetails = "maxLag=" + stealthRestoreLagDistance.get() + ",reachable=false";
+                        watchdogStealthGateDetails = "maxLag=" + optStealthRestoreLagDistance() + ",reachable=false";
                     }
                 }
             }
 
             if (!probeSteps.isEmpty()) {
+                noProbePauseTicks = 0;
                 PathStep next = pickStealthMoveStep(px, pz, py, probeSteps);
-                if (!ensureStealthSupportFloor(px, py, pz, next)) {
+                boolean supportReady = emergencyNoScaffold
+                    ? hasSolidStealthSupportFloor(px, py, pz, next)
+                    : ensureStealthSupportFloor(px, py, pz, next);
+                if (!supportReady) {
+                    if (emergencyNoScaffold) {
+                        committedMoveStep = null;
+                        cachedProbePath.clear();
+                    }
                     watchdogStealthGate = "pause-floor-support-failed";
-                    watchdogStealthGateDetails = "next=" + formatPathStep(next);
+                    watchdogStealthGateDetails = "next=" + formatPathStep(next) + ",emergencyNoScaffold=" + emergencyNoScaffold;
                     mc.options.forwardKey.setPressed(false);
                     return;
                 }
@@ -1178,30 +2147,45 @@ public class TunnelMinerModule extends Module {
                     mc.options.forwardKey.setPressed(false);
                 }
             } else {
+                noProbePauseTicks++;
                 committedMoveStep = null;
                 watchdogStealthGate = "pause-no-probe-steps";
                 watchdogStealthGateDetails = "probeSteps=0";
                 mc.options.forwardKey.setPressed(false);
-                if (px == destX && pz == destZ && (!maintainBehindParity || !hasAnyStealthRestorePending(true))) setPhase(Phase.DONE);
+                if (atGoalReady && (!maintainBehindParity || !hasAnyStealthRestorePending(true))) setPhase(Phase.DONE);
             }
         }
 
         boolean doneRestoreReady = !shouldMaintainBehindParity() || !hasAnyStealthRestorePending(true);
-        if (probeSteps.isEmpty() && doneRestoreReady && normalMining == null && packetMining == null && px == destX && pz == destZ) {
+        if (probeSteps.isEmpty() && doneRestoreReady && normalMining == null && packetMining == null && atGoalReady) {
             setPhase(Phase.DONE);
         }
     }
 
-    private List<PathStep> computeFuturePathSteps(int startX, int startZ, int py, int maxSteps) {
-        boolean rejectAirGapDetours = useStealthAvoidAirGapDetours();
+    private List<PathStep> computeFuturePathSteps(int startX, int startZ, int py, int maxSteps, boolean emergencyRelaxAirGaps) {
+        boolean rejectAirGapDetours = useStealthAvoidAirGapDetours() && !emergencyRelaxAirGaps;
         if (rejectAirGapDetours) {
             if (probeWallFollowActive) {
+                int initialHeading = ((wallFollowHeading % 4) + 4) % 4;
                 for (int attempt = 0; attempt < 4; attempt++) {
+                    int attemptHeading = (initialHeading + attempt) & 3;
+                    wallFollowHeading = attemptHeading;
+                    watchdogCalc(
+                        "wall-follow",
+                        String.format(
+                            Locale.ROOT,
+                            "event=try-heading,start=(%d,%d),attempt=%d,heading=%d",
+                            startX,
+                            startZ,
+                            attempt + 1,
+                            attemptHeading
+                        )
+                    );
                     List<PathStep> wallSteps = computeFuturePathStepsWallFollow(startX, startZ, py, maxSteps, true);
                     if (!wallSteps.isEmpty()) return wallSteps;
 
                     // Try a different cardinal heading before giving up this tick.
-                    wallFollowHeading = (wallFollowHeading + 1) & 3;
+                    int nextHeading = (initialHeading + attempt + 1) & 3;
                     watchdogCalc(
                         "wall-follow",
                         String.format(
@@ -1210,10 +2194,11 @@ public class TunnelMinerModule extends Module {
                             startX,
                             startZ,
                             attempt + 1,
-                            wallFollowHeading
+                            nextHeading
                         )
                     );
                 }
+                wallFollowHeading = (initialHeading + 1) & 3;
             }
 
             List<PathStep> astar = computeFuturePathStepsAStar(startX, startZ, py, maxSteps, true);
@@ -1228,11 +2213,28 @@ public class TunnelMinerModule extends Module {
                 }
 
                 probeAStarFailStreak = 0;
-                if (probeWallFollowActive && isNearMLine(startX, startZ, wallFollowMLineStartX, wallFollowMLineStartZ, destX, destZ)) {
-                    double h = octileDistance(startX, startZ, destX, destZ);
-                    if (h + 1e-6 < wallFollowHitDistance) {
-                        probeWallFollowActive = false;
-                        watchdogCalc("wall-follow", String.format(Locale.ROOT, "event=deactivate,reason=rejoined-mline-at-start,start=(%d,%d),h=%.3f,hit=%.3f", startX, startZ, h, wallFollowHitDistance));
+                if (probeWallFollowActive && wallFollowRerouteBlocks > 0 && (startX != wallFollowMLineStartX || startZ != wallFollowMLineStartZ)) {
+                    boolean nearMLine = isNearMLine(startX, startZ, wallFollowMLineStartX, wallFollowMLineStartZ, destX, destZ);
+                    if (nearMLine) {
+                        boolean farEnough = hasWallFollowMinRejoinDistance(startX, startZ);
+                        boolean goalSide = isOnGoalSideOfMLine(startX, startZ, wallFollowMLineStartX, wallFollowMLineStartZ, destX, destZ);
+                        if (farEnough && goalSide) {
+                            deactivateWallFollow("rejoined-mline-at-start", startX, startZ);
+                        } else {
+                            watchdogCalc(
+                                "wall-follow",
+                                String.format(
+                                    Locale.ROOT,
+                                    "event=rejoin-mline-ignored,at=(%d,%d),reason=%s,farEnough=%s,goalSide=%s,minRejoinDist=%d",
+                                    startX,
+                                    startZ,
+                                    farEnough ? "not-goal-side" : "too-close",
+                                    farEnough,
+                                    goalSide,
+                                    WALL_FOLLOW_MIN_REJOIN_DISTANCE_BLOCKS
+                                )
+                            );
+                        }
                     }
                 }
                 return astar;
@@ -1322,20 +2324,44 @@ public class TunnelMinerModule extends Module {
             wallFollowMLineStartZ = startZ;
             wallFollowHitDistance = octileDistance(startX, startZ, destX, destZ);
             wallFollowHeading = chooseWallFollowHeading(startX, startZ);
+            wallFollowRerouteBlocks = 0;
             watchdogCalc(
                 "wall-follow",
                 String.format(
                     Locale.ROOT,
-                    "event=activate,start=(%d,%d),dest=(%d,%d),hitDist=%.3f,heading=%d",
+                    "event=activate,start=(%d,%d),dest=(%d,%d),hitDist=%.3f,heading=%d,rerouteMax=%d",
                     startX,
                     startZ,
                     destX,
                     destZ,
                     wallFollowHitDistance,
-                    wallFollowHeading
+                    wallFollowHeading,
+                    WALL_FOLLOW_MAX_REROUTE_BLOCKS
                 )
             );
         }
+    }
+
+    private void deactivateWallFollow(String reason, int x, int z) {
+        if (!probeWallFollowActive) return;
+        probeWallFollowActive = false;
+        probeAStarFailStreak = 0;
+        watchdogCalc(
+            "wall-follow",
+            String.format(
+                Locale.ROOT,
+                "event=deactivate,reason=%s,at=(%d,%d),rerouteBlocks=%d,rerouteMax=%d,mLineStart=(%d,%d),dest=(%d,%d)",
+                reason,
+                x,
+                z,
+                wallFollowRerouteBlocks,
+                WALL_FOLLOW_MAX_REROUTE_BLOCKS,
+                wallFollowMLineStartX,
+                wallFollowMLineStartZ,
+                destX,
+                destZ
+            )
+        );
     }
 
     private boolean isAStarSoftFailure(int startX, int startZ, List<PathStep> astar) {
@@ -1394,7 +2420,9 @@ public class TunnelMinerModule extends Module {
         int probeRadiusSq = probeRadius * probeRadius;
         int configuredNodeLimit = Math.max(64, hardPathCalcMaxNodes());
         int dynamicLimit = Math.max(128, probeRadius * probeRadius * 2);
-        int astarNodeLimit = Math.max(64, Math.min(configuredNodeLimit, dynamicLimit));
+        int failureBoost = Math.max(0, probeAStarFailStreak - hardAStarMaxFails());
+        int boostedNodeLimit = configuredNodeLimit + failureBoost * 256;
+        int astarNodeLimit = Math.max(64, Math.min(Math.min(4096, boostedNodeLimit), dynamicLimit));
 
         long startKey = packXZ(startX, startZ);
         PriorityQueue<AStarNode> open = new PriorityQueue<>(Comparator.comparingDouble(a -> a.f));
@@ -1417,7 +2445,7 @@ public class TunnelMinerModule extends Module {
             "future-steps-astar-start",
             String.format(
                 Locale.ROOT,
-                "start=(%d,%d),dest=(%d,%d),py=%d,probeRadius=%d,nodeLimit=%d,rejectAirGapDetours=%s",
+                "start=(%d,%d),dest=(%d,%d),py=%d,probeRadius=%d,nodeLimit=%d,rejectAirGapDetours=%s,failStreak=%d,failureBoost=%d",
                 startX,
                 startZ,
                 destX,
@@ -1425,7 +2453,9 @@ public class TunnelMinerModule extends Module {
                 py,
                 probeRadius,
                 astarNodeLimit,
-                rejectAirGapDetours
+                rejectAirGapDetours,
+                probeAStarFailStreak,
+                failureBoost
             )
         );
 
@@ -1613,7 +2643,7 @@ public class TunnelMinerModule extends Module {
             "wall-follow",
             String.format(
                 Locale.ROOT,
-                "event=start,start=(%d,%d),dest=(%d,%d),mLineStart=(%d,%d),hitDist=%.3f,heading=%d,stepLimit=%d,budget=%d",
+                "event=start,start=(%d,%d),dest=(%d,%d),mLineStart=(%d,%d),hitDist=%.3f,heading=%d,stepLimit=%d,budget=%d,rerouteBlocks=%d,rerouteMax=%d",
                 startX,
                 startZ,
                 destX,
@@ -1623,7 +2653,9 @@ public class TunnelMinerModule extends Module {
                 wallFollowHitDistance,
                 heading,
                 stepLimit,
-                budget
+                budget,
+                wallFollowRerouteBlocks,
+                WALL_FOLLOW_MAX_REROUTE_BLOCKS
             )
         );
 
@@ -1682,6 +2714,13 @@ public class TunnelMinerModule extends Module {
             z = nextZ;
             heading = chosenDir;
 
+            int projectedRerouteBlocks = wallFollowRerouteBlocks + steps.size();
+            if (projectedRerouteBlocks >= WALL_FOLLOW_MAX_REROUTE_BLOCKS) {
+                wallFollowRerouteBlocks = projectedRerouteBlocks;
+                deactivateWallFollow("max-reroute-blocks", x, z);
+                break;
+            }
+
             long key = packXZ(x, z);
             int visits = localVisits.merge(key, 1, Integer::sum);
             if (visits > 3) {
@@ -1690,33 +2729,34 @@ public class TunnelMinerModule extends Module {
                 break;
             }
 
-            if (isNearMLine(x, z, wallFollowMLineStartX, wallFollowMLineStartZ, destX, destZ)) {
-                double h = octileDistance(x, z, destX, destZ);
-                if (h + 1e-6 < wallFollowHitDistance) {
-                    probeWallFollowActive = false;
-                    probeAStarFailStreak = 0;
-                    watchdogCalc(
-                        "wall-follow",
-                        String.format(
-                            Locale.ROOT,
-                            "event=hit-mline,at=(%d,%d),h=%.3f,hitDist=%.3f,steps=%d,heading=%d",
-                            x,
-                            z,
-                            h,
-                            wallFollowHitDistance,
-                            steps.size(),
-                            heading
-                        )
-                    );
+            if ((x != wallFollowMLineStartX || z != wallFollowMLineStartZ)
+                && isNearMLine(x, z, wallFollowMLineStartX, wallFollowMLineStartZ, destX, destZ)) {
+                boolean farEnough = hasWallFollowMinRejoinDistance(x, z);
+                boolean goalSide = isOnGoalSideOfMLine(x, z, wallFollowMLineStartX, wallFollowMLineStartZ, destX, destZ);
+                if (farEnough && goalSide) {
+                    deactivateWallFollow("hit-mline", x, z);
                     break;
                 }
+                watchdogCalc(
+                    "wall-follow",
+                    String.format(
+                        Locale.ROOT,
+                        "event=hit-mline-ignored,at=(%d,%d),farEnough=%s,goalSide=%s,minRejoinDist=%d",
+                        x,
+                        z,
+                        farEnough,
+                        goalSide,
+                        WALL_FOLLOW_MIN_REJOIN_DISTANCE_BLOCKS
+                    )
+                );
             }
         }
 
         wallFollowHeading = heading;
 
-        // When wall-follow itself reports a local dead-end loop/no-step condition, force caller
-        // to retry with rotated headings (and eventually fall back to A*) instead of reusing this path.
+        // For hard stop conditions (including local loops), force caller to retry
+        // with rotated headings instead of accepting a short prefix that may
+        // bounce between the same cells.
         if (probeWallFollowActive && !stopReason.isEmpty()) {
             watchdogCalc(
                 "wall-follow",
@@ -1842,8 +2882,33 @@ public class TunnelMinerModule extends Module {
         return dist <= WALL_FOLLOW_MLINE_EPSILON;
     }
 
+    private boolean hasWallFollowMinRejoinDistance(int x, int z) {
+        if (wallFollowMLineStartX == Integer.MIN_VALUE || wallFollowMLineStartZ == Integer.MIN_VALUE) return false;
+        long dx = (long) x - wallFollowMLineStartX;
+        long dz = (long) z - wallFollowMLineStartZ;
+        long distSq = dx * dx + dz * dz;
+        long minSq = (long) WALL_FOLLOW_MIN_REJOIN_DISTANCE_BLOCKS * WALL_FOLLOW_MIN_REJOIN_DISTANCE_BLOCKS;
+        return distSq >= minSq;
+    }
+
+    private boolean isOnGoalSideOfMLine(int x, int z, int startX, int startZ, int endX, int endZ) {
+        if (startX == Integer.MIN_VALUE || startZ == Integer.MIN_VALUE) return false;
+        long dx = (long) endX - startX;
+        long dz = (long) endZ - startZ;
+        if (dx == 0L && dz == 0L) return false;
+        long rx = (long) x - startX;
+        long rz = (long) z - startZ;
+        double dot = (double) rx * dx + (double) rz * dz;
+        return dot > 0.0;
+    }
+
     private List<PathStep> getOrBuildProbeSteps(int px, int pz, int py, int probeRadius) {
         boolean rejectAirGapDetours = useStealthAvoidAirGapDetours();
+        boolean forceNoProbeReplan = shouldForceNoProbeReplan();
+        if (forceNoProbeReplan && rejectAirGapDetours && noProbePauseTicks == PROBE_NO_STEPS_FORCE_REPLAN_TICKS) {
+            startEmergencyAirFallbackWindow();
+        }
+        boolean emergencyRelaxAirGaps = forceNoProbeReplan && rejectAirGapDetours && isEmergencyAirFallbackActive();
         int radius = Math.max(1, probeRadius);
         int age = (mc != null && mc.player != null) ? mc.player.age : Integer.MIN_VALUE;
         int sinceLastReplan = (age == Integer.MIN_VALUE || cachedProbeLastReplanAge == Integer.MIN_VALUE)
@@ -1859,6 +2924,7 @@ public class TunnelMinerModule extends Module {
             || cachedProbeRadius != radius
             || cachedProbeOnXAxis != onXAxis
             || cachedProbeRejectAirGaps != rejectAirGapDetours
+            || cachedProbeEmergencyNoScaffold != emergencyRelaxAirGaps
             || cachedProbePathMode != hardPathMode();
 
         boolean needsReplan = cachedProbePath.isEmpty() || settingsChanged;
@@ -1866,7 +2932,12 @@ public class TunnelMinerModule extends Module {
             ? (cachedProbePath.isEmpty() ? "empty-cache" : "settings-changed")
             : "";
 
-        if (cachedProbePath.isEmpty() && !settingsChanged) {
+        if (forceNoProbeReplan && cachedProbePath.isEmpty()) {
+            needsReplan = true;
+            reason = "force-no-probe-replan";
+        }
+
+        if (cachedProbePath.isEmpty() && !settingsChanged && !forceNoProbeReplan) {
             boolean sameEmptyQuery =
                 cachedProbeStartX == px
                 && cachedProbeStartZ == pz
@@ -1876,6 +2947,7 @@ public class TunnelMinerModule extends Module {
                 && cachedProbeRadius == radius
                 && cachedProbeOnXAxis == onXAxis
                 && cachedProbeRejectAirGaps == rejectAirGapDetours
+                && cachedProbeEmergencyNoScaffold == emergencyRelaxAirGaps
                 && cachedProbePathMode == hardPathMode();
 
             if (sameEmptyQuery) {
@@ -1891,21 +2963,22 @@ public class TunnelMinerModule extends Module {
                         "probe-path-cache",
                         String.format(
                             Locale.ROOT,
-                            "replan=false,reason=empty-cache-cooldown,sinceLastEmpty=%d,cooldown=%d,start=(%d,%d),dest=(%d,%d),radius=%d",
+                            "replan=false,reason=empty-cache-cooldown,sinceLastEmpty=%d,cooldown=%d,start=(%d,%d),dest=(%d,%d),radius=%d,noProbeTicks=%d",
                             sinceLastEmpty,
                             PROBE_EMPTY_REPLAN_COOLDOWN_TICKS,
                             px,
                             pz,
                             destX,
                             destZ,
-                            radius
+                            radius,
+                            noProbePauseTicks
                         )
                     );
                 }
             }
         }
 
-        if (needsReplan && !"settings-changed".equals(reason)) {
+        if (needsReplan && !"settings-changed".equals(reason) && !forceNoProbeReplan) {
             int minInterval = Math.max(1, hardPathCalcIntervalTicks());
             if (sinceLastReplan < minInterval) {
                 needsReplan = false;
@@ -1914,7 +2987,7 @@ public class TunnelMinerModule extends Module {
                     "probe-path-cache",
                     String.format(
                         Locale.ROOT,
-                        "replan=false,reason=replan-interval-throttle,sinceLast=%d,interval=%d,count=%d,start=(%d,%d),dest=(%d,%d),radius=%d",
+                        "replan=false,reason=replan-interval-throttle,sinceLast=%d,interval=%d,count=%d,start=(%d,%d),dest=(%d,%d),radius=%d,noProbeTicks=%d",
                         sinceLastReplan,
                         minInterval,
                         cachedProbePath.size(),
@@ -1922,7 +2995,8 @@ public class TunnelMinerModule extends Module {
                         pz,
                         destX,
                         destZ,
-                        radius
+                        radius,
+                        noProbePauseTicks
                     )
                 );
             }
@@ -1940,12 +3014,12 @@ public class TunnelMinerModule extends Module {
             int sinceLast = (age == Integer.MIN_VALUE || cachedProbeLastReplanAge == Integer.MIN_VALUE) ? Integer.MAX_VALUE : age - cachedProbeLastReplanAge;
             if (sinceLast < 0) sinceLast = Integer.MAX_VALUE;
 
-            if (sinceLast < PROBE_REPLAN_COOLDOWN_TICKS) {
+            if (sinceLast < PROBE_REPLAN_COOLDOWN_TICKS && !forceNoProbeReplan) {
                 watchdogCalc(
                     "probe-path-cache",
                     String.format(
                         Locale.ROOT,
-                        "replan=false,reason=suppressed-cooldown,sinceLast=%d,cooldown=%d,count=%d,start=(%d,%d),dest=(%d,%d),radius=%d",
+                        "replan=false,reason=suppressed-cooldown,sinceLast=%d,cooldown=%d,count=%d,start=(%d,%d),dest=(%d,%d),radius=%d,noProbeTicks=%d",
                         sinceLast,
                         PROBE_REPLAN_COOLDOWN_TICKS,
                         cachedProbePath.size(),
@@ -1953,18 +3027,19 @@ public class TunnelMinerModule extends Module {
                         pz,
                         destX,
                         destZ,
-                        radius
+                        radius,
+                        noProbePauseTicks
                     )
                 );
             } else {
                 needsReplan = true;
-                reason = "probe-avoidance-detected";
+                reason = forceNoProbeReplan ? "force-no-probe-replan" : "probe-avoidance-detected";
             }
         }
 
         if (needsReplan) {
             cachedProbePath.clear();
-            cachedProbePath.addAll(computeFuturePathSteps(px, pz, py, radius));
+            cachedProbePath.addAll(computeFuturePathSteps(px, pz, py, radius, emergencyRelaxAirGaps));
             cachedProbeStartX = px;
             cachedProbeStartZ = pz;
             cachedProbeY = py;
@@ -1977,13 +3052,112 @@ public class TunnelMinerModule extends Module {
                 : Integer.MIN_VALUE;
             cachedProbeOnXAxis = onXAxis;
             cachedProbeRejectAirGaps = rejectAirGapDetours;
+            cachedProbeEmergencyNoScaffold = emergencyRelaxAirGaps;
             cachedProbePathMode = hardPathMode();
-            watchdogCalc("probe-path-cache", String.format(Locale.ROOT, "replan=true,reason=%s,count=%d,start=(%d,%d),dest=(%d,%d),radius=%d", reason, cachedProbePath.size(), px, pz, destX, destZ, radius));
+            watchdogCalc(
+                "probe-path-cache",
+                String.format(
+                    Locale.ROOT,
+                    "replan=true,reason=%s,count=%d,start=(%d,%d),dest=(%d,%d),radius=%d,forceNoProbe=%s,noProbeTicks=%d,emergencyNoScaffold=%s,emergencyTicksLeft=%d,emergencyBlocksLeft=%d",
+                    reason,
+                    cachedProbePath.size(),
+                    px,
+                    pz,
+                    destX,
+                    destZ,
+                    radius,
+                    forceNoProbeReplan,
+                    noProbePauseTicks,
+                    cachedProbeEmergencyNoScaffold,
+                    emergencyAirFallbackTicksLeft,
+                    emergencyAirFallbackBlocksLeft
+                )
+            );
         } else {
-            watchdogCalc("probe-path-cache", String.format(Locale.ROOT, "replan=false,count=%d,start=(%d,%d),dest=(%d,%d),radius=%d", cachedProbePath.size(), px, pz, destX, destZ, radius));
+            watchdogCalc(
+                "probe-path-cache",
+                String.format(
+                    Locale.ROOT,
+                    "replan=false,count=%d,start=(%d,%d),dest=(%d,%d),radius=%d,forceNoProbe=%s,noProbeTicks=%d,emergencyNoScaffold=%s,emergencyTicksLeft=%d,emergencyBlocksLeft=%d",
+                    cachedProbePath.size(),
+                    px,
+                    pz,
+                    destX,
+                    destZ,
+                    radius,
+                    forceNoProbeReplan,
+                    noProbePauseTicks,
+                    cachedProbeEmergencyNoScaffold,
+                    emergencyAirFallbackTicksLeft,
+                    emergencyAirFallbackBlocksLeft
+                )
+            );
         }
 
         return cachedProbePath;
+    }
+
+    private boolean shouldForceNoProbeReplan() {
+        return noProbePauseTicks >= PROBE_NO_STEPS_FORCE_REPLAN_TICKS;
+    }
+
+    private boolean isEmergencyAirFallbackActive() {
+        return emergencyAirFallbackTicksLeft > 0 && emergencyAirFallbackBlocksLeft > 0;
+    }
+
+    private void startEmergencyAirFallbackWindow() {
+        emergencyAirFallbackTicksLeft = EMERGENCY_AIR_FALLBACK_MAX_TICKS;
+        emergencyAirFallbackBlocksLeft = EMERGENCY_AIR_FALLBACK_MAX_BLOCKS;
+        watchdogCalc(
+            "probe-path-cache",
+            String.format(
+                Locale.ROOT,
+                "event=emergency-air-fallback-start,ticks=%d,blocks=%d,noProbeTicks=%d",
+                emergencyAirFallbackTicksLeft,
+                emergencyAirFallbackBlocksLeft,
+                noProbePauseTicks
+            )
+        );
+    }
+
+    private void tickEmergencyAirFallbackWindow() {
+        if (emergencyAirFallbackTicksLeft <= 0) return;
+        emergencyAirFallbackTicksLeft--;
+        if (isEmergencyAirFallbackActive()) return;
+
+        if (cachedProbeEmergencyNoScaffold) {
+            cachedProbeEmergencyNoScaffold = false;
+            cachedProbePath.clear();
+            watchdogCalc(
+                "probe-path-cache",
+                String.format(
+                    Locale.ROOT,
+                    "event=emergency-air-fallback-expired,reason=ticks,ticksLeft=%d,blocksLeft=%d,cacheCleared=true",
+                    emergencyAirFallbackTicksLeft,
+                    emergencyAirFallbackBlocksLeft
+                )
+            );
+        }
+    }
+
+    private void consumeEmergencyAirFallbackBlock() {
+        if (emergencyAirFallbackBlocksLeft <= 0) return;
+        emergencyAirFallbackBlocksLeft--;
+        if (isEmergencyAirFallbackActive()) return;
+
+        if (cachedProbeEmergencyNoScaffold) {
+            cachedProbeEmergencyNoScaffold = false;
+            cachedProbePath.clear();
+            watchdogCalc(
+                "probe-path-cache",
+                String.format(
+                    Locale.ROOT,
+                    "event=emergency-air-fallback-expired,reason=blocks,ticksLeft=%d,blocksLeft=%d,cacheCleared=true",
+                    emergencyAirFallbackTicksLeft,
+                    emergencyAirFallbackBlocksLeft
+                )
+            );
+        }
     }
 
     private void consumeCachedProbeStepsToCurrent(int px, int pz) {
@@ -1992,6 +3166,15 @@ public class TunnelMinerModule extends Module {
             if (first.fromX() == px && first.fromZ() == pz) return;
             if (first.toX() == px && first.toZ() == pz) {
                 cachedProbePath.remove(0);
+                if (cachedProbeEmergencyNoScaffold) consumeEmergencyAirFallbackBlock();
+                if (probeWallFollowActive) {
+                    wallFollowRerouteBlocks++;
+                    if (wallFollowRerouteBlocks >= WALL_FOLLOW_MAX_REROUTE_BLOCKS) {
+                        deactivateWallFollow("max-reroute-blocks-consumed", px, pz);
+                        cachedProbePath.clear();
+                        return;
+                    }
+                }
                 continue;
             }
             cachedProbePath.clear();
@@ -2158,7 +3341,7 @@ public class TunnelMinerModule extends Module {
     }
 
     private void addColumnPositions(Set<BlockPos> positions, int x, int py, int z) {
-        for (int h = 0; h < tunnelHeight.get(); h++) positions.add(new BlockPos(x, py + h, z));
+        for (int h = 0; h < optTunnelHeight(); h++) positions.add(new BlockPos(x, py + h, z));
     }
 
     private boolean isMineCandidate(BlockPos pos, BlockState state) {
@@ -2169,7 +3352,7 @@ public class TunnelMinerModule extends Module {
     }
 
     private boolean hasCloseMineTarget(List<BlockPos> targets) {
-        double stopRangeSq = stealthStopRange.get() * stealthStopRange.get();
+        double stopRangeSq = optStealthStopRange() * optStealthStopRange();
         Vec3d playerPos = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
         int tested = 0;
 
@@ -2188,7 +3371,7 @@ public class TunnelMinerModule extends Module {
     }
 
     private boolean hasCloseActiveMine() {
-        double stopRangeSq = stealthStopRange.get() * stealthStopRange.get();
+        double stopRangeSq = optStealthStopRange() * optStealthStopRange();
         Vec3d playerPos = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
 
         boolean result = (normalMining != null && Vec3d.ofCenter(normalMining.blockPos).squaredDistanceTo(playerPos) <= stopRangeSq)
@@ -2258,6 +3441,7 @@ public class TunnelMinerModule extends Module {
 
     private void restoreBehindFromCache(boolean allowNear) {
         boolean activeDoubleMine = normalMining != null || packetMining != null;
+        boolean strictExactRestore = isStrictStealthExactRestoreEnabled();
 
         int px = MathHelper.floor(mc.player.getX());
         int pz = MathHelper.floor(mc.player.getZ());
@@ -2284,7 +3468,7 @@ public class TunnelMinerModule extends Module {
         int deferredAirUnbreakable = 0;
         int deferredBreakForActiveMine = 0;
 
-        while (it.hasNext() && actions < placesPerTick.get()) {
+        while (it.hasNext() && actions < optPlacesPerTick()) {
             Map.Entry<BlockPos, BlockState> entry = it.next();
             BlockPos pos = entry.getKey();
             BlockState original = entry.getValue();
@@ -2308,7 +3492,7 @@ public class TunnelMinerModule extends Module {
                 }
             }
 
-            if (original.getBlock() == current.getBlock()) {
+            if (isRestoreSatisfied(original, current, strictExactRestore)) {
                 it.remove();
                 removedAlreadyMatching++;
                 continue;
@@ -2320,15 +3504,11 @@ public class TunnelMinerModule extends Module {
             }
 
             if (isLavaState(original)) {
-                // Lava (source/flowing) is intentionally excluded from restoration.
-                it.remove();
                 removedOriginalLava++;
                 continue;
             }
 
             if (isLavaState(current)) {
-                // Never touch current lava while restoring trace.
-                it.remove();
                 removedCurrentLava++;
                 continue;
             }
@@ -2376,12 +3556,10 @@ public class TunnelMinerModule extends Module {
             int slot = findExactBlockInInv(original.getBlock());
             boolean exactRestore = true;
             if (slot == -1) {
-                if (hasAdjacentAirForRestore(pos)) {
-                    it.remove();
-                    removedAdjacentAir++;
-                    continue;
+                if (strictExactRestore) {
+                    hardFailStealthExactRestore(pos, original, "restore");
+                    return;
                 }
-
                 slot = findFallbackRestoreSlot(pos);
                 exactRestore = false;
                 if (slot == -1) {
@@ -2401,7 +3579,7 @@ public class TunnelMinerModule extends Module {
                 actions++;
                 placed = true;
                 BlockState after = mc.world.getBlockState(pos);
-                if (!after.isAir() && (!exactRestore || after.getBlock() == original.getBlock())) {
+                if (isRestoreSatisfied(original, after, strictExactRestore)) {
                     it.remove();
                     if (exactRestore) placedExact++;
                     else placedFallback++;
@@ -2410,7 +3588,7 @@ public class TunnelMinerModule extends Module {
         }
 
         if (placed) {
-            placeTimer = placeDelay.get();
+            placeTimer = optPlaceDelay();
             ensurePickaxe();
         }
 
@@ -2444,9 +3622,45 @@ public class TunnelMinerModule extends Module {
         watchdogCalc("restore", watchdogRestoreSummary);
     }
 
+    private boolean isRestoreSatisfied(BlockState original, BlockState current, boolean strictExactRestore) {
+        if (strictExactRestore) return original.getBlock() == current.getBlock();
+        if (original.isAir()) return current.isAir();
+        if (original.getBlock() == current.getBlock()) return true;
+        return !current.isAir() && !isLavaState(current);
+    }
+
+    private boolean hasAnyPendingRestoreWithinDistance(double maxDistance) {
+        if (mc == null || mc.player == null || mc.world == null) return false;
+
+        boolean strictExactRestore = isStrictStealthExactRestoreEnabled();
+        double maxSq = maxDistance * maxDistance;
+        Vec3d eyes = mc.player.getEyePos();
+
+        for (Map.Entry<BlockPos, BlockState> entry : stealthCache.entrySet()) {
+            BlockPos pos = entry.getKey();
+            BlockState original = entry.getValue();
+            BlockState current = mc.world.getBlockState(pos);
+            if (isRestoreSatisfied(original, current, strictExactRestore)) continue;
+
+            if (Vec3d.ofCenter(pos).squaredDistanceTo(eyes) <= maxSq) return true;
+        }
+
+        for (Map.Entry<BlockPos, BlockState> entry : fillLog.entrySet()) {
+            BlockPos pos = entry.getKey();
+            BlockState original = entry.getValue();
+            BlockState current = mc.world.getBlockState(pos);
+            if (isRestoreSatisfied(original, current, strictExactRestore)) continue;
+
+            if (Vec3d.ofCenter(pos).squaredDistanceTo(eyes) <= maxSq) return true;
+        }
+
+        return false;
+    }
+
     private boolean hasReachableStealthRestore(boolean allowNear) {
         if (mc.player == null) return false;
 
+        boolean strictExactRestore = isStrictStealthExactRestoreEnabled();
         int px = MathHelper.floor(mc.player.getX());
         int pz = MathHelper.floor(mc.player.getZ());
         double reach = 4 + Objects.requireNonNull(Modules.get().get(Reach.class)).blockReach();
@@ -2459,7 +3673,7 @@ public class TunnelMinerModule extends Module {
             if (activeProbePositions.contains(pos)) continue;
             if (isLavaState(original)) continue;
             if (isLavaState(current)) continue;
-            if (original.getBlock() == current.getBlock()) continue;
+            if (isRestoreSatisfied(original, current, strictExactRestore)) continue;
             if (!allowNear) {
                 if (Math.abs(pos.getX() - px) <= 1 && Math.abs(pos.getZ() - pz) <= 1) continue;
             } else {
@@ -2475,6 +3689,7 @@ public class TunnelMinerModule extends Module {
     private boolean hasAnyStealthRestorePending(boolean allowNear) {
         if (mc.player == null) return false;
 
+        boolean strictExactRestore = isStrictStealthExactRestoreEnabled();
         int px = MathHelper.floor(mc.player.getX());
         int pz = MathHelper.floor(mc.player.getZ());
 
@@ -2486,7 +3701,7 @@ public class TunnelMinerModule extends Module {
             if (activeProbePositions.contains(pos)) continue;
             if (isLavaState(original)) continue;
             if (isLavaState(current)) continue;
-            if (original.getBlock() == current.getBlock()) continue;
+            if (isRestoreSatisfied(original, current, strictExactRestore)) continue;
             if (!allowNear) {
                 if (Math.abs(pos.getX() - px) <= 1 && Math.abs(pos.getZ() - pz) <= 1) continue;
             } else {
@@ -2500,6 +3715,7 @@ public class TunnelMinerModule extends Module {
 
     private boolean hasStealthRestoreLagExceeded(int maxDistance) {
         if (mc.player == null) return false;
+        boolean strictExactRestore = isStrictStealthExactRestoreEnabled();
         double maxSq = (double) maxDistance * maxDistance;
         double playerX = mc.player.getX();
         double playerZ = mc.player.getZ();
@@ -2514,7 +3730,7 @@ public class TunnelMinerModule extends Module {
             if (activeProbePositions.contains(pos)) continue;
             if (isLavaState(original)) continue;
             if (isLavaState(current)) continue;
-            if (original.getBlock() == current.getBlock()) continue;
+            if (isRestoreSatisfied(original, current, strictExactRestore)) continue;
             if (Math.abs(pos.getX() - px) <= 1 && Math.abs(pos.getZ() - pz) <= 1) continue;
 
             double dx = (pos.getX() + 0.5) - playerX;
@@ -2536,6 +3752,29 @@ public class TunnelMinerModule extends Module {
 
         if (!ensureStealthFloorAt(currentFloor, true)) return false;
         return ensureStealthFloorAt(nextFloor, false);
+    }
+
+    private boolean hasSolidStealthSupportFloor(int px, int py, int pz, PathStep step) {
+        if (step == null) return false;
+        BlockPos currentFloor = new BlockPos(px, py - 1, pz);
+        BlockPos nextFloor = new BlockPos(step.toX(), py - 1, step.toZ());
+
+        if (!isSolidSupportFloor(currentFloor)) {
+            watchdogCalc("support-floor", "result=false,reason=emergency-no-scaffold-current-air,pos=" + formatPos(currentFloor));
+            return false;
+        }
+        if (!isSolidSupportFloor(nextFloor)) {
+            watchdogCalc("support-floor", "result=false,reason=emergency-no-scaffold-next-air,pos=" + formatPos(nextFloor));
+            return false;
+        }
+
+        watchdogCalc("support-floor", "result=true,reason=emergency-no-scaffold-solid,current=" + formatPos(currentFloor) + ",next=" + formatPos(nextFloor));
+        return true;
+    }
+
+    private boolean isSolidSupportFloor(BlockPos floorPos) {
+        BlockState state = mc.world.getBlockState(floorPos);
+        return !state.isAir() && state.getFluidState().isEmpty();
     }
 
     private boolean ensureStealthFloorAt(BlockPos floorPos, boolean allowEntityIntersection) {
@@ -2567,7 +3806,7 @@ public class TunnelMinerModule extends Module {
         InvUtils.swap(hb, true);
 
         if (tryAirPlaceAt(floorPos, hb, allowEntityIntersection)) {
-            placeTimer = placeDelay.get();
+            placeTimer = optPlaceDelay();
             watchdogCalc("support-floor", String.format(Locale.ROOT, "result=true,reason=placed,pos=%s,slot=%d,hb=%d,allowEntityIntersection=%s", formatPos(floorPos), slot, hb, allowEntityIntersection));
             return true;
         }
@@ -2613,7 +3852,7 @@ public class TunnelMinerModule extends Module {
         renderBreakPositions.clear();
         // Restock check
         if (needsRestock()) {
-            if (debugMessages.get()) info("Pickaxe low, starting restock.");
+            if (optDebugMessages()) info("Pickaxe low, starting restock.");
             resetRestockStageState();
             setPhase(Phase.RESTOCK_CLEAR);
             return;
@@ -2622,9 +3861,11 @@ public class TunnelMinerModule extends Module {
         int px = MathHelper.floor(mc.player.getX());
         int py = MathHelper.floor(mc.player.getY());
         int pz = MathHelper.floor(mc.player.getZ());
+        if (!refreshActiveNavigationGoal(px, py, pz)) return;
+        boolean atGoalReady = px == destX && pz == destZ && isGoalCompletionCellLoaded();
 
         // Destination reached.
-        if (px == destX && pz == destZ) {
+        if (atGoalReady) {
             setPhase(Phase.DONE);
             return;
         }
@@ -2632,7 +3873,7 @@ public class TunnelMinerModule extends Module {
         // Legacy axis mode: keep old X-then-Z transition behavior.
         if (hardPathMode() == PathMode.AxisFirst && onXAxis && px == destX) {
             onXAxis = false;
-            if (debugMessages.get()) info("X axis done, now heading Z...");
+            if (optDebugMessages()) info("X axis done, now heading Z...");
         }
 
         int[] step = nextStep(px, pz);
@@ -2640,7 +3881,7 @@ public class TunnelMinerModule extends Module {
         int stepZ = step[1];
         watchdogCalc("mine-phase-step", String.format(Locale.ROOT, "pos=(%d,%d),step=(%d,%d),dest=(%d,%d),onXAxis=%s,pathMode=%s", px, pz, stepX, stepZ, destX, destZ, onXAxis, hardPathMode()));
         if (stepX == 0 && stepZ == 0) {
-            if (px == destX && pz == destZ) setPhase(Phase.DONE);
+            if (atGoalReady) setPhase(Phase.DONE);
             else mc.options.forwardKey.setPressed(false);
             return;
         }
@@ -2662,12 +3903,12 @@ public class TunnelMinerModule extends Module {
         // If there are blocks to break, break them and stay in MINE phase.
         if (!toBreak.isEmpty()) {
             ensurePickaxe();
-            int n = Math.min(breaksPerTick.get(), toBreak.size());
-            if (debugMessages.get()) info("Breaking " + n + " blocks at " + toBreak.get(0).toShortString());
+            int n = Math.min(optBreaksPerTick(), toBreak.size());
+            if (optDebugMessages()) info("Breaking " + n + " blocks at " + toBreak.get(0).toShortString());
 
             for (int i = 0; i < n; i++) {
                 BlockPos bp = toBreak.get(i);
-                if (fillBehind.get()) fillLog.putIfAbsent(bp, mc.world.getBlockState(bp));
+                if (optFillBehind()) fillLog.putIfAbsent(bp, mc.world.getBlockState(bp));
 
                 BlockUtils.breakBlock(bp, true);
             }
@@ -2677,8 +3918,8 @@ public class TunnelMinerModule extends Module {
         }
 
         // Check for lava ahead and fill it.
-        if (lavaAvoidance.get() && hasLavaAhead(px, py, pz, stepX, stepZ)) {
-            if (debugMessages.get()) info("Lava detected ahead, filling...");
+        if (isAntiLavaActiveForCurrentMode() && hasLavaAhead(px, py, pz, stepX, stepZ)) {
+            if (optDebugMessages()) info("Lava detected ahead, filling...");
             if (fillLavaAhead(px, py, pz, stepX, stepZ)) return;
         }
 
@@ -2688,7 +3929,7 @@ public class TunnelMinerModule extends Module {
 
     private void collectBreakColumn(Set<BlockPos> out, int x, int py, int z) {
         int added = 0;
-        for (int h = 0; h < tunnelHeight.get(); h++) {
+        for (int h = 0; h < optTunnelHeight(); h++) {
             BlockPos bp = new BlockPos(x, py + h, z);
             BlockState bs = mc.world.getBlockState(bp);
             if (!bs.isAir() && bs.getBlock() != Blocks.BEDROCK && !isAvoidanceBlock(bs) && !touchesNoTouchChainBlock(bp) && !touchesLavaDetourRisk(bp)) {
@@ -2696,7 +3937,7 @@ public class TunnelMinerModule extends Module {
                 added++;
             }
         }
-        watchdogCalc("collect-break-column", String.format(Locale.ROOT, "column=(%d,%d),added=%d,tunnelHeight=%d", x, z, added, tunnelHeight.get()));
+        watchdogCalc("collect-break-column", String.format(Locale.ROOT, "column=(%d,%d),added=%d,tunnelHeight=%d", x, z, added, optTunnelHeight()));
     }
 
     // Check if there is lava in the tunnel path ahead
@@ -2731,7 +3972,7 @@ public class TunnelMinerModule extends Module {
         BlockPos target = new BlockPos(px + stepX, py - 1, pz + stepZ);
         int slot = findTraversalPlacementSlot(target);
         if (slot == -1) {
-            if (debugMessages.get()) warning("No blocks to fill lava with!");
+            if (optDebugMessages()) warning("No blocks to fill lava with!");
             watchdogCalc("fill-lava-ahead", String.format(Locale.ROOT, "result=false,reason=no-slot,from=(%d,%d),step=(%d,%d)", px, pz, stepX, stepZ));
             return false;
         }
@@ -2794,8 +4035,8 @@ public class TunnelMinerModule extends Module {
     private LinkedHashSet<BlockPos> collectLavaSealTargetsAtColumn(int py, int x, int z) {
         LinkedHashSet<BlockPos> targets = new LinkedHashSet<>();
         LinkedHashSet<BlockPos> probes = new LinkedHashSet<>();
-        for (int h = 0; h < tunnelHeight.get(); h++) probes.add(new BlockPos(x, py + h, z));
-        probes.add(new BlockPos(x, py + tunnelHeight.get(), z));
+        for (int h = 0; h < optTunnelHeight(); h++) probes.add(new BlockPos(x, py + h, z));
+        probes.add(new BlockPos(x, py + optTunnelHeight(), z));
 
         for (BlockPos probe : probes) {
             if (isLavaState(mc.world.getBlockState(probe))) targets.add(probe.toImmutable());
@@ -2816,7 +4057,7 @@ public class TunnelMinerModule extends Module {
         walkTargetX = (fromX + stepX) + 0.5;
         walkTargetZ = (fromZ + stepZ) + 0.5;
         watchdogCalc("start-walk", String.format(Locale.ROOT, "from=(%d,%d),step=(%d,%d),target=(%.3f,%.3f)", fromX, fromZ, stepX, stepZ, walkTargetX, walkTargetZ));
-        if (debugMessages.get()) info("Path clear, walking to " + String.format("%.1f, %.1f", walkTargetX, walkTargetZ));
+        if (optDebugMessages()) info("Path clear, walking to " + String.format("%.1f, %.1f", walkTargetX, walkTargetZ));
         setPhase(Phase.WALK);
     }
 
@@ -2830,7 +4071,7 @@ public class TunnelMinerModule extends Module {
         }
 
         // Air place blocks ahead if enabled
-        if (airPlace.get()) {
+        if (optAirPlace()) {
             if (placeAheadBlocks()) {
                 return;
             }
@@ -2838,7 +4079,7 @@ public class TunnelMinerModule extends Module {
 
         moveToward(walkTargetX, walkTargetZ, () -> {
             // After reaching the target, check if we should fill
-            if (fillBehind.get() && !fillLog.isEmpty()) {
+            if (optFillBehind() && !fillLog.isEmpty()) {
                 setPhase(Phase.FILL);
             } else {
                 setPhase(Phase.MINE);
@@ -2878,7 +4119,7 @@ public class TunnelMinerModule extends Module {
             return false;
         }
 
-        for (int d = 1; d <= airPlaceDistance.get(); d++) {
+        for (int d = 1; d <= optAirPlaceDistance(); d++) {
             BlockPos placePos = new BlockPos(px + stepX * d, py - 1, pz + stepZ * d);
             if (mc.world.getBlockState(placePos).isAir()) {
                 int slot = findTraversalPlacementSlot(placePos);
@@ -2899,7 +4140,7 @@ public class TunnelMinerModule extends Module {
                 }
             }
         }
-        watchdogCalc("place-ahead", String.format(Locale.ROOT, "result=false,reason=no-placement,pos=(%d,%d),step=(%d,%d),dist=%d", px, pz, stepX, stepZ, airPlaceDistance.get()));
+        watchdogCalc("place-ahead", String.format(Locale.ROOT, "result=false,reason=no-placement,pos=(%d,%d),step=(%d,%d),dist=%d", px, pz, stepX, stepZ, optAirPlaceDistance()));
         return false;
     }
     /**
@@ -2929,14 +4170,16 @@ public class TunnelMinerModule extends Module {
     // Re-place mined blocks behind the player, then return to MINE
 
     private void fillPhase() {
-        if (!fillBehind.get() || fillLog.isEmpty()) {
-            watchdogCalc("fill-phase", String.format(Locale.ROOT, "result=skip,fillBehind=%s,fillLog=%d", fillBehind.get(), fillLog.size()));
+        if (!optFillBehind() || fillLog.isEmpty()) {
+            watchdogCalc("fill-phase", String.format(Locale.ROOT, "result=skip,fillBehind=%s,fillLog=%d", optFillBehind(), fillLog.size()));
             setPhase(Phase.MINE);
             return;
         }
 
+        boolean strictExactRestore = isStrictStealthExactRestoreEnabled();
+
         // Try air place first if enabled
-        if (airPlace.get()) {
+        if (optAirPlace()) {
             if (placeAheadBlocks()) {
                 return;
             }
@@ -2947,16 +4190,18 @@ public class TunnelMinerModule extends Module {
         int placed = 0;
         int scanned = 0;
         int skippedNear = 0;
-        int removedFar = 0;
+        int skippedFar = 0;
         int removedAlreadyFilled = 0;
-        int removedNoSupport = 0;
-        int removedNoSlot = 0;
+        int skippedNoSupport = 0;
+        int skippedNoSlot = 0;
         int skippedNoHotbar = 0;
 
         Iterator<Map.Entry<BlockPos, BlockState>> it = fillLog.entrySet().iterator();
-        while (it.hasNext() && placed < placesPerTick.get()) {
+        while (it.hasNext() && placed < optPlacesPerTick()) {
             Map.Entry<BlockPos, BlockState> e = it.next();
             BlockPos pos = e.getKey();
+            BlockState original = e.getValue();
+            BlockState current = mc.world.getBlockState(pos);
             scanned++;
 
             // Skip if player is standing on or next to this block
@@ -2967,30 +4212,67 @@ public class TunnelMinerModule extends Module {
 
             // Skip if too far away
             if (Vec3d.ofCenter(pos).distanceTo(mc.player.getEyePos()) > 4 + Objects.requireNonNull(Modules.get().get(Reach.class)).blockReach()) {
-                it.remove();
-                removedFar++;
+                skippedFar++;
                 continue;
             }
 
-            // Skip if already filled
-            if (!mc.world.getBlockState(pos).isAir()) {
+            // Remove only when restore criteria are satisfied at this exact position.
+            if (isRestoreSatisfied(original, current, strictExactRestore)) {
                 it.remove();
                 removedAlreadyFilled++;
                 continue;
             }
 
-            if (!airPlace.get() && mc.world.getBlockState(pos.down()).isAir()) {
-                it.remove();
-                removedNoSupport++;
+            if (isLavaState(original) || isLavaState(current)) {
+                skippedNoSupport++;
                 continue;
             }
 
-            // Try to find a block from the fill list
-            int slot = findBlockToPlace();
-            if (slot == -1) {
-                it.remove(); // Don't have any valid block
-                removedNoSlot++;
+            if (original.isAir()) {
+                if (current.isAir()) {
+                    it.remove();
+                    removedAlreadyFilled++;
+                    continue;
+                }
+
+                if (BlockUtils.canBreak(pos, current)) {
+                    ensurePickaxe();
+                    BlockUtils.breakBlock(pos, true);
+                } else {
+                    skippedNoSupport++;
+                }
                 continue;
+            }
+
+            if (!current.isAir()) {
+                if (BlockUtils.canBreak(pos, current)) {
+                    ensurePickaxe();
+                    BlockUtils.breakBlock(pos, true);
+                } else {
+                    skippedNoSupport++;
+                }
+                continue;
+            }
+
+            if (!optAirPlace() && mc.world.getBlockState(pos.down()).isAir()) {
+                skippedNoSupport++;
+                continue;
+            }
+
+            int slot = findExactBlockInInv(original.getBlock());
+            boolean exactRestore = true;
+            if (slot == -1) {
+                if (strictExactRestore) {
+                    hardFailStealthExactRestore(pos, original, "fill");
+                    return;
+                }
+
+                slot = findFallbackRestoreSlot(pos);
+                exactRestore = false;
+                if (slot == -1) {
+                    skippedNoSlot++;
+                    continue;
+                }
             }
 
             int hb = toHotbar(slot);
@@ -3001,23 +4283,26 @@ public class TunnelMinerModule extends Module {
 
             InvUtils.swap(hb, true);
             if (tryAirPlaceAt(pos, hb, false)) {
-                it.remove();
-                placed++;
+                BlockState after = mc.world.getBlockState(pos);
+                if (isRestoreSatisfied(original, after, strictExactRestore)) {
+                    it.remove();
+                    placed++;
+                }
             }
         }
 
         // If we placed blocks, wait before going back to mine
         if (placed > 0) {
-            if (debugMessages.get()) { info("Placed " + placed + " blocks behind.");}
+            if (optDebugMessages()) { info("Placed " + placed + " blocks behind.");}
 
-            placeTimer = placeDelay.get();
+            placeTimer = optPlaceDelay();
             ensurePickaxe();
-            watchdogCalc("fill-phase", String.format(Locale.ROOT, "result=placed,placed=%d,scanned=%d,skippedNear=%d,removedFar=%d,removedAlreadyFilled=%d,removedNoSupport=%d,removedNoSlot=%d,skippedNoHotbar=%d,remaining=%d", placed, scanned, skippedNear, removedFar, removedAlreadyFilled, removedNoSupport, removedNoSlot, skippedNoHotbar, fillLog.size()));
+            watchdogCalc("fill-phase", String.format(Locale.ROOT, "result=placed,placed=%d,scanned=%d,skippedNear=%d,skippedFar=%d,removedAlreadyFilled=%d,skippedNoSupport=%d,skippedNoSlot=%d,skippedNoHotbar=%d,remaining=%d", placed, scanned, skippedNear, skippedFar, removedAlreadyFilled, skippedNoSupport, skippedNoSlot, skippedNoHotbar, fillLog.size()));
             return;
         }
 
         // If we didn't place anything (e.g. because blocks are too close), go back to mining
-        watchdogCalc("fill-phase", String.format(Locale.ROOT, "result=no-place,placed=%d,scanned=%d,skippedNear=%d,removedFar=%d,removedAlreadyFilled=%d,removedNoSupport=%d,removedNoSlot=%d,skippedNoHotbar=%d,remaining=%d", placed, scanned, skippedNear, removedFar, removedAlreadyFilled, removedNoSupport, removedNoSlot, skippedNoHotbar, fillLog.size()));
+        watchdogCalc("fill-phase", String.format(Locale.ROOT, "result=no-place,placed=%d,scanned=%d,skippedNear=%d,skippedFar=%d,removedAlreadyFilled=%d,skippedNoSupport=%d,skippedNoSlot=%d,skippedNoHotbar=%d,remaining=%d", placed, scanned, skippedNear, skippedFar, removedAlreadyFilled, skippedNoSupport, skippedNoSlot, skippedNoHotbar, fillLog.size()));
         setPhase(Phase.MINE);
     }
 
@@ -3047,6 +4332,7 @@ public class TunnelMinerModule extends Module {
 
     private boolean hasPendingRestockBehindParity(int px, int pz, int forwardX, int forwardZ, int reservedX, int reservedZ, boolean reachableOnly) {
         double reach = 4 + Objects.requireNonNull(Modules.get().get(Reach.class)).blockReach();
+        boolean strictExactRestore = isStrictStealthExactRestoreEnabled();
 
         for (Map.Entry<BlockPos, BlockState> entry : stealthCache.entrySet()) {
             BlockPos pos = entry.getKey();
@@ -3057,7 +4343,7 @@ public class TunnelMinerModule extends Module {
             if (!isBehindForRestock(px, pz, forwardX, forwardZ, pos)) continue;
             if (isLavaState(original)) continue;
             if (isLavaState(current)) continue;
-            if (original.getBlock() == current.getBlock()) continue;
+            if (isRestoreSatisfied(original, current, strictExactRestore)) continue;
             if (reachableOnly && Vec3d.ofCenter(pos).distanceTo(mc.player.getEyePos()) > reach) continue;
             return true;
         }
@@ -3067,9 +4353,10 @@ public class TunnelMinerModule extends Module {
 
     private boolean restoreBehindForRestock(int px, int pz, int forwardX, int forwardZ, int reservedX, int reservedZ) {
         int actions = 0;
-        int maxActions = Math.max(1, placesPerTick.get());
+        int maxActions = Math.max(1, optPlacesPerTick());
         boolean placed = false;
         double reach = 4 + Objects.requireNonNull(Modules.get().get(Reach.class)).blockReach();
+        boolean strictExactRestore = isStrictStealthExactRestoreEnabled();
 
         int scanned = 0;
         int skippedNonBehind = 0;
@@ -3103,7 +4390,7 @@ public class TunnelMinerModule extends Module {
                 continue;
             }
 
-            if (original.getBlock() == current.getBlock()) {
+            if (isRestoreSatisfied(original, current, strictExactRestore)) {
                 it.remove();
                 removedMatch++;
                 continue;
@@ -3115,7 +4402,6 @@ public class TunnelMinerModule extends Module {
             }
 
             if (isLavaState(original) || isLavaState(current)) {
-                it.remove();
                 removedLava++;
                 continue;
             }
@@ -3152,10 +4438,9 @@ public class TunnelMinerModule extends Module {
             int slot = findExactBlockInInv(original.getBlock());
             boolean exactRestore = true;
             if (slot == -1) {
-                if (hasAdjacentAirForRestore(pos)) {
-                    it.remove();
-                    removedAdjacentAir++;
-                    continue;
+                if (strictExactRestore) {
+                    hardFailStealthExactRestore(pos, original, "restock-restore");
+                    return false;
                 }
                 slot = findFallbackRestoreSlot(pos);
                 exactRestore = false;
@@ -3176,7 +4461,7 @@ public class TunnelMinerModule extends Module {
                 actions++;
                 placed = true;
                 BlockState after = mc.world.getBlockState(pos);
-                if (!after.isAir() && (!exactRestore || after.getBlock() == original.getBlock())) {
+                if (isRestoreSatisfied(original, after, strictExactRestore)) {
                     it.remove();
                     if (exactRestore) placedExact++;
                     else placedFallback++;
@@ -3185,7 +4470,7 @@ public class TunnelMinerModule extends Module {
         }
 
         if (placed) {
-            placeTimer = placeDelay.get();
+            placeTimer = optPlaceDelay();
             ensurePickaxe();
         }
 
@@ -3239,7 +4524,7 @@ public class TunnelMinerModule extends Module {
         }
 
         boolean clear = true;
-        for (int h = 0; h < tunnelHeight.get(); h++) {
+        for (int h = 0; h < optTunnelHeight(); h++) {
             BlockPos bp = containerPos.up(h);
             BlockState state = mc.world.getBlockState(bp);
             if (state.isAir()) continue;
@@ -3250,7 +4535,7 @@ public class TunnelMinerModule extends Module {
             clear = false;
             waitTicks++;
             if (waitTicks > MAX_WAIT) {
-                if (debugMessages.get()) warning("Can't clear reserved restock column.");
+                if (optDebugMessages()) warning("Can't clear reserved restock column.");
                 hardFailRestock("clear-timeout");
             }
             return;
@@ -3259,12 +4544,12 @@ public class TunnelMinerModule extends Module {
         if (clear) {
             waitTicks = 0;
             int sk = findPreferredRestockShulkerSlot();
-            int ec = (!restockEcSearchExhausted && useEnderChest.get()) ? findInInv(TunnelMinerModule::isEnderChest) : -1;
+            int ec = (!restockEcSearchExhausted && optUseEnderChest()) ? findInInv(TunnelMinerModule::isEnderChest) : -1;
             if (sk != -1) {
                 restockEC = false;
                 restockPreferShulkerNext = false;
                 restockPlaceRetries = 0;
-                if (debugMessages.get()) info("Found shulker box for restock.");
+                if (optDebugMessages()) info("Found shulker box for restock.");
                 watchdogCalc(
                     "restock-clear-select",
                     String.format(
@@ -3281,7 +4566,7 @@ public class TunnelMinerModule extends Module {
             } else if (ec != -1) {
                 restockEC = true;
                 restockPlaceRetries = 0;
-                if (debugMessages.get()) info("Found ender chest for restock.");
+                if (optDebugMessages()) info("Found ender chest for restock.");
                 watchdogCalc(
                     "restock-clear-select",
                     String.format(
@@ -3303,7 +4588,7 @@ public class TunnelMinerModule extends Module {
                         restockEcExtractedPickShulker
                     )
                 );
-                if (debugMessages.get()) warning("No restock container - stopping.");
+                if (optDebugMessages()) warning("No restock container - stopping.");
                 hardFailRestock("no-restock-container");
             }
         }
@@ -3325,19 +4610,19 @@ public class TunnelMinerModule extends Module {
             if (shouldMaintainBehindParity()) stealthCache.putIfAbsent(floor.toImmutable(), floorState);
             int supportSlot = findTraversalPlacementSlot(floor);
             if (supportSlot == -1) {
-                if (debugMessages.get()) warning("No floor and no support block for restock container.");
+                if (optDebugMessages()) warning("No floor and no support block for restock container.");
                 hardFailRestock("no-support-block-for-container");
                 return;
             }
             int supportHb = toHotbar(supportSlot);
             if (supportHb == -1) {
-                if (debugMessages.get()) warning("No hotbar slot for restock support block.");
+                if (optDebugMessages()) warning("No hotbar slot for restock support block.");
                 hardFailRestock("no-hotbar-slot-for-support");
                 return;
             }
             InvUtils.swap(supportHb, true);
             if (!tryDirectPlaceAt(floor, supportHb, false)) {
-                if (debugMessages.get()) warning("Failed to place floor support for restock container.");
+                if (optDebugMessages()) warning("Failed to place floor support for restock container.");
                 hardFailRestock("failed-place-support");
                 return;
             }
@@ -3346,21 +4631,21 @@ public class TunnelMinerModule extends Module {
         int slot = restockEC ? findInInv(TunnelMinerModule::isEnderChest)
             : findPreferredRestockShulkerSlot();
         if (slot == -1) {
-            if (debugMessages.get()) warning("Lost container!");
+            if (optDebugMessages()) warning("Lost container!");
             hardFailRestock("lost-container-item");
             return;
         }
         int hb = toHotbar(slot);
         if (hb == -1) {
-            if (debugMessages.get()) warning("Hotbar full!");
+            if (optDebugMessages()) warning("Hotbar full!");
             hardFailRestock("no-hotbar-slot-for-container");
             return;
         }
         InvUtils.swap(hb, true);
 
-        if (debugMessages.get()) info("Placing restock container at " + containerPos.toShortString());
+        if (optDebugMessages()) info("Placing restock container at " + containerPos.toShortString());
         if (!tryDirectPlaceAt(containerPos, hb, false)) {
-            if (debugMessages.get()) warning("Failed to place restock container.");
+            if (optDebugMessages()) warning("Failed to place restock container.");
             return;
         }
 
@@ -3381,18 +4666,18 @@ public class TunnelMinerModule extends Module {
                 )
             );
             if (restockPlaceRetries > MAX_RESTOCK_PLACE_RETRIES) {
-                if (debugMessages.get()) warning("Container failed immediate placement verification.");
+                if (optDebugMessages()) warning("Container failed immediate placement verification.");
                 hardFailRestock("container-immediate-verify-failed");
                 return;
             }
             waitTicks = 0;
-            invTimer = invDelay.get();
+            invTimer = optInvDelay();
             setPhase(Phase.RESTOCK_PLACE);
             return;
         }
 
         ensurePickaxe();
-        invTimer = invDelay.get();
+        invTimer = optInvDelay();
         waitTicks = 0;
         setPhase(Phase.RESTOCK_WAIT);
     }
@@ -3505,7 +4790,7 @@ public class TunnelMinerModule extends Module {
                         restockEC
                     )
                 );
-                if (debugMessages.get()) warning("Container didn't appear. Retrying place (" + restockPlaceRetries + "/" + MAX_RESTOCK_PLACE_RETRIES + ").");
+                if (optDebugMessages()) warning("Container didn't appear. Retrying place (" + restockPlaceRetries + "/" + MAX_RESTOCK_PLACE_RETRIES + ").");
                 waitTicks = 0;
                 setPhase(Phase.RESTOCK_PLACE);
                 return;
@@ -3523,7 +4808,7 @@ public class TunnelMinerModule extends Module {
                     restockEC
                 )
             );
-            if (debugMessages.get()) warning("Container didn't appear.");
+            if (optDebugMessages()) warning("Container didn't appear.");
             hardFailRestock("container-did-not-appear");
         }
     }
@@ -3532,25 +4817,20 @@ public class TunnelMinerModule extends Module {
         waitTicks++;
         if (waitTicks == 1) {
             BlockPos bp = containerPos;
-            if (rotate.get()) {
-                Rotations.rotate(Rotations.getYaw(bp), Rotations.getPitch(bp),
-                    () -> mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND,
-                        new BlockHitResult(Vec3d.ofCenter(bp), Direction.UP, bp, false)));
-            } else {
-                mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND,
-                    new BlockHitResult(Vec3d.ofCenter(bp), Direction.UP, bp, false));
-            }
+            Rotations.rotate(Rotations.getYaw(bp), Rotations.getPitch(bp),
+                () -> mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND,
+                    new BlockHitResult(Vec3d.ofCenter(bp), Direction.UP, bp, false)));
             return;
         }
         if (mc.currentScreen != null) {
             waitTicks = 0;
-            invTimer = invDelay.get();
-            if (debugMessages.get()) info("Container open, looting pickaxes.");
+            invTimer = optInvDelay();
+            if (optDebugMessages()) info("Container open, looting pickaxes.");
             setPhase(Phase.RESTOCK_LOOT);
             return;
         }
         if (waitTicks > MAX_WAIT) {
-            if (debugMessages.get()) warning("Container didn't open.");
+            if (optDebugMessages()) warning("Container didn't open.");
             hardFailRestock("container-did-not-open");
         }
     }
@@ -3571,14 +4851,14 @@ public class TunnelMinerModule extends Module {
         }
         if (free <= 1) {
             watchdogCalc("restock-loot", String.format(Locale.ROOT, "action=close-inventory-full,free=%d", free));
-            if (debugMessages.get()) info("Inventory full, closing container.");
+            if (optDebugMessages()) info("Inventory full, closing container.");
             setPhase(Phase.RESTOCK_CLOSE);
             return;
         }
 
         // Only grab pickaxes
         int currentPickaxes = countPickaxes();
-        int closeTarget = restockEC ? (minPickaxes.get() + 1) : minPickaxes.get();
+        int closeTarget = restockEC ? (optMinPickaxes() + 1) : optMinPickaxes();
         if (currentPickaxes >= closeTarget) {
             watchdogCalc(
                 "restock-loot",
@@ -3590,7 +4870,7 @@ public class TunnelMinerModule extends Module {
                     restockEC
                 )
             );
-            if (debugMessages.get()) info("Have enough pickaxes, closing container.");
+            if (optDebugMessages()) info("Have enough pickaxes, closing container.");
             setPhase(Phase.RESTOCK_CLOSE);
             return;
         }
@@ -3608,16 +4888,16 @@ public class TunnelMinerModule extends Module {
                         i,
                         containerSlots,
                         currentPickaxes,
-                        minPickaxes.get()
+                        optMinPickaxes()
                     )
                 );
-                invTimer = invDelay.get();
+                invTimer = optInvDelay();
                 return;
             }
         }
 
         if (restockEC) {
-            int minimum = minPickaxes.get();
+            int minimum = optMinPickaxes();
             int ecTarget = minimum + 1;
             int projected = currentPickaxes + countPickaxesStoredInInventoryShulkers();
             if (projected >= ecTarget) {
@@ -3635,7 +4915,7 @@ public class TunnelMinerModule extends Module {
                         containerSlots
                     )
                 );
-                if (debugMessages.get()) info("Ender chest search complete; switching to shulker restock.");
+                if (optDebugMessages()) info("Ender chest search complete; switching to shulker restock.");
                 setPhase(Phase.RESTOCK_CLOSE);
                 return;
             }
@@ -3689,7 +4969,7 @@ public class TunnelMinerModule extends Module {
                         minimum
                     )
                 );
-                invTimer = invDelay.get();
+                invTimer = optInvDelay();
                 setPhase(Phase.RESTOCK_CLOSE);
                 return;
             }
@@ -3717,7 +4997,7 @@ public class TunnelMinerModule extends Module {
                     (!canContinueShulkerStage && currentPickaxes < minimum)
                 )
             );
-            if (debugMessages.get()) {
+            if (optDebugMessages()) {
                 if (canContinueShulkerStage) info("Ender chest search complete; switching to shulker restock.");
                 else info("No viable pickaxe source found in ender chest.");
             }
@@ -3732,18 +5012,18 @@ public class TunnelMinerModule extends Module {
                 "action=close-no-picks,reason=no-pickaxe-in-container,containerSlots=%d,pickaxes=%d,target=%d",
                 containerSlots,
                 currentPickaxes,
-                minPickaxes.get()
+                optMinPickaxes()
             )
         );
         restockFailOutOfPickaxes = false;
-        if (debugMessages.get()) info("No more pickaxes in container, closing.");
+        if (optDebugMessages()) info("No more pickaxes in container, closing.");
         setPhase(Phase.RESTOCK_CLOSE);
     }
 
     private void restockClose() {
         if (mc.currentScreen != null) {
             mc.currentScreen.close();
-            invTimer = invDelay.get();
+            invTimer = optInvDelay();
             return;
         }
         waitTicks = 0;
@@ -3806,38 +5086,61 @@ public class TunnelMinerModule extends Module {
         List<ItemEntity> drops = collectRestockDropEntities();
         if (!drops.isEmpty()) {
             waitTicks++;
+
+            ItemEntity nearestDrop = null;
+            double nearestDistSq = Double.POSITIVE_INFINITY;
+            for (ItemEntity drop : drops) {
+                double distSq = mc.player.squaredDistanceTo(drop.getX(), drop.getY(), drop.getZ());
+                if (distSq < nearestDistSq) {
+                    nearestDistSq = distSq;
+                    nearestDrop = drop;
+                }
+            }
+
+            // Move toward pending restock drops every other tick to improve pickup reliability.
+            boolean moveThisTick = (waitTicks & 1) == 0 && nearestDrop != null;
+            if (moveThisTick) {
+                moveToward(nearestDrop.getX(), nearestDrop.getZ(), () -> {});
+            } else {
+                mc.options.forwardKey.setPressed(false);
+            }
+
             watchdogCalc(
                 "restock-pickup",
                 String.format(
                     Locale.ROOT,
-                    "waiting=true,reason=drop-entities,pending=%d,ticks=%d,items=%s,center=%s",
+                    "waiting=true,reason=drop-entities,pending=%d,ticks=%d,items=%s,center=%s,moveEveryOtherTick=true,moveThisTick=%s,target=%s,nearestDistSq=%.3f",
                     drops.size(),
                     waitTicks,
                     summarizeRestockDropEntities(drops),
-                    restockCleanupPos == null ? "null" : formatPos(restockCleanupPos)
+                    restockCleanupPos == null ? "null" : formatPos(restockCleanupPos),
+                    moveThisTick,
+                    nearestDrop == null ? "none" : formatPos(nearestDrop.getBlockPos()),
+                    nearestDistSq
                 )
             );
             if (waitTicks > MAX_WAIT * 3) {
-                if (debugMessages.get()) warning("Restock drops not picked up in time; stopping.");
+                if (optDebugMessages()) warning("Restock drops not picked up in time; stopping.");
                 hardFailRestock("drops-not-picked-up");
             }
             return;
         }
 
+        mc.options.forwardKey.setPressed(false);
         if (++waitTicks < 8) return;
         containerPos = null;
         restockCleanupPos = null;
         waitTicks = 0;
         int currentPickaxes = countPickaxes();
-        int minimum = minPickaxes.get();
+        int minimum = optMinPickaxes();
         boolean stillNeedsRestock = needsRestock();
         int invPickShulkerSlot = findInInv(this::shulkerContainsPickaxe);
         int invAnyShulkerSlot = findInInv(TunnelMinerModule::isShulkerBox);
         boolean forcedShulkerStage = restockPreferShulkerNext || restockEcExtractedPickShulker;
         boolean canRunShulkerStage = invPickShulkerSlot != -1
             || (forcedShulkerStage && invAnyShulkerSlot != -1)
-            || (useShulkers.get() && !useEnderChest.get() && invAnyShulkerSlot != -1);
-        boolean canRunEcStage = useEnderChest.get()
+            || (optUseShulkers() && !optUseEnderChest() && invAnyShulkerSlot != -1);
+        boolean canRunEcStage = optUseEnderChest()
             && !restockEcSearchExhausted
             && findInInv(TunnelMinerModule::isEnderChest) != -1;
 
@@ -3903,7 +5206,7 @@ public class TunnelMinerModule extends Module {
 
         resetRestockStageState();
         pickSlot = equipBestPickaxe();
-        if (debugMessages.get()) info("Restock done - resuming.");
+        if (optDebugMessages()) info("Restock done - resuming.");
         setPhase(Phase.MINE);
     }
 
@@ -3914,29 +5217,519 @@ public class TunnelMinerModule extends Module {
         }
         if (isActive()) toggle();
     }
+
+    private void disconnectOnSuccessfulCompletion() {
+        String completionMessage;
+        if (goalMode == GoalMode.FALLBACK) {
+            completionMessage = String.format(
+                Locale.ROOT,
+                "Requested destination unreachable; completed at fallback (%d, %d) for requested (%d, %d).",
+                activeGoalX,
+                activeGoalZ,
+                requestedDestX,
+                requestedDestZ
+            );
+        } else {
+            completionMessage = String.format(
+                Locale.ROOT,
+                "Destination reached at (%d, %d).",
+                activeGoalX,
+                activeGoalZ
+            );
+        }
+
+        watchdog("success-disconnect", sanitizeLogField(completionMessage));
+        watchdogCalc("success-disconnect", sanitizeLogField(completionMessage));
+
+        if (mc.getNetworkHandler() != null && mc.getNetworkHandler().getConnection() != null) {
+            MutableText text = Text.literal("[")
+                .styled(style -> style.withColor(Formatting.WHITE))
+                .append(Text.literal(title).styled(style -> style.withColor(Formatting.BLUE)))
+                .append(Text.literal("] ").styled(style -> style.withColor(Formatting.WHITE)))
+                .append(Text.literal(completionMessage).styled(style -> style.withColor(Formatting.GREEN)));
+            mc.getNetworkHandler().getConnection().disconnect(text);
+        }
+
+        if (isActive()) toggle();
+    }
+
+    private String hazardUserMessage(HazardCondition hazard) {
+        return switch (hazard) {
+            case SUFFOCATING -> "player is suffocating";
+            case DROWNING -> "player is drowning";
+            case BURNING -> "player is burning / in lava";
+            case SWIMMING -> "player is swimming / in swimming pose";
+            default -> "hazard detected";
+        };
+    }
+
+    private void hardFailHazard(HazardCondition hazard, String stage) {
+        String userReason = hazardUserMessage(hazard);
+        String details = String.format(
+            Locale.ROOT,
+            "hazard=%s,stage=%s,message=%s",
+            hazard.id,
+            sanitizeLogField(stage),
+            sanitizeLogField(userReason)
+        );
+        watchdogCalc("hazard-hard-fail", details);
+        if (mc.getNetworkHandler() != null && mc.getNetworkHandler().getConnection() != null) {
+            mc.getNetworkHandler().getConnection().disconnect(Text.literal("[TunnelMiner] Hazard failure: " + userReason));
+        }
+        if (isActive()) toggle();
+    }
+
+    private void hardFailDestinationUnreachable(int px, int py, int pz, String reason) {
+        String details = String.format(
+            Locale.ROOT,
+            "requested=(%d,%d),active=(%d,%d),player=(%d,%d,%d),radius=%d,reason=%s",
+            requestedDestX,
+            requestedDestZ,
+            activeGoalX,
+            activeGoalZ,
+            px,
+            py,
+            pz,
+            GOAL_FALLBACK_RADIUS,
+            sanitizeLogField(reason)
+        );
+        watchdog("destination-unreachable", details);
+        watchdogCalc("destination-unreachable", details);
+        if (optDebugMessages()) warning("Destination unreachable under current safety rules: " + details);
+        if (mc.options != null) mc.options.forwardKey.setPressed(false);
+        if (isActive()) toggle();
+    }
+
+    private void setActiveGoal(int goalX, int goalZ, GoalMode mode, String reason) {
+        GoalMode nextMode = mode == null ? GoalMode.EXACT : mode;
+        String nextReason = reason == null ? "" : reason;
+        boolean changed = activeGoalX != goalX || activeGoalZ != goalZ || goalMode != nextMode || !Objects.equals(goalReason, nextReason);
+
+        activeGoalX = goalX;
+        activeGoalZ = goalZ;
+        goalMode = nextMode;
+        goalReason = nextReason;
+
+        // Planner continues to use destX/destZ as the active navigation goal.
+        destX = activeGoalX;
+        destZ = activeGoalZ;
+
+        if (changed) {
+            watchdog(
+                "goal-update",
+                String.format(
+                    Locale.ROOT,
+                    "mode=%s,requested=(%d,%d),active=(%d,%d),reason=%s",
+                    goalMode.id,
+                    requestedDestX,
+                    requestedDestZ,
+                    activeGoalX,
+                    activeGoalZ,
+                    sanitizeLogField(goalReason)
+                )
+            );
+            if (optDebugMessages()) {
+                if (goalMode == GoalMode.EXACT) info("Goal mode exact: (" + activeGoalX + ", " + activeGoalZ + ")");
+                else if (goalMode == GoalMode.FALLBACK) warning("Goal mode fallback: (" + activeGoalX + ", " + activeGoalZ + ") requested=(" + requestedDestX + ", " + requestedDestZ + ")");
+            }
+        }
+    }
+
+    private boolean refreshActiveNavigationGoal(int px, int py, int pz) {
+        boolean rejectAirGapDetours = useStealthAvoidAirGapDetours();
+
+        // Do not run fallback goal search while the requested destination is still far away.
+        // This prevents expensive 48-radius scans from running continuously on distant goals.
+        int requestedDx = requestedDestX - px;
+        int requestedDz = requestedDestZ - pz;
+        int fallbackRadiusSq = GOAL_FALLBACK_RADIUS * GOAL_FALLBACK_RADIUS;
+        int requestedDistSq = requestedDx * requestedDx + requestedDz * requestedDz;
+        if (requestedDistSq > fallbackRadiusSq) {
+            setActiveGoal(requestedDestX, requestedDestZ, GoalMode.EXACT, "fallback-deferred-distance>48");
+            return true;
+        }
+
+        if (isGoalCellTraversable(requestedDestX, requestedDestZ, py, rejectAirGapDetours)) {
+            setActiveGoal(requestedDestX, requestedDestZ, GoalMode.EXACT, "requested-traversable");
+            return true;
+        }
+
+        GoalResolution fallback = resolveFallbackGoal(px, pz, py, rejectAirGapDetours);
+        if (fallback.mode() == GoalMode.UNREACHABLE) {
+            setActiveGoal(requestedDestX, requestedDestZ, GoalMode.UNREACHABLE, fallback.reason());
+            hardFailDestinationUnreachable(px, py, pz, fallback.reason());
+            return false;
+        }
+
+        setActiveGoal(fallback.x(), fallback.z(), GoalMode.FALLBACK, fallback.reason());
+        return true;
+    }
+
+    private GoalResolution resolveFallbackGoal(int px, int pz, int py, boolean rejectAirGapDetours) {
+        if (mc != null && mc.player != null
+            && fallbackSearchCachedPx == px
+            && fallbackSearchCachedPz == pz
+            && fallbackSearchCachedPy == py
+            && fallbackSearchCachedDestX == requestedDestX
+            && fallbackSearchCachedDestZ == requestedDestZ
+            && fallbackSearchCachedRejectAirGaps == rejectAirGapDetours
+            && fallbackSearchCachedAge != Integer.MIN_VALUE
+            && (mc.player.age - fallbackSearchCachedAge) <= hardPathCalcIntervalTicks()) {
+            return new GoalResolution(
+                fallbackSearchResultX,
+                fallbackSearchResultZ,
+                fallbackSearchResultMode,
+                fallbackSearchResultReason
+            );
+        }
+
+        final int[][] dirs = {
+            { 1, 0 }, { 1, 1 }, { 0, 1 }, { -1, 1 },
+            { -1, 0 }, { -1, -1 }, { 0, -1 }, { 1, -1 }
+        };
+
+        int radiusSq = GOAL_FALLBACK_RADIUS * GOAL_FALLBACK_RADIUS;
+        long startKey = packXZ(px, pz);
+        PriorityQueue<AStarNode> open = new PriorityQueue<>(Comparator.comparingDouble(a -> a.f));
+        HashMap<Long, Double> gScore = new HashMap<>();
+        HashSet<Long> closed = new HashSet<>();
+
+        double startH = octileDistance(px, pz, requestedDestX, requestedDestZ);
+        open.add(new AStarNode(px, pz, 0.0, startH));
+        gScore.put(startKey, 0.0);
+
+        long bestKey = Long.MIN_VALUE;
+        double bestTargetDistance = Double.POSITIVE_INFINITY;
+        double bestPathCost = Double.POSITIVE_INFINITY;
+        double bestPlayerDistSq = Double.POSITIVE_INFINITY;
+        int expanded = 0;
+
+        while (!open.isEmpty() && expanded < GOAL_FALLBACK_MAX_NODES) {
+            AStarNode current = open.poll();
+            long currentKey = packXZ(current.x, current.z);
+            if (!closed.add(currentKey)) continue;
+            expanded++;
+
+            int centerDx = current.x - px;
+            int centerDz = current.z - pz;
+            if (centerDx * centerDx + centerDz * centerDz > radiusSq) continue;
+
+            if (isGoalCellTraversable(current.x, current.z, py, rejectAirGapDetours)) {
+                double targetDistance = octileDistance(current.x, current.z, requestedDestX, requestedDestZ);
+                double playerDistSq = (double) centerDx * centerDx + (double) centerDz * centerDz;
+                if (targetDistance < bestTargetDistance - 1e-6
+                    || (Math.abs(targetDistance - bestTargetDistance) <= 1e-6 && current.g < bestPathCost - 1e-6)
+                    || (Math.abs(targetDistance - bestTargetDistance) <= 1e-6 && Math.abs(current.g - bestPathCost) <= 1e-6 && playerDistSq < bestPlayerDistSq - 1e-6)) {
+                    bestTargetDistance = targetDistance;
+                    bestPathCost = current.g;
+                    bestPlayerDistSq = playerDistSq;
+                    bestKey = currentKey;
+                }
+            }
+
+            for (int[] dir : dirs) {
+                int nx = current.x + dir[0];
+                int nz = current.z + dir[1];
+                int rx = nx - px;
+                int rz = nz - pz;
+                if (rx * rx + rz * rz > radiusSq) continue;
+                if (!isStepTraversable(current.x, current.z, nx, nz, py, false, rejectAirGapDetours)) continue;
+
+                long nKey = packXZ(nx, nz);
+                if (closed.contains(nKey)) continue;
+
+                double tentativeG = current.g + stepMovementCost(current.x, current.z, nx, nz);
+                double prevG = gScore.getOrDefault(nKey, Double.POSITIVE_INFINITY);
+                if (tentativeG >= prevG) continue;
+
+                gScore.put(nKey, tentativeG);
+                double nf = tentativeG + octileDistance(nx, nz, requestedDestX, requestedDestZ);
+                open.add(new AStarNode(nx, nz, tentativeG, nf));
+            }
+        }
+
+        GoalResolution result;
+        if (bestKey == Long.MIN_VALUE) {
+            result = new GoalResolution(
+                requestedDestX,
+                requestedDestZ,
+                GoalMode.UNREACHABLE,
+                String.format(
+                    Locale.ROOT,
+                    "no-reachable-goal-within-radius,expanded=%d,nodeLimit=%d,radius=%d",
+                    expanded,
+                    GOAL_FALLBACK_MAX_NODES,
+                    GOAL_FALLBACK_RADIUS
+                )
+            );
+        } else {
+            result = new GoalResolution(
+                unpackX(bestKey),
+                unpackZ(bestKey),
+                GoalMode.FALLBACK,
+                String.format(
+                    Locale.ROOT,
+                    "fallback-best-reachable,expanded=%d,nodeLimit=%d,radius=%d,targetDist=%.3f,pathCost=%.3f",
+                    expanded,
+                    GOAL_FALLBACK_MAX_NODES,
+                    GOAL_FALLBACK_RADIUS,
+                    bestTargetDistance,
+                    bestPathCost
+                )
+            );
+        }
+
+        fallbackSearchCachedPx = px;
+        fallbackSearchCachedPz = pz;
+        fallbackSearchCachedPy = py;
+        fallbackSearchCachedDestX = requestedDestX;
+        fallbackSearchCachedDestZ = requestedDestZ;
+        fallbackSearchCachedRejectAirGaps = rejectAirGapDetours;
+        fallbackSearchCachedAge = (mc != null && mc.player != null) ? mc.player.age : Integer.MIN_VALUE;
+        fallbackSearchResultX = result.x();
+        fallbackSearchResultZ = result.z();
+        fallbackSearchResultMode = result.mode();
+        fallbackSearchResultReason = result.reason();
+
+        watchdogCalc(
+            "goal-resolve",
+            String.format(
+                Locale.ROOT,
+                "requested=(%d,%d),player=(%d,%d),mode=%s,active=(%d,%d),reason=%s",
+                requestedDestX,
+                requestedDestZ,
+                px,
+                pz,
+                result.mode().id,
+                result.x(),
+                result.z(),
+                sanitizeLogField(result.reason())
+            )
+        );
+
+        return result;
+    }
+
+    private boolean isGoalCellTraversable(int x, int z, int py, boolean rejectAirGapDetours) {
+        return !isObstacleCell(x, z, py, rejectAirGapDetours);
+    }
+
+    public boolean goTo(int x, int z, int stealthMode, boolean renderingEnabled) {
+        if (mc == null || !mc.isOnThread()) {
+            warning("TunnelMiner API goTo must be called on the Minecraft client thread.");
+            return false;
+        }
+
+        if (!isSupportedApiStealthMode(stealthMode)) {
+            warning("Unsupported TunnelMiner API stealth mode: " + stealthMode + " (expected 0=off or 1=on).");
+            return false;
+        }
+
+        if (mc == null || mc.player == null || mc.world == null) {
+            warning("Cannot start TunnelMiner API goTo without an active world/player context.");
+            return false;
+        }
+
+        if (isActive()) {
+            pendingApiGoToRequest = null;
+            installApiEffectiveOptions(x, z, stealthMode, renderingEnabled);
+            startFreshRunFromCurrentPosition("api-retarget");
+        } else {
+            pendingApiGoToRequest = new ApiGoToRequest(x, z, stealthMode, renderingEnabled);
+            toggle();
+        }
+
+        return true;
+    }
+
+    public boolean goTo(int x, int z, boolean stealthEnabled, boolean renderingEnabled) {
+        return goTo(x, z, stealthEnabled ? API_STEALTH_ON : API_STEALTH_OFF, renderingEnabled);
+    }
+
+    public boolean isApiModeActive() {
+        return apiModeActive;
+    }
+
+    public SettingsSource getSettingsSource() {
+        return settingsSource;
+    }
+
+    private void startFreshRunFromCurrentPosition(String reason) {
+        if (mc.player == null) return;
+        flushWatchdogBuffer();
+        watchdogWriteBuffer.setLength(0);
+        watchdogWriteBufferLines = 0;
+
+        int px = MathHelper.floor(mc.player.getX());
+        int py = MathHelper.floor(mc.player.getY());
+        int pz = MathHelper.floor(mc.player.getZ());
+        requestedDestX = optTargetX();
+        requestedDestZ = optTargetZ();
+
+        destX = requestedDestX;
+        destZ = requestedDestZ;
+        activeGoalX = destX;
+        activeGoalZ = destZ;
+        goalMode = GoalMode.EXACT;
+        goalReason = reason;
+        fallbackSearchCachedPx = Integer.MIN_VALUE;
+        fallbackSearchCachedPz = Integer.MIN_VALUE;
+        fallbackSearchCachedPy = Integer.MIN_VALUE;
+        fallbackSearchCachedDestX = Integer.MIN_VALUE;
+        fallbackSearchCachedDestZ = Integer.MIN_VALUE;
+        fallbackSearchCachedAge = Integer.MIN_VALUE;
+        fallbackSearchResultMode = GoalMode.UNREACHABLE;
+        fallbackSearchResultReason = "";
+        tunnelY = py;
+        onXAxis = true;
+        fillLog.clear();
+        stealthCache.clear();
+        resumeStateAvailable = false;
+        resumeFromCompletedRun = false;
+        clearResumeCacheFile();
+        renderBreakPositions.clear();
+        activeProbePositions.clear();
+        activeMineTargets.clear();
+        cachedProbePath.clear();
+        cachedProbeStartX = Integer.MIN_VALUE;
+        cachedProbeStartZ = Integer.MIN_VALUE;
+        cachedProbeY = Integer.MIN_VALUE;
+        cachedProbeDestX = Integer.MIN_VALUE;
+        cachedProbeDestZ = Integer.MIN_VALUE;
+        cachedProbeRadius = Integer.MIN_VALUE;
+        cachedProbeLastReplanAge = Integer.MIN_VALUE;
+        cachedProbeLastEmptyReplanAge = Integer.MIN_VALUE;
+        cachedProbeOnXAxis = onXAxis;
+        cachedProbeRejectAirGaps = useStealthAvoidAirGapDetours();
+        cachedProbeEmergencyNoScaffold = false;
+        cachedProbePathMode = hardPathMode();
+        noProbePauseTicks = 0;
+        emergencyAirFallbackTicksLeft = 0;
+        emergencyAirFallbackBlocksLeft = 0;
+        probeAStarFailStreak = 0;
+        probeWallFollowActive = false;
+        wallFollowMLineStartX = Integer.MIN_VALUE;
+        wallFollowMLineStartZ = Integer.MIN_VALUE;
+        wallFollowHitDistance = Double.POSITIVE_INFINITY;
+        wallFollowHeading = 0;
+        wallFollowRerouteBlocks = 0;
+        hazardRecoveryCondition = HazardCondition.NONE;
+        hazardRecoveryTicks = 0;
+        placeTimer = invTimer = waitTicks = 0;
+        restockPlaceRetries = 0;
+        stealthBreakTimer = 0;
+        detourVisitCounts.clear();
+        proactiveAStarCacheFromX = Integer.MIN_VALUE;
+        proactiveAStarCacheFromZ = Integer.MIN_VALUE;
+        proactiveAStarCachePy = Integer.MIN_VALUE;
+        proactiveAStarCacheDestX = Integer.MIN_VALUE;
+        proactiveAStarCacheDestZ = Integer.MIN_VALUE;
+        proactiveAStarCacheAge = Integer.MIN_VALUE;
+        proactiveAStarCacheStepX = 0;
+        proactiveAStarCacheStepZ = 0;
+        proactiveAStarCacheSummary = "";
+        committedMoveStep = null;
+        prevVisitedX = Integer.MIN_VALUE;
+        prevVisitedZ = Integer.MIN_VALUE;
+        lastVisitedX = Integer.MIN_VALUE;
+        lastVisitedZ = Integer.MIN_VALUE;
+        pickSlot = -1;
+        containerPos = null;
+        restockCleanupPos = null;
+        resetRestockStageState();
+        restockPlaceRetries = 0;
+        startMs = System.currentTimeMillis();
+        blocksMined = 0;
+        watchdogSequence = 0;
+        resetWatchdogTelemetry();
+        reloadAvoidanceBlockSets();
+        freeLookModule = Modules.get().get(FreeLook.class);
+        if (optAutoFreeLook()) {
+            if (freeLookModule != null && !freeLookModule.isActive()) {
+                freeLookModule.toggle();
+                managedFreeLook = freeLookModule.isActive();
+            }
+        } else if (managedFreeLook && freeLookModule != null && freeLookModule.isActive()) {
+            freeLookModule.toggle();
+            managedFreeLook = false;
+        }
+        clearStealthMining(false);
+        totalBlocks = blocksLeftFrom(px, pz);
+        phase = Phase.INIT;
+
+        if (optDebugMessages()) {
+            info("Retarget tunnel to X=" + requestedDestX + " Z=" + requestedDestZ + " (" + totalBlocks + " blocks)");
+        }
+        watchdog(
+            "external-goto-reset",
+            String.format(
+                Locale.ROOT,
+                "reason=%s,targetX=%d,targetZ=%d,targetY=%d,totalBlocks=%d",
+                reason,
+                requestedDestX,
+                requestedDestZ,
+                tunnelY,
+                totalBlocks
+            )
+        );
+    }
+
     public int getBlocksLeft() {
         if (mc.player == null || !isActive()) return 0;
         return blocksLeftFrom(MathHelper.floor(mc.player.getX()), MathHelper.floor(mc.player.getZ()));
     }
 
     public double getEtaSeconds() {
-        if (!isActive() || blocksMined < 5) return -1;
+        if (!isActive()) return -1;
+        int blocksLeft = getBlocksLeft();
+        int progressed = Math.max(0, totalBlocks - blocksLeft);
+        if (progressed < 5) return -1;
         long ms = System.currentTimeMillis() - startMs;
         if (ms <= 0) return -1;
-        double rate = (double) blocksMined / ms;
-        return rate <= 0 ? -1 : getBlocksLeft() / (rate * 1000.0);
+        double rate = (double) progressed / ms;
+        return rate <= 0 ? -1 : blocksLeft / (rate * 1000.0);
     }
 
     public int getDestX() {
-        return destX;
+        return requestedDestX;
     }
 
     public int getDestZ() {
-        return destZ;
+        return requestedDestZ;
+    }
+
+    public int getActiveGoalX() {
+        return activeGoalX;
+    }
+
+    public int getActiveGoalZ() {
+        return activeGoalZ;
     }
 
     public int getTotalBlocks() {
         return totalBlocks;
+    }
+
+    public int getApproxRequiredPicks() {
+        int remainingDistance = Math.max(0, getBlocksLeft());
+        long approxBlocksToMine = (long) remainingDistance * Math.max(1, optTunnelHeight());
+        return ceilDivPositive(approxBlocksToMine, 8128);
+    }
+
+    public int getApproxRequiredPickShulkers() {
+        int picks = getApproxRequiredPicks();
+        return picks <= 0 ? 0 : ((picks + 26) / 27);
+    }
+
+    private int ceilDivPositive(long numerator, int denominator) {
+        if (numerator <= 0 || denominator <= 0) return 0;
+        return (int) ((numerator + denominator - 1L) / denominator);
+    }
+
+    private boolean isGoalCompletionCellLoaded() {
+        if (mc == null || mc.world == null) return false;
+        BlockPos completionPos = new BlockPos(destX, tunnelY, destZ);
+        return mc.world.getBlockState(completionPos).getBlock() != Blocks.VOID_AIR;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -4301,7 +6094,7 @@ public class TunnelMinerModule extends Module {
             if (touchesAirGapDetourRisk(floor, true)) return true;
         }
 
-        for (int h = 0; h < tunnelHeight.get(); h++) {
+        for (int h = 0; h < optTunnelHeight(); h++) {
             BlockPos pos = new BlockPos(x, py + h, z);
             BlockState state = mc.world.getBlockState(pos);
 
@@ -4318,7 +6111,7 @@ public class TunnelMinerModule extends Module {
 
     private int getDetourAStarRadius(boolean rejectAirGapDetours) {
         if (!rejectAirGapDetours) return DETOUR_ASTAR_RADIUS;
-        int configuredProbe = stealthMode.get() ? effectiveProbeDistance() : DETOUR_ASTAR_RADIUS;
+        int configuredProbe = optStealthMode() ? effectiveProbeDistance() : DETOUR_ASTAR_RADIUS;
         return Math.max(1, Math.min(configuredProbe, 64));
     }
 
@@ -4427,9 +6220,14 @@ public class TunnelMinerModule extends Module {
     }
 
     private int effectiveProbeDistance() {
-        int configured = Math.max(1, stealthProbeDistance.get());
-        if (stealthMode.get()) return configured;
+        int configured = Math.max(1, optStealthProbeDistance());
+        if (optStealthMode()) return configured;
         return Math.min(configured, NON_STEALTH_PROBE_MAX);
+    }
+
+    private boolean isAntiLavaActiveForCurrentMode() {
+        // Requested behavior: anti-lava fill/pause logic is disabled while stealth mode is active.
+        return optLavaAvoidance() && !optStealthMode();
     }
 
     private double hardDetourSafetyBufferCost() {
@@ -4454,7 +6252,30 @@ public class TunnelMinerModule extends Module {
 
     private boolean shouldMaintainBehindParity() {
         // Stealth mode always maintains parity; non-stealth follows fill-behind toggle.
-        return stealthMode.get() || fillBehind.get();
+        return optStealthMode() || optFillBehind();
+    }
+
+    private boolean isStrictStealthExactRestoreEnabled() {
+        return optStealthMode() && optStrictStealthExactRestore();
+    }
+
+    private void hardFailStealthExactRestore(BlockPos pos, BlockState original, String stage) {
+        String blockId = Registries.BLOCK.getId(original.getBlock()).toString();
+        String details = String.format(
+            Locale.ROOT,
+            "reason=missing-exact-restore-block,stage=%s,pos=%s,block=%s",
+            stage,
+            formatPos(pos),
+            blockId
+        );
+        watchdog("stealth-restore-hard-fail", details);
+        String msg = "[TunnelMiner] Missing materials to restore tunnel (block=" + blockId + ", pos=" + pos.toShortString() + ").";
+        if (optDebugMessages()) warning("Stealth restore hard fail: " + msg + " stage=" + stage);
+        if (mc.options != null) mc.options.forwardKey.setPressed(false);
+        if (mc.getNetworkHandler() != null && mc.getNetworkHandler().getConnection() != null) {
+            mc.getNetworkHandler().getConnection().disconnect(Text.literal(msg));
+        }
+        if (isActive()) toggle();
     }
 
     private PathMode hardPathMode() {
@@ -4462,19 +6283,19 @@ public class TunnelMinerModule extends Module {
     }
 
     private boolean useStealthAvoidLavaDetours() {
-        return stealthMode.get();
+        return optStealthMode();
     }
 
     private boolean useStealthAvoidAirGapDetours() {
-        return stealthMode.get();
+        return optStealthMode();
     }
 
     private boolean useStealthAvoidStateChangeBlocks() {
-        return stealthMode.get();
+        return optStealthMode();
     }
 
     private boolean useStealthAvoidChainReactionBlocks() {
-        return stealthMode.get();
+        return optStealthMode();
     }
 
     private boolean isAvoidanceBlock(BlockState state) {
@@ -4535,7 +6356,7 @@ public class TunnelMinerModule extends Module {
 
         int protectedLoaded = loadEmbeddedAvoidanceBlockIds(EMBEDDED_STATE_CHANGE_BLOCK_IDS, protectedStateBlocks);
         int chainLoaded = loadEmbeddedAvoidanceBlockIds(EMBEDDED_GRAVITY_CHAIN_BLOCK_IDS, noTouchChainBlocks);
-        if (debugMessages.get()) info("Loaded avoidance sets: state-change=" + protectedLoaded + ", chain-no-touch=" + chainLoaded + ".");
+        if (optDebugMessages()) info("Loaded avoidance sets: state-change=" + protectedLoaded + ", chain-no-touch=" + chainLoaded + ".");
     }
 
     private int loadEmbeddedAvoidanceBlockIds(String[] ids, Set<Block> out) {
@@ -4548,7 +6369,7 @@ public class TunnelMinerModule extends Module {
 
             Identifier id = Identifier.tryParse(token);
             if (id == null || !Registries.BLOCK.containsId(id)) {
-                if (debugMessages.get()) warning("Embedded avoidance block id not found: " + token);
+                if (optDebugMessages()) warning("Embedded avoidance block id not found: " + token);
                 continue;
             }
 
@@ -4615,7 +6436,7 @@ public class TunnelMinerModule extends Module {
         int doubleSkipped = 0;
         boolean startedDoubleMine = false;
 
-        if (stealthDoubleMine.get()) {
+        if (optStealthDoubleMine()) {
             ArrayDeque<BlockPos> doubleMineTargets = new ArrayDeque<>();
             for (BlockPos pos : targets) {
                 BlockState state = mc.world.getBlockState(pos);
@@ -4659,7 +6480,7 @@ public class TunnelMinerModule extends Module {
 
         int attempts = 0;
         for (BlockPos pos : targets) {
-            if (attempts >= breaksPerTick.get() || stealthBreakTimer > 0) {
+            if (attempts >= optBreaksPerTick() || stealthBreakTimer > 0) {
                 directSkippedTimer++;
                 watchdogMineSummary = String.format(
                     Locale.ROOT,
@@ -4670,7 +6491,7 @@ public class TunnelMinerModule extends Module {
                     directAttempts,
                     directSkippedNonCandidate,
                     directSkippedTimer,
-                    breaksPerTick.get(),
+                    optBreaksPerTick(),
                     stealthBreakTimer,
                     formatMineBlock(normalMining),
                     formatMineBlock(packetMining)
@@ -4688,7 +6509,7 @@ public class TunnelMinerModule extends Module {
             ensurePickaxe();
             BlockUtils.breakBlock(pos, true);
 
-            stealthBreakTimer = stealthBreakDelay.get();
+            stealthBreakTimer = optStealthBreakDelay();
             attempts++;
             directAttempts++;
             if (!BlockUtils.canInstaBreak(pos)) {
@@ -4701,7 +6522,7 @@ public class TunnelMinerModule extends Module {
                     directAttempts,
                     directSkippedNonCandidate,
                     directSkippedTimer,
-                    breaksPerTick.get(),
+                    optBreaksPerTick(),
                     stealthBreakTimer,
                     formatMineBlock(normalMining),
                     formatMineBlock(packetMining)
@@ -4720,7 +6541,7 @@ public class TunnelMinerModule extends Module {
             directAttempts,
             directSkippedNonCandidate,
             directSkippedTimer,
-            breaksPerTick.get(),
+            optBreaksPerTick(),
             stealthBreakTimer,
             formatMineBlock(normalMining),
             formatMineBlock(packetMining)
@@ -4788,7 +6609,7 @@ public class TunnelMinerModule extends Module {
 
         if (normalMining == null && !blocks.isEmpty()) {
             normalMining = new StealthDoubleMineBlock(this, blocks.pop()).startDestroying();
-            stealthBreakTimer = stealthBreakDelay.get();
+            stealthBreakTimer = optStealthBreakDelay();
             watchdogCalc("double-mine-run", String.format(Locale.ROOT, "action=start-normal,normal=%s,queue=%d,stealthBreakTimer=%d", formatMineBlock(normalMining), blocks.size(), stealthBreakTimer));
             if (stealthBreakTimer > 0) return;
         }
@@ -4802,7 +6623,7 @@ public class TunnelMinerModule extends Module {
             StealthDoubleMineBlock block = new StealthDoubleMineBlock(this, blocks.pop());
             packetMining = normalMining.packetMine();
             normalMining = block.startDestroying();
-            stealthBreakTimer = stealthBreakDelay.get();
+            stealthBreakTimer = optStealthBreakDelay();
             watchdogCalc("double-mine-run", String.format(Locale.ROOT, "action=start-packet,normal=%s,packet=%s,queue=%d,stealthBreakTimer=%d", formatMineBlock(normalMining), formatMineBlock(packetMining), blocks.size(), stealthBreakTimer));
         }
     }
@@ -4983,9 +6804,9 @@ public class TunnelMinerModule extends Module {
     }
 
     private boolean needsRestock() {
-        if (!useShulkers.get() && !useEnderChest.get()) return false;
+        if (!optUseShulkers() && !optUseEnderChest()) return false;
         int pickaxes = countPickaxes();
-        int minimum = minPickaxes.get();
+        int minimum = optMinPickaxes();
         return pickaxes < minimum;
     }
 
@@ -5192,9 +7013,9 @@ public class TunnelMinerModule extends Module {
         int slot = findInInv(s -> {
             if (s.isEmpty()) return false;
             if (!(s.getItem() instanceof BlockItem bi)) return false;
-            return fillBlocks.get().contains(bi.getBlock());
+            return optFillBlocks().contains(bi.getBlock());
         });
-        watchdogCalc("find-block-to-place", String.format(Locale.ROOT, "slot=%d,fillBlocks=%d", slot, fillBlocks.get().size()));
+        watchdogCalc("find-block-to-place", String.format(Locale.ROOT, "slot=%d,fillBlocks=%d", slot, optFillBlocks().size()));
         return slot;
     }
 
@@ -5279,7 +7100,7 @@ public class TunnelMinerModule extends Module {
         }
 
         private boolean isReady() {
-            return progress() >= (module.stealthFastBreak.get() ? 0.7 : 1.0);
+            return progress() >= (module.optStealthFastBreak() ? 0.7 : 1.0);
         }
 
         private boolean shouldRemove() {
@@ -5305,15 +7126,24 @@ public class TunnelMinerModule extends Module {
 
     private void setPhase(Phase newPhase) {
         if (this.phase != newPhase) {
-            if (debugMessages.get()) info("Phase: " + (this.phase == null ? "NONE" : this.phase) + " -> " + newPhase);
+            if (optDebugMessages()) info("Phase: " + (this.phase == null ? "NONE" : this.phase) + " -> " + newPhase);
             watchdog("phase-change", (this.phase == null ? "NONE" : this.phase.name()) + "->" + newPhase.name());
             this.phase = newPhase;
         }
 
     }
 
+    private void clearResumeCacheState(String reason) {
+        fillLog.clear();
+        stealthCache.clear();
+        resumeStateAvailable = false;
+        resumeFromCompletedRun = false;
+        clearResumeCacheFile();
+        watchdog("resume-cache-cleared", "reason=" + reason);
+    }
+
     private void saveResumeCacheToDisk() {
-        if (!resumeCacheOnReactivate.get()) {
+        if (!optResumeCacheOnReactivate()) {
             clearResumeCacheFile();
             return;
         }
@@ -5334,8 +7164,8 @@ public class TunnelMinerModule extends Module {
 
             StringBuilder out = new StringBuilder(Math.max(8192, (stealthCache.size() + fillLog.size()) * 40));
             out.append(RESUME_CACHE_MAGIC).append('\n');
-            appendResumeMeta(out, "destX", destX);
-            appendResumeMeta(out, "destZ", destZ);
+            appendResumeMeta(out, "destX", requestedDestX);
+            appendResumeMeta(out, "destZ", requestedDestZ);
             appendResumeMeta(out, "onXAxis", onXAxis);
             appendResumeMeta(out, "stealthMode", resumeStealthMode);
             appendResumeMeta(out, "tunnelHeight", resumeTunnelHeight);
@@ -5344,6 +7174,7 @@ public class TunnelMinerModule extends Module {
             appendResumeMeta(out, "pauseZ", resumePauseZ);
             appendResumeMeta(out, "pauseValid", resumePausePosValid);
             appendResumeMeta(out, "stateAvailable", resumeStateAvailable);
+            appendResumeMeta(out, "completedRun", resumeFromCompletedRun);
             appendResumeMeta(out, "dimension", currentDimensionKey());
             appendResumeMeta(out, "savedAt", System.currentTimeMillis());
             appendResumeMeta(out, "stealthEntries", stealthCache.size());
@@ -5359,7 +7190,7 @@ public class TunnelMinerModule extends Module {
             Path tmp = path.resolveSibling(path.getFileName().toString() + ".tmp");
             Files.writeString(tmp, out.toString(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
             Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING);
-            watchdogCalc("resume-cache-save", String.format(Locale.ROOT, "result=true,path=%s,stealth=%d,fill=%d,pauseValid=%s", path, stealthCache.size(), fillLog.size(), resumePausePosValid));
+            watchdogCalc("resume-cache-save", String.format(Locale.ROOT, "result=true,path=%s,stealth=%d,fill=%d,pauseValid=%s,completedRun=%s", path, stealthCache.size(), fillLog.size(), resumePausePosValid, resumeFromCompletedRun));
         } catch (IOException e) {
             warning("Failed writing resume cache file (" + path + "): " + e.getMessage());
             watchdogCalc("resume-cache-save", String.format(Locale.ROOT, "result=false,path=%s,error=%s", path, e.getMessage()));
@@ -5367,7 +7198,7 @@ public class TunnelMinerModule extends Module {
     }
 
     private void loadResumeCacheFromDisk() {
-        if (!resumeCacheOnReactivate.get()) return;
+        if (!optResumeCacheOnReactivate()) return;
 
         Path path = resolveResumeCachePath();
         if (!Files.exists(path)) return;
@@ -5418,6 +7249,7 @@ public class TunnelMinerModule extends Module {
         String currentDimension = currentDimensionKey();
         if (!"unknown".equals(savedDimension) && !"unknown".equals(currentDimension) && !savedDimension.equals(currentDimension)) {
             watchdogCalc("resume-cache-load", String.format(Locale.ROOT, "result=false,path=%s,reason=dimension-mismatch,saved=%s,current=%s", path, savedDimension, currentDimension));
+            clearResumeCacheState("dimension-mismatch");
             return;
         }
 
@@ -5431,6 +7263,7 @@ public class TunnelMinerModule extends Module {
         resumePauseZ = parseIntSafe(meta.get("pauseZ"), resumePauseZ);
         resumePausePosValid = Boolean.parseBoolean(meta.getOrDefault("pauseValid", Boolean.toString(resumePausePosValid)));
         resumeStateAvailable = Boolean.parseBoolean(meta.getOrDefault("stateAvailable", "false"));
+        resumeFromCompletedRun = Boolean.parseBoolean(meta.getOrDefault("completedRun", "false"));
 
         if (!resumeStateAvailable) return;
 
@@ -5439,7 +7272,7 @@ public class TunnelMinerModule extends Module {
         stealthCache.putAll(loadedStealth);
         fillLog.putAll(loadedFill);
         resumeStateAvailable = !stealthCache.isEmpty() || !fillLog.isEmpty();
-        watchdogCalc("resume-cache-load", String.format(Locale.ROOT, "result=true,path=%s,stealth=%d,fill=%d,pauseValid=%s", path, stealthCache.size(), fillLog.size(), resumePausePosValid));
+        watchdogCalc("resume-cache-load", String.format(Locale.ROOT, "result=true,path=%s,stealth=%d,fill=%d,pauseValid=%s,completedRun=%s", path, stealthCache.size(), fillLog.size(), resumePausePosValid, resumeFromCompletedRun));
     }
 
     private void clearResumeCacheFile() {
@@ -5472,6 +7305,15 @@ public class TunnelMinerModule extends Module {
         if (value == null || value.isBlank()) return fallback;
         try {
             return Integer.parseInt(value.trim());
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private double parseDoubleSafe(String value, double fallback) {
+        if (value == null || value.isBlank()) return fallback;
+        try {
+            return Double.parseDouble(value.trim());
         } catch (NumberFormatException ignored) {
             return fallback;
         }
@@ -5552,6 +7394,7 @@ public class TunnelMinerModule extends Module {
     private int countPendingStealthRestore(boolean allowNear) {
         if (mc == null || mc.player == null || mc.world == null) return -1;
 
+        boolean strictExactRestore = isStrictStealthExactRestoreEnabled();
         int px = MathHelper.floor(mc.player.getX());
         int pz = MathHelper.floor(mc.player.getZ());
         int count = 0;
@@ -5564,7 +7407,7 @@ public class TunnelMinerModule extends Module {
             if (activeProbePositions.contains(pos)) continue;
             if (isLavaState(original)) continue;
             if (isLavaState(current)) continue;
-            if (original.getBlock() == current.getBlock()) continue;
+            if (isRestoreSatisfied(original, current, strictExactRestore)) continue;
             if (!allowNear) {
                 if (Math.abs(pos.getX() - px) <= 1 && Math.abs(pos.getZ() - pz) <= 1) continue;
             } else {
@@ -5617,7 +7460,7 @@ public class TunnelMinerModule extends Module {
     }
 
     private void watchdogCalc(String calculation, String details) {
-        if (!watchdogEnabled.get() || !HARD_WATCHDOG_VERBOSE) return;
+        if (!optWatchdogEnabled() || !HARD_WATCHDOG_VERBOSE) return;
         if (!HARD_WATCHDOG_HOTPATH_CALCULATIONS && isHotPathCalculation(calculation)) return;
 
         try {
@@ -5636,15 +7479,18 @@ public class TunnelMinerModule extends Module {
 
             String line = String.format(
                 Locale.ROOT,
-                "%s | #%d | event=calc-%s%s | phase=%s,onXAxis=%s,destX=%d,destZ=%d,lockedY=%d,blocksLeft=%d,blocksMined=%d,samePosTicks=%d,noProgressTicks=%d | %s%n",
+                "%s | #%d | event=calc-%s%s | phase=%s,onXAxis=%s,requestedX=%d,requestedZ=%d,goalX=%d,goalZ=%d,goalMode=%s,lockedY=%d,blocksLeft=%d,blocksMined=%d,samePosTicks=%d,noProgressTicks=%d | %s%n",
                 LocalDateTime.now().format(WATCHDOG_TS),
                 ++watchdogSequence,
                 calculation,
                 extra,
                 phaseName,
                 onXAxis,
+                requestedDestX,
+                requestedDestZ,
                 destX,
                 destZ,
+                goalMode.id,
                 tunnelY,
                 blocksLeft,
                 blocksMined,
@@ -5660,7 +7506,7 @@ public class TunnelMinerModule extends Module {
     }
 
     private void watchdogTick(String event, long tickStartNs) {
-        if (!watchdogEnabled.get() || !HARD_WATCHDOG_LOG_TICKS) return;
+        if (!optWatchdogEnabled() || !HARD_WATCHDOG_LOG_TICKS) return;
 
         long tickMicros = tickStartNs > 0L ? (System.nanoTime() - tickStartNs) / 1_000L : -1L;
         watchdog(event, "tickUs=" + tickMicros);
@@ -5671,7 +7517,7 @@ public class TunnelMinerModule extends Module {
     }
 
     private void watchdog(String event, String details) {
-        if (!watchdogEnabled.get()) return;
+        if (!optWatchdogEnabled()) return;
 
         try {
             String phaseName = phase == null ? "null" : phase.name();
@@ -5688,7 +7534,7 @@ public class TunnelMinerModule extends Module {
             }
             int pendingRestoreFar = -1;
             int pendingRestoreNear = -1;
-            if (stealthMode.get()) {
+            if (optStealthMode()) {
                 cachePendingRestoreCountsIfNeeded();
                 pendingRestoreFar = watchdogCachedPendingFar;
                 pendingRestoreNear = watchdogCachedPendingNear;
@@ -5696,15 +7542,18 @@ public class TunnelMinerModule extends Module {
 
             String line = String.format(
                 Locale.ROOT,
-                "%s | #%d | event=%s%s | phase=%s,onXAxis=%s,destX=%d,destZ=%d,lockedY=%d,totalBlocks=%d,blocksLeft=%d,blocksMined=%d,fillLog=%d,renderBreak=%d,placeTimer=%d,invTimer=%d,waitTicks=%d,pickSlot=%d,restockEC=%s,pathMode=%s,stealthMode=%s,stealthCache=%d,activeProbe=%d,activeMine=%d,pendingRestoreFar=%d,pendingRestoreNear=%d,samePosTicks=%d,noProgressTicks=%d,detourVisits=%d | %s",
+                "%s | #%d | event=%s%s | phase=%s,onXAxis=%s,requestedX=%d,requestedZ=%d,goalX=%d,goalZ=%d,goalMode=%s,lockedY=%d,totalBlocks=%d,blocksLeft=%d,blocksMined=%d,fillLog=%d,renderBreak=%d,placeTimer=%d,invTimer=%d,waitTicks=%d,pickSlot=%d,restockEC=%s,pathMode=%s,settingsSource=%s,apiMode=%s,stealthMode=%s,effectiveRenderMining=%s,effectiveRenderPlacing=%s,speedSnapshotOwned=%s,speedOverrideActive=%s,stealthCache=%d,activeProbe=%d,activeMine=%d,pendingRestoreFar=%d,pendingRestoreNear=%d,samePosTicks=%d,noProgressTicks=%d,detourVisits=%d | %s",
                 LocalDateTime.now().format(WATCHDOG_TS),
                 ++watchdogSequence,
                 event,
                 extra,
                 phaseName,
                 onXAxis,
+                requestedDestX,
+                requestedDestZ,
                 destX,
                 destZ,
+                goalMode.id,
                 tunnelY,
                 totalBlocks,
                 blocksLeft,
@@ -5717,7 +7566,13 @@ public class TunnelMinerModule extends Module {
                 pickSlot,
                 restockEC,
                 hardPathMode(),
-                stealthMode.get(),
+                settingsSource.id,
+                apiModeActive,
+                optStealthMode(),
+                optRenderMining(),
+                optRenderPlacing(),
+                speedSnapshotOwned,
+                speedOverrideActive,
                 stealthCache.size(),
                 activeProbePositions.size(),
                 activeMineTargets.size(),
@@ -5731,7 +7586,9 @@ public class TunnelMinerModule extends Module {
             if (HARD_WATCHDOG_VERBOSE) {
                 line += String.format(
                     Locale.ROOT,
-                    " | gate=%s,gateDetails=%s,probe=%s,mine=%s,restore=%s,detour=%s,traverseFail=%s,astar=%s,normalMine=%s,packetMine=%s",
+                    " | goalReason=%s,speedReason=%s,gate=%s,gateDetails=%s,probe=%s,mine=%s,restore=%s,detour=%s,traverseFail=%s,astar=%s,normalMine=%s,packetMine=%s",
+                    sanitizeLogField(goalReason),
+                    sanitizeLogField(speedSnapshotLastReason),
                     sanitizeLogField(watchdogStealthGate),
                     sanitizeLogField(watchdogStealthGateDetails),
                     sanitizeLogField(watchdogProbeSummary),

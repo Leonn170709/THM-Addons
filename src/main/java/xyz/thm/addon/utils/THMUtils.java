@@ -2,6 +2,7 @@ package xyz.thm.addon.utils;
 
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
+import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.network.ServerInfo;
 import net.minecraft.item.ItemStack;
@@ -12,6 +13,7 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.Difficulty;
 import org.jetbrains.annotations.Nullable;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.modules.TunnelMinerModule;
 
 import java.awt.*;
 import java.awt.image.BufferedImage;
@@ -38,6 +40,46 @@ public class THMUtils {
 
     public static boolean canPlaceTHM(BlockPos blockPos) {
         return canPlace(blockPos, false);
+    }
+
+    public static boolean tunnelMinerGoTo(int x, int z, int stealthMode, boolean renderingEnabled) {
+        if (mc == null || !mc.isOnThread()) {
+            THMAddon.LOG.warn(
+                "TunnelMiner API goTo rejected: must be called on the Minecraft client thread. target=({}, {}) [stealthMode={},render={}]",
+                x,
+                z,
+                stealthMode,
+                renderingEnabled
+            );
+            return false;
+        }
+
+        TunnelMinerModule tunnelMiner = Modules.get().get(TunnelMinerModule.class);
+        if (tunnelMiner == null) {
+            THMAddon.LOG.warn("TunnelMiner API goTo failed: TunnelMiner module not found.");
+            return false;
+        }
+
+        boolean ok = tunnelMiner.goTo(x, z, stealthMode, renderingEnabled);
+        if (!ok) {
+            THMAddon.LOG.warn(
+                "TunnelMiner API goTo failed for target ({}, {}) [stealthMode={},render={}]",
+                x,
+                z,
+                stealthMode,
+                renderingEnabled
+            );
+        }
+        return ok;
+    }
+
+    public static boolean tunnelMinerGoTo(int x, int z, boolean stealthEnabled, boolean renderingEnabled) {
+        return tunnelMinerGoTo(
+            x,
+            z,
+            stealthEnabled ? TunnelMinerModule.API_STEALTH_ON : TunnelMinerModule.API_STEALTH_OFF,
+            renderingEnabled
+        );
     }
 
     public static BlockPos forward(BlockPos pos, int distance) {
