@@ -10,7 +10,9 @@ import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.world.World;
@@ -260,9 +262,14 @@ public class HighwaySearcher extends Module {
     private void disconnectPlayer() {
         if (mc.getNetworkHandler() != null) {
             toggle();
-            mc.getNetworkHandler().getConnection().disconnect(
-                Text.literal("[HighwayChecker] Highway boundary reached.")
-            );
+
+            MutableText text = Text.literal("[")
+                .styled(style -> style.withColor(Formatting.WHITE))
+                .append(Text.literal("HighwayChecker").styled(style -> style.withColor(Formatting.BLUE)))
+                .append(Text.literal("] ").styled(style -> style.withColor(Formatting.WHITE)))
+                .append(Text.literal("Highway boundary reached.").styled(style -> style.withColor(Formatting.RED)));
+
+            mc.getNetworkHandler().getConnection().disconnect(text);
         }
     }
 

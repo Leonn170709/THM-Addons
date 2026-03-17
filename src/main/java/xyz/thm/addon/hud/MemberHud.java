@@ -45,7 +45,7 @@ public class MemberHud extends HudElement {
 
     public final Setting<Boolean> showBots = sgGeneral.add(new BoolSetting.Builder()
         .name("show-bots")
-        .description("Whether to show Kitbot in the list.")
+        .description("Whether to show bots in the list.")
         .defaultValue(true)
         .build()
     );
