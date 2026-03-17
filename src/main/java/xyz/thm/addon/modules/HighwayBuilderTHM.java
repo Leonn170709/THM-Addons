@@ -91,6 +91,8 @@ import static xyz.thm.addon.utils.password.*;
 
 @SuppressWarnings("ConstantConditions")
 public class HighwayBuilderTHM extends Module {
+    private boolean suppressThmHwyMonitorSync;
+
     public enum Floor {
         Replace,
         PlaceMissing
@@ -858,7 +860,7 @@ public class HighwayBuilderTHM extends Module {
         if (mc.player == null || mc.world == null) return;
         if (!Utils.canUpdate()) return;
 
-        syncThmHwyMonitorOnActivate();
+        if (!suppressThmHwyMonitorSync) syncThmHwyMonitorOnActivate();
 
         previousPauseOnLostFocus = mc.options.pauseOnLostFocus;
         pauseOnLostFocusChanged = previousPauseOnLostFocus;
@@ -934,7 +936,7 @@ public class HighwayBuilderTHM extends Module {
     }
     @Override
     public void onDeactivate() {
-        syncThmHwyMonitorOnDeactivate();
+        if (!suppressThmHwyMonitorSync) syncThmHwyMonitorOnDeactivate();
 
         Modules.get().get(Timer.class).setOverride(Timer.OFF);
 
@@ -1027,8 +1029,15 @@ public class HighwayBuilderTHM extends Module {
         monitor.toggle();
     }
 
-    public void disableWithoutMonitorSync(String reason) {
-        if (isActive()) toggle();
+    public void disableForMonitorRealignPause() {
+        if (!isActive()) return;
+
+        suppressThmHwyMonitorSync = true;
+        try {
+            toggle();
+        } finally {
+            suppressThmHwyMonitorSync = false;
+        }
     }
 
     @Override

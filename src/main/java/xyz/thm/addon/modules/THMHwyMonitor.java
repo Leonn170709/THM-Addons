@@ -1087,7 +1087,7 @@ public class THMHwyMonitor extends Module {
         HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
         if (builder == null || !builder.isActive()) return;
 
-        builder.disableWithoutMonitorSync("monitor restart flow: " + source);
+        builder.disable();
         boolean disabled = !builder.isActive();
         runtimeFlag("forceBuilderOff:" + source + ":" + (disabled ? "ok" : "failed"));
 
@@ -1458,7 +1458,7 @@ public class THMHwyMonitor extends Module {
         resumePausedModulesAfterRecovery();
 
         if (builder != null && builder.isActive()) {
-            builder.disableWithoutMonitorSync("monitor excessive misalignment");
+            builder.disable();
             if (builder.isActive()) warning("Failed to toggle THM HighwayBuilder off after excessive misalignment.");
             else info("Toggled THM HighwayBuilder off after excessive misalignment.");
         }
@@ -1501,7 +1501,7 @@ public class THMHwyMonitor extends Module {
 
         recoveryPausedModules.add(module);
         if (module instanceof HighwayBuilderTHM builder) {
-            builder.disableWithoutMonitorSync("monitor recovery pause");
+            builder.disableForMonitorRealignPause();
         } else {
             module.disable();
         }
