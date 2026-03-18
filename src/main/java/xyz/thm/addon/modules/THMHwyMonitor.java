@@ -9,6 +9,10 @@ import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.events.meteor.ActiveModulesChangedEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
+import meteordevelopment.meteorclient.gui.GuiTheme;
+import meteordevelopment.meteorclient.gui.widgets.WWidget;
+import meteordevelopment.meteorclient.gui.widgets.containers.WTable;
+import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import meteordevelopment.meteorclient.pathing.BaritoneUtils;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
@@ -73,6 +77,7 @@ public class THMHwyMonitor extends Module {
     private static final String LOGIN_PROMPT_MARKER = "please login with the command: /login";
     private static final String RESTART_DETECTED_MARKER = "server restart detected";
     private static final String RESTOCK_FAILURE_MARKER = "unable to perform restock";
+    private static final String EXCESSIVE_MISALIGNMENT_HARD_STOP_MARKER = "hwy-monitor-hard-stop-excessive-misalignment";
     private static final String THM_HIGHWAYBUILDER_TAG_A = "thm highwaybuilder";
     private static final String THM_HIGHWAYBUILDER_TAG_B = "thm-highwaybuilder";
     private static final long RESTART_EVIDENCE_TTL_MS = 20_000L;
@@ -185,6 +190,7 @@ public class THMHwyMonitor extends Module {
     private RecoveryPhase recoveryPhase = RecoveryPhase.None;
     private boolean recoveryModulesPaused;
     private final List<Module> recoveryPausedModules = new ArrayList<>();
+    private HighwayBuilderTHM recoveryPausedHighwayBuilder;
     private WorkLine trackedLine;
     private String trackedDirection;
     private float recoveryYawBeforeMove = Float.NaN;
@@ -246,6 +252,14 @@ public class THMHwyMonitor extends Module {
 
     public THMHwyMonitor() {
         super(THMAddon.MAIN, "THM Hwy Monitor", "Monitors alignment and recovers HighwayBuilder from drift.");
+    }
+
+    @Override
+    public WWidget getWidget(GuiTheme theme) {
+        WTable table = theme.table();
+        WButton debugRecovery = table.add(theme.button("Debug: Trigger Misalign Recovery")).expandX().widget();
+        debugRecovery.action = this::triggerDebugMisalignRecovery;
+        return table;
     }
 
     public static void signalNonRestartHardFailFromHighwayBuilder() {
@@ -390,6 +404,7 @@ public class THMHwyMonitor extends Module {
         recoveryPhase = RecoveryPhase.None;
         recoveryModulesPaused = false;
         recoveryPausedModules.clear();
+        recoveryPausedHighwayBuilder = null;
         trackedLine = null;
         trackedDirection = "";
         recoveryYawBeforeMove = Float.NaN;
@@ -471,6 +486,7 @@ public class THMHwyMonitor extends Module {
         baritoneTimeoutTicks = 0;
         recoveryPhase = RecoveryPhase.None;
         resumePausedModulesAfterRecovery();
+        recoveryPausedHighwayBuilder = null;
         trackedLine = null;
         trackedDirection = "";
         recoveryYawBeforeMove = Float.NaN;
@@ -635,6 +651,13 @@ public class THMHwyMonitor extends Module {
             wasSuppressed,
             autoRestartHandlingEnabled()
         );
+
+        if (!restartAutomationAllowed()) {
+            if (hasRestartAutomationState()) {
+                clearRestartAutomationState("join event gate (toggle off)", true, false);
+            }
+            return;
+        }
 
         if (restartHandlingArmed || awaitPostRejoinAfterReconnect || pendingHighwayBuilderEnableAfterRestore) {
             ensureHighwayBuilderDisabledForRestart("join guard", false);
@@ -1190,12 +1213,14 @@ public class THMHwyMonitor extends Module {
             disableAutoReconnectForNonRestartHardFail("HighwayBuilder signaled non-restart hard fail");
         }
 
-        if (restartHandlingArmed || awaitPostRejoinAfterReconnect || pendingHighwayBuilderEnableAfterRestore) {
+        if (restartAutomationAllowed() && (restartHandlingArmed || awaitPostRejoinAfterReconnect || pendingHighwayBuilderEnableAfterRestore)) {
             ensureHighwayBuilderDisabledForRestart("tick guard", false);
         }
 
-        handleRestartAutomationTick();
-        handleDeferredHighwayBuilderEnableAfterRestore();
+        if (restartAutomationAllowed()) {
+            handleRestartAutomationTick();
+            handleDeferredHighwayBuilderEnableAfterRestore();
+        }
 
         // Do not clear non-restart suppression from tick while still on the same connection.
         // Suppression is cleared on GameJoinedEvent after an actual rejoin.
@@ -1274,6 +1299,87 @@ public class THMHwyMonitor extends Module {
             return;
         }
 
+        beginRecoveryFromTarget(builder, target, recoveryDirectionYaw, yOffset, "");
+    }
+
+    private void triggerDebugMisalignRecovery() {
+        if (!isActive()) {
+            warning("THM Hwy Monitor must be active to run debug misalignment recovery.");
+            return;
+        }
+
+        if (mc.player == null || mc.world == null) {
+            warning("Player/world not available for debug misalignment recovery.");
+            return;
+        }
+
+        if (recoveryPhase != RecoveryPhase.None) {
+            info("Debug misalignment recovery requested, but a recovery is already in progress.");
+            return;
+        }
+
+        HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
+        if (builder == null || !builder.isActive()) {
+            warning("THM HighwayBuilder must be active to run debug misalignment recovery.");
+            return;
+        }
+
+        int recoveryGoalY = isPavingMode(builder) ? 120 : 119;
+        float recoveryDirectionYaw = resolveRecoveryDirectionYawForInference(builder);
+
+        RecoveryTarget target = determineRecoveryTarget(
+            mc.player.getX(),
+            mc.player.getZ(),
+            recoveryDirectionYaw,
+            recoveryGoalY,
+            trueCenterMode.get(),
+            trackedLine,
+            trackedDirection
+        );
+        if (target == null) {
+            warning("Unable to compute recovery target for debug misalignment trigger.");
+            return;
+        }
+
+        if (trackedLine == null && target.distance() <= ALIGN_TOLERANCE) {
+            trackedLine = target.line();
+            trackedDirection = target.direction();
+        }
+
+        if (trackedLine != null) {
+            target = determineRecoveryTarget(
+                mc.player.getX(),
+                mc.player.getZ(),
+                recoveryDirectionYaw,
+                recoveryGoalY,
+                trueCenterMode.get(),
+                trackedLine,
+                trackedDirection
+            );
+            if (target == null) {
+                warning("Unable to refine debug recovery target.");
+                return;
+            }
+        }
+
+        int yDelta = recoveryYDelta(mc.player.getY(), recoveryGoalY);
+        String yOffset = yDelta == 0 ? "" : String.format(Locale.ROOT, ", Y %+d", yDelta);
+
+        if (target.distance() > maxCorrectionDistance.get()) {
+            warning(
+                "Debug recovery bypassing max-correction-distance %.2f (current %.2f%s on %s %s).",
+                maxCorrectionDistance.get(),
+                target.distance(),
+                yOffset,
+                target.highway(),
+                target.direction()
+            );
+        }
+
+        beginRecoveryFromTarget(builder, target, recoveryDirectionYaw, yOffset, "Debug trigger:");
+    }
+
+    private void beginRecoveryFromTarget(HighwayBuilderTHM builder, RecoveryTarget target, float recoveryDirectionYaw, String yOffset, String sourcePrefix) {
         if (!pauseAllActiveModulesForRecovery()) {
             warning("Failed to pause recovery modules (THM HighwayBuilder / Timer / Speed).");
             cooldownTicks = recoveryCooldown.get();
@@ -1287,7 +1393,14 @@ public class THMHwyMonitor extends Module {
         recoveryYawBeforeMove = recoveryDirectionYaw;
         recoveryTicks = RECOVERY_DELAY_TICKS;
         recoveryPhase = RecoveryPhase.WaitBeforeCorrection;
-        info("Paused recovery modules (THM HighwayBuilder / Timer / Speed) on %s %s (off by %.2f%s). Starting Baritone correction in 2.0s.", target.highway(), target.direction(), target.distance(), yOffset);
+
+        String prefix = sourcePrefix == null || sourcePrefix.isEmpty() ? "" : sourcePrefix + " ";
+        info(prefix + "Paused recovery modules (THM HighwayBuilder / Timer / Speed) on %s %s (off by %.2f%s). Starting Baritone correction in 2.0s.",
+            target.highway(),
+            target.direction(),
+            target.distance(),
+            yOffset
+        );
     }
 
     private float resolveRecoveryDirectionYawForInference(HighwayBuilderTHM builder) {
@@ -1452,23 +1565,30 @@ public class THMHwyMonitor extends Module {
     }
 
     private void handleExcessiveMisalignment(HighwayBuilderTHM builder, RecoveryTarget target) {
-        disableAutoReconnectForNonRestartHardFail("HighwayBuilder excessive misalignment");
+        disableAutoReconnectForNonRestartHardFail("[" + EXCESSIVE_MISALIGNMENT_HARD_STOP_MARKER + "] HighwayBuilder excessive misalignment");
+        runtimeFlag("hardStop:" + EXCESSIVE_MISALIGNMENT_HARD_STOP_MARKER);
+        traceExec("hardStop:" + EXCESSIVE_MISALIGNMENT_HARD_STOP_MARKER);
 
         // Ensure no previously paused modules remain paused before forcing a disconnect.
         resumePausedModulesAfterRecovery();
 
         if (builder != null && builder.isActive()) {
             builder.disable();
-            if (builder.isActive()) warning("Failed to toggle THM HighwayBuilder off after excessive misalignment.");
-            else info("Toggled THM HighwayBuilder off after excessive misalignment.");
+            if (builder.isActive()) warning("[%s] Failed to toggle THM HighwayBuilder off after excessive misalignment.", EXCESSIVE_MISALIGNMENT_HARD_STOP_MARKER);
+            else info("[%s] Toggled THM HighwayBuilder off after excessive misalignment.", EXCESSIVE_MISALIGNMENT_HARD_STOP_MARKER);
         }
 
         resetRecoveryState();
         cooldownTicks = recoveryCooldown.get();
 
         String reason = String.format(Locale.ROOT,
-            "THM Hwy Monitor: excessive misalignment %.2f on %s %s (max %.2f).",
-            target.distance(), target.highway(), target.direction(), maxCorrectionDistance.get());
+            "[%s] THM Hwy Monitor: excessive misalignment %.2f on %s %s (max %.2f).",
+            EXCESSIVE_MISALIGNMENT_HARD_STOP_MARKER,
+            target.distance(),
+            target.highway(),
+            target.direction(),
+            maxCorrectionDistance.get()
+        );
         if (mc != null && mc.getNetworkHandler() != null && mc.getNetworkHandler().getConnection() != null) {
             mc.getNetworkHandler().getConnection().disconnect(Text.literal(reason));
         }
@@ -1478,6 +1598,7 @@ public class THMHwyMonitor extends Module {
         if (recoveryModulesPaused) return true;
 
         recoveryPausedModules.clear();
+        recoveryPausedHighwayBuilder = null;
         Module highwayBuilder = Modules.get().get(HighwayBuilderTHM.class);
         Module timer = Modules.get().get(Timer.class);
         Module speed = Modules.get().get(Speed.class);
@@ -1499,10 +1620,10 @@ public class THMHwyMonitor extends Module {
         if (module == null || module == this) return;
         if (!module.isActive()) return;
 
-        recoveryPausedModules.add(module);
         if (module instanceof HighwayBuilderTHM builder) {
-            builder.disableForMonitorRealignPause();
+            if (builder.pauseForMonitorRealign()) recoveryPausedHighwayBuilder = builder;
         } else {
+            recoveryPausedModules.add(module);
             module.disable();
         }
     }
@@ -1512,6 +1633,11 @@ public class THMHwyMonitor extends Module {
 
         internalTimerSpeedToggleInProgress = true;
         try {
+            if (recoveryPausedHighwayBuilder != null) {
+                recoveryPausedHighwayBuilder.resumeFromMonitorRealign();
+                recoveryPausedHighwayBuilder = null;
+            }
+
             for (Module module : recoveryPausedModules) {
                 if (module == null) continue;
                 module.enable();
