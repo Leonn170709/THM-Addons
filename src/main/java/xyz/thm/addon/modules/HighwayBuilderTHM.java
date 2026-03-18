@@ -91,7 +91,7 @@ import static xyz.thm.addon.utils.password.*;
 
 @SuppressWarnings("ConstantConditions")
 public class HighwayBuilderTHM extends Module {
-    private boolean monitorRealignPaused;
+    private boolean suppressThmHwyMonitorSync;
 
     public enum Floor {
         Replace,
@@ -860,9 +860,7 @@ public class HighwayBuilderTHM extends Module {
         if (mc.player == null || mc.world == null) return;
         if (!Utils.canUpdate()) return;
 
-        monitorRealignPaused = false;
-
-        syncThmHwyMonitorOnActivate();
+        if (!suppressThmHwyMonitorSync) syncThmHwyMonitorOnActivate();
 
         previousPauseOnLostFocus = mc.options.pauseOnLostFocus;
         pauseOnLostFocusChanged = previousPauseOnLostFocus;
@@ -938,9 +936,7 @@ public class HighwayBuilderTHM extends Module {
     }
     @Override
     public void onDeactivate() {
-        monitorRealignPaused = false;
-
-        syncThmHwyMonitorOnDeactivate();
+        if (!suppressThmHwyMonitorSync) syncThmHwyMonitorOnDeactivate();
 
         Modules.get().get(Timer.class).setOverride(Timer.OFF);
 
@@ -1033,19 +1029,15 @@ public class HighwayBuilderTHM extends Module {
         monitor.toggle();
     }
 
-    public boolean pauseForMonitorRealign() {
-        if (!isActive()) return false;
-        if (monitorRealignPaused) return true;
+    public void disableForMonitorRealignPause() {
+        if (!isActive()) return;
 
-        monitorRealignPaused = true;
-        if (input != null) input.stop();
-        if (mc != null && mc.currentScreen != null) closeHandledScreen();
-        return true;
-    }
-
-    public void resumeFromMonitorRealign() {
-        if (!monitorRealignPaused) return;
-        monitorRealignPaused = false;
+        suppressThmHwyMonitorSync = true;
+        try {
+            toggle();
+        } finally {
+            suppressThmHwyMonitorSync = false;
+        }
     }
 
     @Override
@@ -1075,11 +1067,6 @@ public class HighwayBuilderTHM extends Module {
                 sendStatusLog();
                 statusLogTimer = 0;
             }
-        }
-
-        if (monitorRealignPaused) {
-            if (input != null) input.stop();
-            return;
         }
 
         if (dir == null) {
