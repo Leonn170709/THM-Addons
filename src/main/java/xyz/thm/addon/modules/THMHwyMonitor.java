@@ -245,7 +245,7 @@ public class THMHwyMonitor extends Module {
     private long executionTraceCounter;
 
     public THMHwyMonitor() {
-        super(THMAddon.MAIN, "THM Hwy Monitor", "Monitors alignment and recovers HighwayBuilder from drift.");
+        super(THMAddon.MAIN, "THM Highway Monitor", "Monitors alignment and recovers HighwayBuilder from drift.");
     }
 
     public static void signalNonRestartHardFailFromHighwayBuilder() {
@@ -1736,7 +1736,7 @@ public class THMHwyMonitor extends Module {
 
     private void handleRestartAutomationTick() {
         long now = System.currentTimeMillis();
-        
+
         if (postRejoinRoutineRetryScheduled) {
             if (isSuccessfullyConnectedToServer()) {
                 postRejoinRoutineRetryScheduled = false;

@@ -39,6 +39,10 @@ import meteordevelopment.meteorclient.utils.world.Dir;
 import meteordevelopment.meteorclient.utils.world.TickRate;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.*;
+import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.block.entity.HangingSignBlockEntity;
+import net.minecraft.block.entity.SignBlockEntity;
+import net.minecraft.block.entity.SignText;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
 import net.minecraft.client.gui.screen.ingame.ShulkerBoxScreen;
@@ -85,6 +89,7 @@ import java.security.MessageDigest;
 import java.util.*;
 import java.util.function.Supplier;
 import java.util.function.Predicate;
+import java.util.regex.Pattern;
 
 import static xyz.thm.addon.utils.THMUtils.*;
 import static xyz.thm.addon.utils.password.*;
@@ -135,18 +140,6 @@ public class HighwayBuilderTHM extends Module {
     private final SettingGroup sgNotifies = settings.createGroup("Notifies");
     private final SettingGroup sgRenderDigging = settings.createGroup("Render Digging");
     private final SettingGroup sgRenderPaving = settings.createGroup("Render Paving");
-
-    private final Setting<Boolean> manageThmHwyMonitor = sgGeneral.add(new BoolSetting.Builder()
-        .name("manage-thm-hwy-monitor")
-        .description("Manages HighwayBuilder to reduce highway-building drift and auto-aligns the user on the current highway when HighwayBuilder is on.")
-        .defaultValue(false)
-        .onChanged(value -> {
-            if (!isActive()) return;
-            if (value) syncThmHwyMonitorOnActivate();
-            else syncThmHwyMonitorOnDeactivate();
-        })
-        .build()
-    );
 
     public final Setting<Integer> width = sgGeneral.add(new IntSetting.Builder()
         .name("width")
@@ -240,14 +233,21 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    // Digging
+    private final Setting<Boolean> manageThmHwyMonitor = sgGeneral.add(new BoolSetting.Builder()
+        .name("manage-thm-hwy-monitor")
+        .description("Manages HighwayBuilder to reduce highway-building drift and auto-aligns the user on the current highway when HighwayBuilder is on.")
+        .defaultValue(false)
+        .onChanged(value -> {
+            if (!isActive()) return;
+            if (value) syncThmHwyMonitorOnActivate();
+            else syncThmHwyMonitorOnDeactivate();
+        })
+        .visible(() -> isBaritoneInstalled())
+        .build()
+    );
 
-    //private final Setting<Boolean> ignoreSigns = sgDigging.add(new BoolSetting.Builder()
-    //    .name("ignore-signs")
-    //    .description("Ignore breaking signs = preserving history (based).")
-    //    .defaultValue(true)
-    //    .build()
-    //);
+
+    // Digging
 
     private final Setting<Boolean> doubleMine = sgDigging.add(new BoolSetting.Builder()
         .name("double-mine")
@@ -315,6 +315,23 @@ public class HighwayBuilderTHM extends Module {
         .defaultValue(7)
         .range(1, 100)
         .sliderRange(1, 25)
+        .build()
+    );
+
+    private final Setting<Boolean> ignoreSigns = sgDigging.add(new BoolSetting.Builder()
+        .name("ignore-signs")
+        .description("Ignore breaking signs = preserving history (based).")
+        .defaultValue(true)
+        .onChanged(value -> updateSignBreakRegex())
+        .build()
+    );
+
+    private final Setting<Boolean> breakAdvertisementSigns = sgDigging.add(new BoolSetting.Builder()
+        .name("break-advertisement-signs")
+        .description("Only break signs that look like advertisements/invites.")
+        .defaultValue(false)
+        .onChanged(value -> updateSignBreakRegex())
+        .visible(() -> !ignoreSigns.get())
         .build()
     );
 
@@ -670,6 +687,18 @@ public class HighwayBuilderTHM extends Module {
     public DoubleMineBlock normalMining, packetMining;
     private final MBlockPos posRender2 = new MBlockPos();
     private final MBlockPos posRender3 = new MBlockPos();
+    private List<Pattern> signBreakPatterns = Collections.emptyList();
+    private static final String[] ADVERTISEMENT_SIGN_REGEXES = {
+        "invite",
+        "discord\\.gg",
+        "discord\\.com/invite",
+        "dsc\\.gg",
+        "advertis",
+        "discord",
+        "dsc",
+        "Join",
+        "On Top",
+    };
     public HighwayBuilderTHM() {
         super(THMAddon.MAIN, "THM-HighwayBuilder", "Automatically builds highways according to THMs standards.");
         runInMainMenu = true;
@@ -867,6 +896,7 @@ public class HighwayBuilderTHM extends Module {
         if (pauseOnLostFocusChanged) togglePauseOnLostFocus(false);
 
         updateVariables();
+        updateSignBreakRegex();
         dir = HorizontalDirection.get(mc.player.getYaw());
         leftDir = dir.rotateLeftSkipOne();
         rightDir = leftDir.opposite();
@@ -1263,6 +1293,96 @@ public class HighwayBuilderTHM extends Module {
         packetMining = null;
     }
 
+    private void updateSignBreakRegex() {
+        if (ignoreSigns.get() || !breakAdvertisementSigns.get()) {
+            signBreakPatterns = Collections.emptyList();
+            return;
+        }
+
+        List<Pattern> compiled = new ArrayList<>();
+        for (String regex : ADVERTISEMENT_SIGN_REGEXES) {
+            if (regex == null || regex.isEmpty()) continue;
+            try {
+                compiled.add(Pattern.compile(regex, Pattern.CASE_INSENSITIVE));
+            } catch (Exception e) {
+                warning("Invalid sign-break-regex: " + e.getMessage());
+            }
+        }
+
+        signBreakPatterns = compiled;
+    }
+
+    private boolean shouldSkipSignBreak(BlockPos pos, BlockState state) {
+        if (!isSignBlock(state)) return false;
+        if (ignoreSigns.get()) return true;
+        if (!breakAdvertisementSigns.get()) return false;
+
+        List<Pattern> patterns = signBreakPatterns;
+        if (patterns == null || patterns.isEmpty()) return true;
+
+        String text = getSignText(pos);
+        if (text.isEmpty()) return true;
+
+        for (Pattern pattern : patterns) {
+            if (pattern.matcher(text).find()) return false;
+        }
+
+        return true;
+    }
+
+    private boolean isSignBlock(BlockState state) {
+        Block block = state.getBlock();
+        return block instanceof SignBlock || block instanceof HangingSignBlock;
+    }
+
+    private String getSignText(BlockPos pos) {
+        BlockEntity blockEntity = mc.world.getBlockEntity(pos);
+        if (blockEntity == null) return "";
+
+        SignText frontText = null;
+        SignText backText = null;
+        if (blockEntity instanceof SignBlockEntity sign) {
+            frontText = sign.getFrontText();
+            backText = sign.getBackText();
+        } else if (blockEntity instanceof HangingSignBlockEntity sign) {
+            frontText = sign.getFrontText();
+            backText = sign.getBackText();
+        }
+
+        String text = extractSignText(frontText);
+        if (!text.isEmpty()) return text;
+
+        return extractSignText(backText);
+    }
+
+    private String extractSignText(SignText signText) {
+        if (signText == null) return "";
+
+        Text[] messages = signText.getMessages(false);
+        if (messages == null) return "";
+
+        StringBuilder sb = new StringBuilder();
+        for (Text message : messages) {
+            if (message == null) continue;
+            String line = cleanSignText(message.getString());
+            if (line.isEmpty()) continue;
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(line);
+        }
+
+        return sb.toString();
+    }
+
+    private String cleanSignText(String text) {
+        if (text == null || text.isEmpty()) return "";
+        text = text.replaceAll("§.", "");
+        text = text.replaceAll("&[0-9a-fklmnor]", "");
+        text = text.replaceAll("[\\p{C}&&[^\\s]]", "");
+        text = text.replaceAll("[\\u0000-\\u001F\\u007F-\\u009F]", "");
+        text = text.replaceAll("\\s+", " ").trim();
+        return text;
+    }
+
     private void togglePauseOnLostFocus(boolean b) {
         mc.options.pauseOnLostFocus = b;
         info("Pause on Lost Focus %s.", b ? "enabled" : "disabled");
@@ -1304,6 +1424,7 @@ public class HighwayBuilderTHM extends Module {
 
     private boolean canMine(MBlockPos pos, boolean mineBlocksToPlace) {
         BlockState state = pos.getState();
+        if (shouldSkipSignBreak(pos.getBlockPos(), state)) return false;
         return BlockUtils.canBreak(pos.getBlockPos(), state) && (mineBlocksToPlace || !blocksToPlace.get().contains(state.getBlock()));
     }
 
@@ -2721,6 +2842,7 @@ public class HighwayBuilderTHM extends Module {
 
                 it.save();
                 it.forEach(pos -> {
+                    if (b.shouldSkipSignBreak(pos.getBlockPos(), pos.getState())) return;
                     // only want to double mine blocks that we can mine, that are not instamined, and we are not already mining
                     if (
                         BlockUtils.canBreak(pos.getBlockPos(), pos.getState())
@@ -2762,6 +2884,7 @@ public class HighwayBuilderTHM extends Module {
 
                 BlockState state = pos.getState();
                 if (state.isAir() || (!mineBlocksToPlace && b.blocksToPlace.get().contains(state.getBlock()))) continue;
+                if (b.shouldSkipSignBreak(pos.getBlockPos(), state)) continue;
 
                 int slot = findAndMoveBestToolToHotbar(b, state, false);
                 if (slot == -1) return;
