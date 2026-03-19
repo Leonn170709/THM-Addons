@@ -124,6 +124,13 @@ public class THMHwyMonitor extends Module {
         .build()
     );
 
+    private final Setting<Boolean> repairMisalignments = sgGeneral.add(new BoolSetting.Builder()
+        .name("repair-misalignments")
+        .description("upon alignment recovery, it will travel backwards 2 spaces to fix possible misaligned paving/digging")
+        .defaultValue(false)
+        .build()
+    );
+
     private final Setting<Integer> recoveryCooldown = sgGeneral.add(new IntSetting.Builder()
         .name("recovery-cooldown")
         .description("Ticks to wait before checking again after a recovery attempt.")
@@ -188,6 +195,8 @@ public class THMHwyMonitor extends Module {
     private WorkLine trackedLine;
     private String trackedDirection;
     private float recoveryYawBeforeMove = Float.NaN;
+    // Restart automation subsystem. This code stays in the file but must remain fully dormant
+    // unless reconnectAutomationEnabled() returns true.
     private volatile boolean restartScreenshotScheduled;
     private boolean pendingPostRejoinActions;
     private long postRejoinActionsAtMs;
@@ -362,19 +371,6 @@ public class THMHwyMonitor extends Module {
         runtimeFlag("onActivate");
         executionTraceCounter = 0L;
         traceExec("onActivate:begin");
-        boolean preserveRestartFlow = restartHandlingArmed;
-        boolean preserveRestartPostJoinStart = restartHandlingArmed && postRejoinStartedForCurrentRestart;
-        boolean preserveRestartStage = restartHandlingArmed && restartRoutineStage != RestartRoutineStage.None;
-        boolean preserveRestartModuleSnapshot = restartHandlingArmed && restartModuleStateSnapshotTaken;
-        boolean preservePendingBuilderEnable = pendingHighwayBuilderEnableAfterRestore;
-        boolean preserveModuleRestoreState = postJoinModuleStateCaptured || timerWasActiveBeforePostJoin || speedWasActiveBeforePostJoin;
-        clearNonRestartHardFailSignal();
-        clearRestartHardFailSignal();
-        unresolvedMainServerDisconnectCandidate = false;
-        deferRestartScreenshotUntilReconnect = false;
-        deferredRestartScreenshotAfterReconnectPending = false;
-        pendingDisconnectScreenEvidenceCheck = false;
-        pendingDisconnectScreenEvidenceUntilMs = 0L;
         if (Float.isNaN(lastReliableRecoveryYaw) && mc != null && mc.player != null) {
             lastReliableRecoveryYaw = mc.player.getYaw();
         }
@@ -393,55 +389,9 @@ public class THMHwyMonitor extends Module {
         trackedLine = null;
         trackedDirection = "";
         recoveryYawBeforeMove = Float.NaN;
-        restartScreenshotScheduled = false;
-        pendingPostRejoinActions = false;
-        postRejoinActionsAtMs = 0L;
-        awaitingCrackedLoginSuccess = false;
-        postRejoinRoutineRetryScheduled = false;
-        postRejoinRoutineRetryAtMs = 0L;
-        postRejoinRoutineRetryCount = 0;
-        if (!preserveModuleRestoreState) {
-            postJoinModuleStateCaptured = false;
-            timerWasActiveBeforePostJoin = false;
-            speedWasActiveBeforePostJoin = false;
-        }
-        resetPostRejoinPathState();
-        if (!preserveRestartFlow) {
-            awaitPostRejoinAfterReconnect = false;
-            restartHandlingArmed = false;
-        }
-        if (!preserveRestartPostJoinStart) postRejoinStartedForCurrentRestart = false;
-        if (!preserveRestartStage) restartRoutineStage = RestartRoutineStage.None;
-        if (!preserveRestartModuleSnapshot) restartModuleStateSnapshotTaken = false;
-        if (!preservePendingBuilderEnable) {
-            pendingHighwayBuilderEnableAfterRestore = false;
-            pendingHighwayBuilderDirection = null;
-            pendingHighwayBuilderEnableAtMs = 0L;
-            pendingBuilderDirectionProbeFailures = 0;
-        }
-        if (!preserveRestartFlow) {
-            crackedLoginPromptSeenThisCycle = false;
-            crackedLoginSuccessSeenThisCycle = false;
-        }
-        refreshTimerSpeedSnapshotFromCurrentState("activate");
-        boolean connectedOnActivate = isSuccessfullyConnectedToServer();
-        if (connectedOnActivate && autoRestartHandlingEnabled() && suppressAutoReconnectAfterHardFail) {
-            suppressAutoReconnectAfterHardFail = false;
-            nonRestartHardFailArmed = false;
-            clearNonRestartHardFailSignal();
-            runtimeFlag("clearSuppression:onActivateConnected");
-            info("Successful server reconnection detected (activate fallback). AutoReconnect suppression cleared.");
-        }
-        if (connectedOnActivate) clearRestartDisconnectEvidence();
-        wasConnectedLastTick = connectedOnActivate;
-        if (!restartAutomationAllowed()) {
-            clearRestartAutomationState("activate gate (toggle off)", true, false);
-        }
-        if (preserveRestartFlow) {
-            runtimeFlag("activate-preserved-restart-flow");
-            info("Preserved restart flow state through module re-activation.");
-        }
-        if (preserveModuleRestoreState) runtimeFlag("activate-preserved-module-restore-state");
+        resetReconnectAutomationState(false);
+        wasConnectedLastTick = isSuccessfullyConnectedToServer();
+        if (reconnectAutomationEnabled()) refreshTimerSpeedSnapshotFromCurrentState("activate");
         runtimeFlag("activate-state-initialized");
         traceExec("onActivate:end");
     }
@@ -450,17 +400,6 @@ public class THMHwyMonitor extends Module {
     public void onDeactivate() {
         runtimeFlag("onDeactivate");
         traceExec("onDeactivate:begin");
-        boolean preserveRestartFlow = restartHandlingArmed;
-        boolean preserveRestartPostJoinStart = restartHandlingArmed && postRejoinStartedForCurrentRestart;
-        boolean preserveRestartStage = restartHandlingArmed && restartRoutineStage != RestartRoutineStage.None;
-        boolean preserveRestartModuleSnapshot = restartHandlingArmed && restartModuleStateSnapshotTaken;
-        boolean preservePendingBuilderEnable = pendingHighwayBuilderEnableAfterRestore;
-        boolean preserveModuleRestoreState = postJoinModuleStateCaptured || timerWasActiveBeforePostJoin || speedWasActiveBeforePostJoin;
-        unresolvedMainServerDisconnectCandidate = false;
-        deferRestartScreenshotUntilReconnect = false;
-        deferredRestartScreenshotAfterReconnectPending = false;
-        pendingDisconnectScreenEvidenceCheck = false;
-        pendingDisconnectScreenEvidenceUntilMs = 0L;
         lastReliableRecoveryYaw = Float.NaN;
         preTickYawSnapshot = Float.NaN;
         preTickYawSnapshotAtMs = 0L;
@@ -474,35 +413,8 @@ public class THMHwyMonitor extends Module {
         trackedLine = null;
         trackedDirection = "";
         recoveryYawBeforeMove = Float.NaN;
-        restartScreenshotScheduled = false;
-        pendingPostRejoinActions = false;
-        postRejoinActionsAtMs = 0L;
-        awaitingCrackedLoginSuccess = false;
-        postRejoinRoutineRetryScheduled = false;
-        postRejoinRoutineRetryAtMs = 0L;
-        postRejoinRoutineRetryCount = 0;
-        if (!preserveModuleRestoreState) {
-            postJoinModuleStateCaptured = false;
-            timerWasActiveBeforePostJoin = false;
-            speedWasActiveBeforePostJoin = false;
-        }
-        resetPostRejoinPathState();
-        if (!preserveRestartFlow) {
-            awaitPostRejoinAfterReconnect = false;
-            restartHandlingArmed = false;
-        }
-        if (!preserveRestartPostJoinStart) postRejoinStartedForCurrentRestart = false;
-        if (!preserveRestartStage) restartRoutineStage = RestartRoutineStage.None;
-        if (!preserveRestartModuleSnapshot) restartModuleStateSnapshotTaken = false;
-        if (!preservePendingBuilderEnable) {
-            pendingHighwayBuilderEnableAfterRestore = false;
-            pendingHighwayBuilderDirection = null;
-            pendingHighwayBuilderEnableAtMs = 0L;
-            pendingBuilderDirectionProbeFailures = 0;
-        }
+        resetReconnectAutomationState(false);
         wasConnectedLastTick = false;
-        if (preserveRestartFlow) runtimeFlag("deactivate-preserved-restart-flow");
-        if (preserveModuleRestoreState) runtimeFlag("deactivate-preserved-module-restore-state");
         stopRuntimeWatchdog();
         traceExec("onDeactivate:end");
     }
@@ -521,7 +433,10 @@ public class THMHwyMonitor extends Module {
         runtimeFlag(String.format(Locale.ROOT, "cacheRecoveryYaw:onActivate:%.2f", yaw));
     }
 
+    // --- Restart automation subsystem entrypoints and helpers ---
+
     private void refreshTimerSpeedSnapshotFromCurrentState(String source) {
+        if (!reconnectAutomationEnabled()) return;
         if (postJoinModuleStateCaptured || internalTimerSpeedToggleInProgress) return;
 
         Timer timer = Modules.get().get(Timer.class);
@@ -540,6 +455,7 @@ public class THMHwyMonitor extends Module {
 
     @EventHandler
     private void onActiveModulesChanged(ActiveModulesChangedEvent event) {
+        if (!reconnectAutomationEnabled()) return;
         refreshTimerSpeedSnapshotFromCurrentState("activeModulesChanged");
     }
 
@@ -554,6 +470,7 @@ public class THMHwyMonitor extends Module {
     private void onMessageReceive(ReceiveMessageEvent event) {
         String message = event.getMessage().getString();
         if (message == null) return;
+        if (!reconnectAutomationEnabled()) return;
         String lower = message.toLowerCase(Locale.ROOT);
         traceExec("onMessageReceive:len=" + lower.length());
 
@@ -621,6 +538,7 @@ public class THMHwyMonitor extends Module {
 
     @EventHandler
     private void onGameJoined(GameJoinedEvent event) {
+        if (!reconnectAutomationEnabled()) return;
         runtimeFlag("onGameJoined");
         traceExec("onGameJoined");
         wasConnectedLastTick = true;
@@ -650,6 +568,7 @@ public class THMHwyMonitor extends Module {
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        if (!reconnectAutomationEnabled()) return;
         runtimeFlag("onGameLeft");
         traceExec("onGameLeft:begin");
         boolean startingNewDisconnectCycle = !restartHandlingArmed && !awaitPostRejoinAfterReconnect && !pendingHighwayBuilderEnableAfterRestore;
@@ -1015,7 +934,7 @@ public class THMHwyMonitor extends Module {
     }
 
     private boolean autoRestartHandlingEnabled() {
-        return EXPOSE_RESTART_AUTOMATION_SETTINGS && autoRejoinOnRestartDetection.get();
+        return reconnectAutomationEnabled();
     }
 
     private boolean autoRestartScreenshotEnabled() {
@@ -1023,7 +942,11 @@ public class THMHwyMonitor extends Module {
     }
 
     private boolean restartAutomationAllowed() {
-        return autoRestartHandlingEnabled();
+        return reconnectAutomationEnabled();
+    }
+
+    private boolean reconnectAutomationEnabled() {
+        return EXPOSE_RESTART_AUTOMATION_SETTINGS && autoRejoinOnRestartDetection.get();
     }
 
     private boolean hasRestartAutomationState() {
@@ -1053,29 +976,48 @@ public class THMHwyMonitor extends Module {
             || crackedLoginSuccessSeenThisCycle;
     }
 
-    private void clearRestartAutomationState(String reason, boolean disableAutoReconnect, boolean includeWarning) {
-        boolean hadState = hasRestartAutomationState();
-
-        restartHandlingArmed = false;
+    private void resetReconnectAutomationState(boolean disableAutoReconnect) {
+        restartScreenshotScheduled = false;
+        pendingPostRejoinActions = false;
+        postRejoinActionsAtMs = 0L;
+        awaitingCrackedLoginSuccess = false;
+        postRejoinRoutineRetryScheduled = false;
+        postRejoinRoutineRetryAtMs = 0L;
+        postRejoinRoutineRetryCount = 0;
+        postJoinModuleStateCaptured = false;
+        timerWasActiveBeforePostJoin = false;
+        speedWasActiveBeforePostJoin = false;
+        suppressAutoReconnectAfterHardFail = false;
         awaitPostRejoinAfterReconnect = false;
+        nonRestartHardFailArmed = false;
+        unresolvedMainServerDisconnectCandidate = false;
+        deferRestartScreenshotUntilReconnect = false;
+        deferredRestartScreenshotAfterReconnectPending = false;
+        pendingDisconnectScreenEvidenceCheck = false;
+        pendingDisconnectScreenEvidenceUntilMs = 0L;
+        restartHandlingArmed = false;
         postRejoinStartedForCurrentRestart = false;
+        restartModuleStateSnapshotTaken = false;
         restartRoutineStage = RestartRoutineStage.None;
         activePostRejoinPathPurpose = PostRejoinPathPurpose.None;
         pendingHighwayBuilderEnableAfterRestore = false;
         pendingHighwayBuilderDirection = null;
         pendingHighwayBuilderEnableAtMs = 0L;
         pendingBuilderDirectionProbeFailures = 0;
-        pendingDisconnectScreenEvidenceCheck = false;
-        pendingDisconnectScreenEvidenceUntilMs = 0L;
-        unresolvedMainServerDisconnectCandidate = false;
-        deferRestartScreenshotUntilReconnect = false;
-        deferredRestartScreenshotAfterReconnectPending = false;
         crackedLoginPromptSeenThisCycle = false;
         crackedLoginSuccessSeenThisCycle = false;
+        internalTimerSpeedToggleInProgress = false;
         clearRestartDisconnectEvidence();
         clearPostRejoinFlowState();
+        clearNonRestartHardFailSignal();
+        clearRestartHardFailSignal();
 
         if (disableAutoReconnect) disableMeteorAutoReconnect(false);
+    }
+
+    private void clearRestartAutomationState(String reason, boolean disableAutoReconnect, boolean includeWarning) {
+        boolean hadState = hasRestartAutomationState();
+        resetReconnectAutomationState(disableAutoReconnect);
 
         if (!hadState) return;
         runtimeFlag("restartAutomationStateCleared:" + reason);
@@ -1155,62 +1097,16 @@ public class THMHwyMonitor extends Module {
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         traceExec("onTick");
-        if (!restartAutomationAllowed()) {
-            if (hasRestartAutomationState()) {
-                clearRestartAutomationState("tick gate (toggle off)", true, true);
-            } else {
-                disableMeteorAutoReconnect(false);
-            }
-        }
+        handleReconnectAutomationTickLane();
 
-        boolean connectedNow = isSuccessfullyConnectedToServer();
-        handlePendingDisconnectScreenEvidenceCheck(connectedNow);
-        boolean connectedTransitionToConnected = connectedNow && !wasConnectedLastTick;
-        if (connectedNow != wasConnectedLastTick) {
-            runtimeFlag("tickConnectedTransition:" + (wasConnectedLastTick ? "connected->disconnected" : "disconnected->connected"));
-        }
-
-        if (connectedTransitionToConnected && autoRestartHandlingEnabled() && suppressAutoReconnectAfterHardFail) {
-            suppressAutoReconnectAfterHardFail = false;
-            nonRestartHardFailArmed = false;
-            clearNonRestartHardFailSignal();
-            info("Successful server reconnection detected (tick transition). AutoReconnect suppression cleared.");
-            runtimeFlag("clearSuppression:tickConnectedTransition");
-        }
-
-        if (connectedNow && restartHandlingArmed && awaitPostRejoinAfterReconnect) {
-            info("Server rejoin detected (tick fallback).");
-            runtimeFlag("tickFallbackDetected");
-            tryStartPostRejoinAfterReconnect("tick fallback");
-        }
-        wasConnectedLastTick = connectedNow;
-
-        if (consumeNonRestartHardFailSignal()) {
-            nonRestartHardFailArmed = true;
-            disableAutoReconnectForNonRestartHardFail("HighwayBuilder signaled non-restart hard fail");
-        }
-
-        if (restartHandlingArmed || awaitPostRejoinAfterReconnect || pendingHighwayBuilderEnableAfterRestore) {
-            ensureHighwayBuilderDisabledForRestart("tick guard", false);
-        }
-
-        handleRestartAutomationTick();
-        handleDeferredHighwayBuilderEnableAfterRestore();
-
-        // Do not clear non-restart suppression from tick while still on the same connection.
-        // Suppression is cleared on GameJoinedEvent after an actual rejoin.
-        if (autoRestartHandlingEnabled() && !suppressAutoReconnectAfterHardFail) configureMeteorAutoReconnect(true, false);
-        else {
-            disableMeteorAutoReconnect(false);
-        }
-
-        if (!autoRecover.get()) return;
         if (mc.player == null || mc.world == null) return;
 
         if (recoveryPhase != RecoveryPhase.None) {
             handleRecoveryPhase();
             return;
         }
+
+        if (!autoRecover.get()) return;
 
         if (cooldownTicks > 0) {
             cooldownTicks--;
@@ -1267,6 +1163,10 @@ public class THMHwyMonitor extends Module {
 
         if (target.distance() <= ALIGN_TOLERANCE && yAligned) return;
 
+        beginRecoveryRoutine(builder, target, yOffset, recoveryDirectionYaw);
+    }
+
+    private void beginRecoveryRoutine(HighwayBuilderTHM builder, RecoveryTarget target, String yOffset, float recoveryDirectionYaw) {
         if (target.distance() > maxCorrectionDistance.get()) {
             warning("Misaligned by %.2f%s on %s %s. Exceeds max-correction-distance %.2f.",
                 target.distance(), yOffset, target.highway(), target.direction(), maxCorrectionDistance.get());
@@ -1280,14 +1180,61 @@ public class THMHwyMonitor extends Module {
             return;
         }
 
+        RecoveryTarget correctionTarget = applyRepairMisalignmentBackstepForGoto(target);
         recoveryBuilder = builder;
-        pendingCorrectionTarget = target;
+        pendingCorrectionTarget = correctionTarget;
         trackedLine = target.line();
         trackedDirection = target.direction();
         recoveryYawBeforeMove = recoveryDirectionYaw;
         recoveryTicks = RECOVERY_DELAY_TICKS;
         recoveryPhase = RecoveryPhase.WaitBeforeCorrection;
         info("Paused recovery modules (THM HighwayBuilder / Timer / Speed) on %s %s (off by %.2f%s). Starting Baritone correction in 2.0s.", target.highway(), target.direction(), target.distance(), yOffset);
+    }
+
+    private void handleReconnectAutomationTickLane() {
+        if (!reconnectAutomationEnabled()) {
+            if (hasRestartAutomationState()) resetReconnectAutomationState(false);
+            return;
+        }
+
+        boolean connectedNow = isSuccessfullyConnectedToServer();
+        handlePendingDisconnectScreenEvidenceCheck(connectedNow);
+        boolean connectedTransitionToConnected = connectedNow && !wasConnectedLastTick;
+        if (connectedNow != wasConnectedLastTick) {
+            runtimeFlag("tickConnectedTransition:" + (wasConnectedLastTick ? "connected->disconnected" : "disconnected->connected"));
+        }
+
+        if (connectedTransitionToConnected && suppressAutoReconnectAfterHardFail) {
+            suppressAutoReconnectAfterHardFail = false;
+            nonRestartHardFailArmed = false;
+            clearNonRestartHardFailSignal();
+            info("Successful server reconnection detected (tick transition). AutoReconnect suppression cleared.");
+            runtimeFlag("clearSuppression:tickConnectedTransition");
+        }
+
+        if (connectedNow && restartHandlingArmed && awaitPostRejoinAfterReconnect) {
+            info("Server rejoin detected (tick fallback).");
+            runtimeFlag("tickFallbackDetected");
+            tryStartPostRejoinAfterReconnect("tick fallback");
+        }
+        wasConnectedLastTick = connectedNow;
+
+        if (consumeNonRestartHardFailSignal()) {
+            nonRestartHardFailArmed = true;
+            disableAutoReconnectForNonRestartHardFail("HighwayBuilder signaled non-restart hard fail");
+        }
+
+        if (restartHandlingArmed || awaitPostRejoinAfterReconnect || pendingHighwayBuilderEnableAfterRestore) {
+            ensureHighwayBuilderDisabledForRestart("tick guard", false);
+        }
+
+        handleRestartAutomationTick();
+        handleDeferredHighwayBuilderEnableAfterRestore();
+
+        // Do not clear non-restart suppression from tick while still on the same connection.
+        // Suppression is cleared on GameJoinedEvent after an actual rejoin.
+        if (!suppressAutoReconnectAfterHardFail) configureMeteorAutoReconnect(true, false);
+        else disableMeteorAutoReconnect(false);
     }
 
     private float resolveRecoveryDirectionYawForInference(HighwayBuilderTHM builder) {
@@ -1452,9 +1399,7 @@ public class THMHwyMonitor extends Module {
     }
 
     private void handleExcessiveMisalignment(HighwayBuilderTHM builder, RecoveryTarget target) {
-        disableAutoReconnectForNonRestartHardFail("HighwayBuilder excessive misalignment");
-
-        // Ensure no previously paused modules remain paused before forcing a disconnect.
+        // Ensure no previously paused modules remain paused before stopping monitor recovery.
         resumePausedModulesAfterRecovery();
 
         if (builder != null && builder.isActive()) {
@@ -1465,13 +1410,14 @@ public class THMHwyMonitor extends Module {
 
         resetRecoveryState();
         cooldownTicks = recoveryCooldown.get();
-
-        String reason = String.format(Locale.ROOT,
-            "THM Hwy Monitor: excessive misalignment %.2f on %s %s (max %.2f).",
-            target.distance(), target.highway(), target.direction(), maxCorrectionDistance.get());
-        if (mc != null && mc.getNetworkHandler() != null && mc.getNetworkHandler().getConnection() != null) {
-            mc.getNetworkHandler().getConnection().disconnect(Text.literal(reason));
-        }
+        warning(
+            "Too far from a highway to realign automatically (%.2f on %s %s, max %.2f). Disabled THM HighwayBuilder and THM Hwy Monitor. Move closer to a highway and try again.",
+            target.distance(),
+            target.highway(),
+            target.direction(),
+            maxCorrectionDistance.get()
+        );
+        if (isActive()) toggle();
     }
 
     private boolean pauseAllActiveModulesForRecovery() {
@@ -1719,6 +1665,36 @@ public class THMHwyMonitor extends Module {
         String highway = (line == WorkLine.CardinalNS || line == WorkLine.CardinalEW) ? "Cardinal" : "Diagonal";
 
         return new RecoveryTarget(highway, direction, targetX, targetZ, goalX, goalY, goalZ, directionToYaw(direction), distance, line);
+    }
+
+    private RecoveryTarget applyRepairMisalignmentBackstepForGoto(RecoveryTarget target) {
+        if (target == null || !repairMisalignments.get()) return target;
+
+        int directionOffsetX = workingDirectionOffsetX(target.direction());
+        int directionOffsetZ = workingDirectionOffsetZ(target.direction());
+        if (directionOffsetX == 0 && directionOffsetZ == 0) return target;
+
+        double correctedTargetX = target.targetX() - directionOffsetX * 2.0;
+        double correctedTargetZ = target.targetZ() - directionOffsetZ * 2.0;
+        int correctedGoalX = floorToBlock(correctedTargetX);
+        int correctedGoalZ = floorToBlock(correctedTargetZ);
+        double correctedDistance = target.distance();
+        if (mc != null && mc.player != null) {
+            correctedDistance = Math.hypot(mc.player.getX() - correctedTargetX, mc.player.getZ() - correctedTargetZ);
+        }
+
+        return new RecoveryTarget(
+            target.highway(),
+            target.direction(),
+            correctedTargetX,
+            correctedTargetZ,
+            correctedGoalX,
+            target.goalY(),
+            correctedGoalZ,
+            target.yaw(),
+            correctedDistance,
+            target.line()
+        );
     }
 
     private static boolean isPavingMode(HighwayBuilderTHM builder) {
@@ -2636,6 +2612,22 @@ public class THMHwyMonitor extends Module {
             case "W", "West" -> "W";
             case "NW", "NorthWest" -> "NW";
             default -> "";
+        };
+    }
+
+    private static int workingDirectionOffsetX(String direction) {
+        return switch (normalizeDirection(direction)) {
+            case "E", "NE", "SE" -> 1;
+            case "W", "NW", "SW" -> -1;
+            default -> 0;
+        };
+    }
+
+    private static int workingDirectionOffsetZ(String direction) {
+        return switch (normalizeDirection(direction)) {
+            case "S", "SE", "SW" -> 1;
+            case "N", "NE", "NW" -> -1;
+            default -> 0;
         };
     }
 
