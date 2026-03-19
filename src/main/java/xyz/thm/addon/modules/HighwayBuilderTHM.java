@@ -134,6 +134,23 @@ public class HighwayBuilderTHM extends Module {
         }
     }
 
+    public enum KitbotRestockKit {
+        Echest(KitbotFrontend.KitName.Echest),
+        Pickaxe(KitbotFrontend.KitName.Pickaxe),
+        Highway(KitbotFrontend.KitName.Highway);
+
+        public final KitbotFrontend.KitName kitName;
+
+        KitbotRestockKit(KitbotFrontend.KitName kitName) {
+            this.kitName = kitName;
+        }
+
+        @Override
+        public String toString() {
+            return kitName.toString();
+        }
+    }
+
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgDigging = settings.createGroup("Digging");
     private final SettingGroup sgPaving = settings.createGroup("Paving");
@@ -201,6 +218,14 @@ public class HighwayBuilderTHM extends Module {
         .name("kitbot-restock")
         .description("Order a kit from KitBot1 when out of building blocks.")
         .defaultValue(false)
+        .build()
+    );
+
+    public final Setting<KitbotRestockKit> kitbotRestockKit = sgInventory.add(new EnumSetting.Builder<KitbotRestockKit>()
+        .name("kitbot-restock-kit")
+        .description("Kit to order when kitbot restock triggers.")
+        .defaultValue(KitbotRestockKit.Highway)
+        .visible(kitbotRestock::get)
         .build()
     );
 
@@ -690,6 +715,7 @@ public class HighwayBuilderTHM extends Module {
     private final MBlockPos posRender2 = new MBlockPos();
     private final MBlockPos posRender3 = new MBlockPos();
     private List<Pattern> signBreakPatterns = Collections.emptyList();
+    private static final String KITBOT_NAME = "KitBot1";
     private static final String[] ADVERTISEMENT_SIGN_REGEXES = {
         "invite",
         "discord\\.gg",
@@ -1170,9 +1196,9 @@ public class HighwayBuilderTHM extends Module {
         if (state != State.KitbotOrder || kitbotTpHandled) return;
 
         String msg = event.getMessage().getString();
-        if (msg.contains("KitBot1 wants to teleport to you")) {
-            ChatUtils.sendPlayerMsg("/tpy " + KitbotFrontend.KITBOT_NAME);
-            info("Accepted KitBot1 teleport request.");
+        if (msg.contains(KITBOT_NAME + " wants to teleport to you")) {
+            ChatUtils.sendPlayerMsg("/tpy " + KITBOT_NAME);
+            info("Accepted " + KITBOT_NAME + " teleport request.");
             kitbotTpHandled = true;
         }
     }
@@ -2186,8 +2212,10 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 if (!orderSent) {
-                    KitbotFrontend.kitOrder(KitbotFrontend.KitName.Highway, 4);
-                    b.info("Ordering kit '%s' x%d from %s.", KitbotFrontend.KitName.Highway, 4, KitbotFrontend.KITBOT_NAME);
+                    KitbotRestockKit kit = b.kitbotRestockKit.get();
+                    int amount = 4;
+                    KitbotFrontend.kitOrder(kit.kitName, amount);
+                    b.info("Ordering kit '%s' x%d from %s.", kit.kitName, amount, KITBOT_NAME);
                     orderSent = true;
                     return;
                 }
