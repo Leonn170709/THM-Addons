@@ -1157,9 +1157,9 @@ public class THMHwyMonitor extends Module {
             if (target == null) return;
         }
 
-        int yDelta = recoveryYDelta(mc.player.getY(), recoveryGoalY);
-        boolean yAligned = yDelta == 0;
-        String yOffset = yAligned ? "" : String.format(Locale.ROOT, ", Y %+d", yDelta);
+        double yDelta = recoveryYDelta(mc.player.getY(), recoveryGoalY);
+        boolean yAligned = Math.abs(yDelta) <= ALIGN_TOLERANCE;
+        String yOffset = yAligned ? "" : String.format(Locale.ROOT, ", Y %+.2f", yDelta);
 
         if (target.distance() <= ALIGN_TOLERANCE && yAligned) return;
 
@@ -1701,8 +1701,8 @@ public class THMHwyMonitor extends Module {
         return !builder.blocksToPlace.get().contains(Blocks.NETHERRACK);
     }
 
-    private static int recoveryYDelta(double playerY, int goalY) {
-        return goalY - (int) playerY;
+    private static double recoveryYDelta(double playerY, int goalY) {
+        return goalY - playerY;
     }
 
     private void takeRestartScreenshot() {
