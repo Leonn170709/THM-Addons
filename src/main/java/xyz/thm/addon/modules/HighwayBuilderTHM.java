@@ -60,6 +60,8 @@ import net.minecraft.item.*;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
 import net.minecraft.registry.tag.ItemTags;
+import net.minecraft.screen.slot.Slot;
+import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
@@ -2360,6 +2362,7 @@ public class HighwayBuilderTHM extends Module {
                     );
 
                     if (restockOccurred) {
+                        if (clearCursor(b)) return;
                         b.setState(ThrowOutTrash, Forward);
                     } else {
                         b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", "Unable to perform restock for '" + b.restockTask.item() + "'.");
@@ -2416,10 +2419,12 @@ public class HighwayBuilderTHM extends Module {
                     b.error("Invalid restocking action.");
                     return;
                 }
+                if (clearCursor(b)) return;
 
                 if (indicateStopping && !breakContainer) {
                     if (stopTimer > 0) stopTimer--;
                     else {
+                        if (clearCursor(b)) return;
                         if (b.lastState == PlaceShulkerBlockade) {// && !(b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && countItem(b, stack -> stack.getItem() == Items.ENDER_CHEST) > b.saveEchests.get() && !hasItem(b, stack -> stack.getItem() == Items.OBSIDIAN))) {
                             b.setState(MineShulkerBlockade);
                         } else {
@@ -2432,6 +2437,7 @@ public class HighwayBuilderTHM extends Module {
 
                 // prevent tasks executing when they shouldn't
                 if (b.restockTask.tasksInactive()) {
+                    if (clearCursor(b)) return;
                     b.setState(Forward);
                     return;
                 }
@@ -2441,12 +2447,7 @@ public class HighwayBuilderTHM extends Module {
                     return;
                 }
 
-                if (!b.mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
-                    if (b.mc.currentScreen != null) b.closeHandledScreen();
-                    if (!b.mc.player.currentScreenHandler.getCursorStack().isEmpty()) InvUtils.dropHand();
-                    delayTimer = b.inventoryDelay.get();
-                    return;
-                }
+                if (clearCursor(b)) return;
 
                 // calculate the amount of materials we have already pulled
                 int slotsPulled = 0;
@@ -2543,7 +2544,10 @@ public class HighwayBuilderTHM extends Module {
                             breakContainer = false;
 
                             // if we don't signal intent to stop, we loop back to the start and continue restocking
-                            if (indicateStopping) b.restockTask.complete();
+                            if (indicateStopping) {
+                                if (clearCursor(b)) return;
+                                b.restockTask.complete();
+                            }
                             else start(b);
 
                             return;
@@ -2575,36 +2579,79 @@ public class HighwayBuilderTHM extends Module {
             private boolean restockItems(HighwayBuilderTHM b, Inventory inv) {
                 if (b.restockTask.materials) {
                     // take raw material
-                    if (grabFromInventory(inv, itemStack -> itemStack.getItem() instanceof BlockItem bi && b.blocksToPlace.get().contains(bi.getBlock()))) return true;
+                    if (grabFromInventory(b, inv, itemStack -> itemStack.getItem() instanceof BlockItem bi && b.blocksToPlace.get().contains(bi.getBlock()))) return true;
 
                     // prefer taking raw material before echests
                     if (b.blocksToPlace.get().contains(Blocks.OBSIDIAN)) {
-                        if (grabFromInventory(inv, itemStack -> itemStack.getItem() == Items.ENDER_CHEST)) return true;
+                        if (grabFromInventory(b, inv, itemStack -> itemStack.getItem() == Items.ENDER_CHEST)) return true;
                     }
                 }
                 if (b.restockTask.pickaxes) {
-                    if (grabFromInventory(inv, itemStack -> itemStack.isIn(ItemTags.PICKAXES))) return true;
+                    if (grabFromInventory(b, inv, itemStack -> itemStack.isIn(ItemTags.PICKAXES))) return true;
                 }
                 if (b.restockTask.food) {
-                    return grabFromInventory(inv, itemStack -> itemStack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(itemStack.getItem()));
+                    return grabFromInventory(b, inv, itemStack -> itemStack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(itemStack.getItem()));
                 }
 
                 return false;
             }
 
             // scans the inventory, takes out the first item that matches the predicate and returns
-            private boolean grabFromInventory(Inventory inv, Predicate<ItemStack> filterItem) {
+            private boolean grabFromInventory(HighwayBuilderTHM b, Inventory inv, Predicate<ItemStack> filterItem) {
                 for (int i = 0; i < inv.size(); i++) {
                     if (filterItem.test(inv.getStack(i))) {
                         ItemStack before = inv.getStack(i).copy();
                         InvUtils.shiftClick().slotId(i);
                         ItemStack after = inv.getStack(i);
 
+                        if (clearCursor(b)) return true;
+
                         if (after.getCount() < before.getCount() || after.getItem() != before.getItem()) return true;
                     }
                 }
 
                 return false;
+            }
+
+            private boolean clearCursor(HighwayBuilderTHM b) {
+                if (!b.mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
+                    if (tryPlaceCursorInEmptySlot(b)) {
+                        delayTimer = b.inventoryDelay.get();
+                        return true;
+                    }
+
+                    if (b.mc.currentScreen != null) b.closeHandledScreen();
+                    if (!b.mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
+                        dropCursorBypassAntiDrop();
+                    }
+                    delayTimer = b.inventoryDelay.get();
+                    return true;
+                }
+
+                return false;
+            }
+
+            private boolean tryPlaceCursorInEmptySlot(HighwayBuilderTHM b) {
+                if (b.mc.player == null) return false;
+                if (b.mc.player.currentScreenHandler == null) return false;
+
+                for (int i = 0; i < b.mc.player.currentScreenHandler.slots.size(); i++) {
+                    Slot slot = b.mc.player.currentScreenHandler.slots.get(i);
+                    if (slot.inventory == b.mc.player.getInventory() && slot.getStack().isEmpty()) {
+                        b.mc.interactionManager.clickSlot(b.mc.player.currentScreenHandler.syncId, i, 0, SlotActionType.PICKUP, b.mc.player);
+                        if (b.mc.player.currentScreenHandler.getCursorStack().isEmpty()) return true;
+                    }
+                }
+
+                return false;
+            }
+
+            private void dropCursorBypassAntiDrop() {
+                AntiDrop antiDrop = Modules.get().get(AntiDrop.class);
+                boolean wasActive = antiDrop != null && antiDrop.isActive();
+                if (wasActive) antiDrop.toggle();
+                InvUtils.dropHand();
+                if (wasActive) antiDrop.toggle();
             }
 
             private void setShulkerPredicate(HighwayBuilderTHM b) {
