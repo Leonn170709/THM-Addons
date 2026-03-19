@@ -391,7 +391,7 @@ public class HighwayBuilderTHM extends Module {
     private final Setting<Boolean> checkBehind = sgGeneral.add(new BoolSetting.Builder()
         .name("check-behind")
         .description("Checks and repairs missing highway floor and railings behind the player.")
-        .defaultValue(false)
+        .defaultValue(true)
         .build()
     );
 
