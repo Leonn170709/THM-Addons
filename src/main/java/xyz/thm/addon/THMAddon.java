@@ -29,6 +29,8 @@ import xyz.thm.addon.modules.*;
 import xyz.thm.addon.modules.chesttracker.ChestTrackerModule;
 import xyz.thm.addon.system.THMTab;
 import xyz.thm.addon.utils.JoinPayload;
+import xyz.thm.addon.utils.ServerReconnectService;
+import xyz.thm.addon.utils.ServerStatusHandler;
 import xyz.thm.addon.utils.THMUtils;
 
 
@@ -71,6 +73,8 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         LOG.info("Initializing THM Addon");
 
         MOD_META = FabricLoader.getInstance().getModContainer(MOD_ID).orElseThrow().getMetadata();
+        ServerStatusHandler.getInstance();
+        ServerReconnectService.getInstance();
 
         // Modules
         Modules.get().add(new HighwayBuilderTHM());

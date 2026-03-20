@@ -96,6 +96,8 @@ import static xyz.thm.addon.utils.password.*;
 
 @SuppressWarnings("ConstantConditions")
 public class HighwayBuilderTHM extends Module {
+    private static final String RESTART_DETECTED_MARKER = "server restart detected";
+
     private boolean suppressThmHwyMonitorSync;
 
     public enum Floor {
@@ -1073,6 +1075,7 @@ public class HighwayBuilderTHM extends Module {
     @Override
     public void error(String message, Object... args) {
         super.error(message, args);
+        signalMonitorHardFailIfNonRestart(message, args);
         toggle();
 
         if (disconnectOnToggle.get()) {
@@ -1082,9 +1085,22 @@ public class HighwayBuilderTHM extends Module {
 
     private void errorEarly(String message, Object... args) {
         super.error(message, args);
+        signalMonitorHardFailIfNonRestart(message, args);
 
         displayInfo = false;
         toggle();
+    }
+
+    private void signalMonitorHardFailIfNonRestart(String message, Object... args) {
+        if (message == null || message.isEmpty()) {
+            THMHwyMonitor.signalNonRestartHardFailFromHighwayBuilder();
+            return;
+        }
+
+        String formatted = String.format(message, args);
+        if (!formatted.toLowerCase(java.util.Locale.ROOT).contains(RESTART_DETECTED_MARKER)) {
+            THMHwyMonitor.signalNonRestartHardFailFromHighwayBuilder();
+        }
     }
 
     @EventHandler

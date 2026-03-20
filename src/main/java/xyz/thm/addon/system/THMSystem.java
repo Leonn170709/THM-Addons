@@ -23,6 +23,13 @@ public class THMSystem extends System<THMSystem> {
         .build()
     );
 
+    private final Setting<String> crackedPassword = sgPrefix.add(new StringSetting.Builder()
+        .name("cracked-password")
+        .description("Password used for cracked-account reconnect /login.")
+        .defaultValue("")
+        .build()
+    );
+
     // Highway Profiles Settings
     public final Setting<Mode> mode = sgProfiles.add(new EnumSetting.Builder<Mode>()
         .name("profile")
@@ -55,6 +62,10 @@ public class THMSystem extends System<THMSystem> {
 
     public String getHash() {
         return hash.get();
+    }
+
+    public String getCrackedPassword() {
+        return crackedPassword.get();
     }
 
     public void applyProfile() {
