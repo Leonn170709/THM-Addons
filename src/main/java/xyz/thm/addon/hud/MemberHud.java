@@ -1,9 +1,6 @@
 package xyz.thm.addon.hud;
 
 import com.google.common.util.concurrent.AtomicDouble;
-import com.google.gson.Gson;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.ColorSetting;
 import meteordevelopment.meteorclient.settings.Setting;
@@ -14,17 +11,11 @@ import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.utils.ThmMembers;
 
-import javax.crypto.Cipher;
-import javax.crypto.spec.SecretKeySpec;
-import java.net.HttpURLConnection;
-import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.*;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
-import static xyz.thm.addon.utils.password.*;
 
 public class MemberHud extends HudElement {
     public static final HudElementInfo<MemberHud> INFO = new HudElementInfo<>(THMAddon.HUD_GROUP, "THM Member Hud", "Shows all online THM members and ranks", MemberHud::new);
@@ -80,162 +71,9 @@ public class MemberHud extends HudElement {
         .build()
     );
 
-    // Inner class to represent a member
-    private static class User {
-        String name;
-        String[] mcNames;
-        String rank;
-        String rankId;
-
-        public User(String name, String[] mcNames, String rank, String rankId) {
-            this.name = name;
-            this.mcNames = mcNames;
-            this.rank = rank;
-            this.rankId = rankId;
-        }
-    }
-
-    public String apiUrl = getAPIMemberHud();
-
-    // Cache variables
-    private List<User> cachedMembers = null;
-    private long lastCacheTime = 0;
-    private static final long CACHE_DURATION = 30 * 60 * 1000; // 30 minutes in milliseconds
-
-    private String decryptAPI(String encryptedapi, String password) {
-        try {
-            // Derive a 256-bit (32 byte) key from the password using SHA-256
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] keyBytes = digest.digest(password.getBytes(StandardCharsets.UTF_8));
-
-            // Add proper Base64 padding for encrypted data if needed
-            String padded = encryptedapi;
-            int padding = padded.length() % 4;
-            if (padding > 0) {
-                padded += "=".repeat(4 - padding);
-            }
-
-            byte[] encryptedBytes = Base64.getDecoder().decode(padded);
-
-            // Create AES-256 cipher
-            SecretKeySpec secretKey = new SecretKeySpec(keyBytes, 0, keyBytes.length, "AES");
-            Cipher cipher = Cipher.getInstance("AES");
-            cipher.init(Cipher.DECRYPT_MODE, secretKey);
-
-            byte[] decrypted = cipher.doFinal(encryptedBytes);
-            String result = new String(decrypted, StandardCharsets.UTF_8);
-
-            // Validate result looks like a URL
-            if (!result.startsWith("http://") && !result.startsWith("https://")) {
-                THMAddon.LOG.warn("Decrypted API URL invalid - wrong password or corrupted data");
-                return null;
-            }
-
-            return result;
-        } catch (Exception e) {
-            THMAddon.LOG.warn("Failed to decrypt API: " + e.getMessage());
-            return null;
-        }
-    }
-
-    private List<User> fetchMembersFromApi() {
-        List<User> members = new ArrayList<>();
-
-        try {
-            // Create HTTP connection to the API endpoint
-            HttpURLConnection connection = (HttpURLConnection) new URI(Objects.requireNonNull(decryptAPI(apiUrl, getPassword()))).toURL().openConnection();
-            connection.setRequestMethod("GET");
-            connection.setConnectTimeout(5000);
-            connection.setReadTimeout(5000);
-
-            // Check if the response is successful
-            if (connection.getResponseCode() != 200) {
-                THMAddon.LOG.error("Failed to fetch members from API. Response code: {}", connection.getResponseCode());
-                return members;
-            }
-            THMAddon.LOG.info("Fetched Members");
-
-            // Read the response body
-            StringBuilder response = new StringBuilder();
-            try (Scanner scanner = new Scanner(connection.getInputStream())) {
-                while (scanner.hasNextLine()) {
-                    response.append(scanner.nextLine());
-                }
-            }
-
-            // Parse JSON response
-            Gson gson = new Gson();
-            JsonArray jsonArray = gson.fromJson(response.toString(), JsonArray.class);
-
-            // Convert JSON to User objects
-            for (int i = 0; i < jsonArray.size(); i++) {
-                JsonObject jsonObject = jsonArray.get(i).getAsJsonObject();
-
-                // Extract usernames array
-                JsonArray usernamesArray = jsonObject.getAsJsonArray("usernames");
-                String[] usernames = new String[usernamesArray.size()];
-                for (int j = 0; j < usernamesArray.size(); j++) {
-                    usernames[j] = usernamesArray.get(j).getAsString();
-                }
-
-                // Extract rank and rankId
-                String rank = jsonObject.get("rank").getAsString();
-                String rankId = jsonObject.has("rankId") ? jsonObject.getAsJsonPrimitive("rankId").getAsString() : "";
-
-                // Create User object with first username as the display name
-                String displayName = usernames.length > 0 ? usernames[0] : "Unknown";
-                members.add(new User(displayName, usernames, rank, rankId));
-            }
-
-            connection.disconnect();
-        } catch (Exception e) {
-            System.err.println("Error fetching members from API: " + e.getMessage());
-            e.printStackTrace();
-        }
-
-        return members;
-    }
-
-    // Get cached members or fetch from API if cache expired
-    private List<User> getCachedMembers() {
-        long currentTime = System.currentTimeMillis();
-
-        // Check if cache is still valid
-        if (cachedMembers != null && (currentTime - lastCacheTime) < CACHE_DURATION) {
-            return cachedMembers;
-        }
-
-        // Fetch new data from API and update cache
-        cachedMembers = fetchMembersFromApi();
-        lastCacheTime = currentTime;
-        return cachedMembers;
-    }
-
     // Reset cache on world join
     public void onWorldJoin() {
-        cachedMembers = null;
-        lastCacheTime = 0;
-    }
-
-    // Parse hex string with optional '#' prefix
-    private Color getColorForRank(String rankName) {
-        return switch (rankName) {
-            case "King" -> new Color(255, 217, 94, 255); // Orange
-            case "Prince" -> new Color(218, 160, 52, 255); // Deep Pink
-            case "The Chosen One" -> new Color(255, 215, 0, 255); // Gold
-            case "Major" -> new Color(249, 204, 158, 255); // Tan
-            case "Mayor" -> new Color(156, 232, 180, 255); // Light Green
-            case "Elite Highway Man" -> new Color(185, 230, 88, 255); // Yellow Green
-            case "Journeyman" -> new Color(116, 148, 114, 255); // Sage Green
-            case "Highway Man" -> new Color(133, 89, 221, 255); // Purple
-            case "PvP Manager" -> new Color(255, 0, 55, 255); // Red
-            case "PvP Lead" -> new Color(218, 109, 255, 255); // Magenta
-            case "PvP Branch" -> new Color(255, 0, 4, 255); // Bright Red
-            case "Apprentice" -> new Color(95, 70, 53, 255); // Brown
-            case "Novice" -> new Color(76, 173, 208, 255); // Cyan
-            case "Bot" -> new Color(52, 152, 219, 255); // Blue
-            default -> new Color(255, 255, 255, 255); // White fallback
-        };
+        ThmMembers.resetCache();
     }
 
     @Override
@@ -243,7 +81,7 @@ public class MemberHud extends HudElement {
         if (mc.player == null) return;
 
         // Get cached members (API is only called if cache expired)
-        List<User> thmMembers = getCachedMembers();
+        List<ThmMembers.Member> thmMembers = ThmMembers.getCachedMembers();
 
         // Get all online players from tab list
         List<String> onlinePlayers = new ArrayList<>(mc.player.networkHandler.getPlayerList().stream()
@@ -268,7 +106,7 @@ public class MemberHud extends HudElement {
         );
 
         // Create a map of player to member for easier lookup
-        Map<String, User> playerMemberMap = new HashMap<>();
+        Map<String, ThmMembers.Member> playerMemberMap = new HashMap<>();
         onlinePlayers.forEach(player -> {
             thmMembers.stream()
                 .filter(member -> member.mcNames.length > 0 && Arrays.asList(member.mcNames).contains(player))
@@ -280,8 +118,8 @@ public class MemberHud extends HudElement {
         List<String> sortedPlayers = onlinePlayers.stream()
             .filter(playerMemberMap::containsKey)
             .sorted((player1, player2) -> {
-                User member1 = playerMemberMap.get(player1);
-                User member2 = playerMemberMap.get(player2);
+                ThmMembers.Member member1 = playerMemberMap.get(player1);
+                ThmMembers.Member member2 = playerMemberMap.get(player2);
 
                 int rank1Index = rankHierarchy.indexOf(member1.rank);
                 int rank2Index = rankHierarchy.indexOf(member2.rank);
@@ -304,7 +142,7 @@ public class MemberHud extends HudElement {
         AtomicDouble largestWidth = new AtomicDouble(renderer.textWidth("Online THM Members: ", true));
 
         sortedPlayers.forEach(player -> {
-            User member = playerMemberMap.get(player);
+            ThmMembers.Member member = playerMemberMap.get(player);
 
             if (!showBots.get() && member.rank.equals("Bot")) {
                 return;
@@ -315,7 +153,7 @@ public class MemberHud extends HudElement {
             }
 
             // Get the color for this rank
-            Color rankColor = getColorForRank(member.rank);
+            Color rankColor = ThmMembers.getRankColor(member.rank);
 
             // Build complete display text for width calculation
             String displayText = String.format("[%s] %s", member.rank, player);
