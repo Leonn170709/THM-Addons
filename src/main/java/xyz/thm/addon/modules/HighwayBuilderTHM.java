@@ -1529,7 +1529,7 @@ public class HighwayBuilderTHM extends Module {
 
     private void restockDebug(String message, Object... args) {
         if (!restockDebugLog.get()) return;
-        info("[restock-debug] " + message, args);
+        THMAddon.LOG.info("[restock-debug] " + String.format(message, args));
     }
 
     private boolean shouldLogRestockStateTransition(State previousState, State nextState, State lastState) {
@@ -2123,7 +2123,7 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 if (!b.mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
-                    if (!b.clearCursorStackToEmptySlot("ThrowOutTrash")) InvUtils.dropHand();
+                    handleCursorStack(b);
                     return;
                 }
 
@@ -2185,6 +2185,50 @@ public class HighwayBuilderTHM extends Module {
 
                 timerEnabled = true;
                 timer = threwItems ? 10 : 1;
+            }
+
+            private void handleCursorStack(HighwayBuilderTHM b) {
+                if (b.clearCursorStackToEmptySlot("ThrowOutTrash")) return;
+
+                if (trySwapCursorObsidianForTrash(b)) {
+                    InvUtils.dropHand();
+                    threwItems = true;
+                    return;
+                }
+
+                InvUtils.dropHand();
+            }
+
+            private boolean trySwapCursorObsidianForTrash(HighwayBuilderTHM b) {
+                ItemStack cursorStack = b.mc.player.currentScreenHandler.getCursorStack();
+                if (!cursorStack.isOf(Items.OBSIDIAN)) return false;
+
+                int trashSlot = findTrashSwapSlot(b);
+                if (trashSlot == -1) return false;
+
+                b.mc.interactionManager.clickSlot(
+                    b.mc.player.currentScreenHandler.syncId,
+                    SlotUtils.indexToId(trashSlot),
+                    0,
+                    SlotActionType.PICKUP,
+                    b.mc.player
+                );
+
+                return !b.mc.player.currentScreenHandler.getCursorStack().isOf(Items.OBSIDIAN);
+            }
+
+            private int findTrashSwapSlot(HighwayBuilderTHM b) {
+                for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
+                    if (keepSlots.contains(i)) continue;
+
+                    ItemStack itemStack = b.mc.player.getInventory().getStack(i);
+                    if (!(itemStack.getItem() instanceof BlockItem)) continue;
+                    if (!b.trashItems.get().contains(itemStack.getItem())) continue;
+
+                    return i;
+                }
+
+                return -1;
             }
         },
 
@@ -3581,6 +3625,12 @@ public class HighwayBuilderTHM extends Module {
                 return slot;
             }
 
+            slot = tryMoveCursorToHotbar(b, predicate, failHardNoHotbar);
+            if (slot != -1) {
+                if (b.restockDebugLog.get()) b.restockDebug("findAndMoveToHotbar moved cursor stack into hotbar slot %d.", slot);
+                return slot;
+            }
+
             // Check inventory
             slot = findSlot(b, predicate, false);
 
@@ -3611,6 +3661,40 @@ public class HighwayBuilderTHM extends Module {
             if (!b.clearCursorStackToEmptySlot("findAndMoveToHotbar")) InvUtils.dropHand();
 
             return hotbarSlot;
+        }
+
+        private int tryMoveCursorToHotbar(HighwayBuilderTHM b, Predicate<ItemStack> predicate, boolean failHardNoHotbar) {
+            if (b.mc.player == null || b.mc.player.currentScreenHandler == null) return -1;
+
+            ItemStack cursorStack = b.mc.player.currentScreenHandler.getCursorStack();
+            if (cursorStack.isEmpty() || !predicate.test(cursorStack)) return -1;
+
+            int hotbarSlot = b.getPreferredManagedHotbarSlot(cursorStack.getItem());
+            if (hotbarSlot != -1) {
+                if (b.restockDebugLog.get()) {
+                    b.restockDebug("findAndMoveToHotbar using HotbarManager slot %d for cursor item %s.", hotbarSlot, cursorStack.getItem());
+                }
+            } else {
+                hotbarSlot = findHotbarSlot(b, false, failHardNoHotbar);
+                if (hotbarSlot == -1) {
+                    if (b.restockDebugLog.get()) {
+                        b.restockDebug("findAndMoveToHotbar failed: no hotbar slot available for cursor item %s (failHard=%s).", cursorStack.getItem(), failHardNoHotbar);
+                    }
+                    return -1;
+                }
+            }
+
+            b.mc.interactionManager.clickSlot(
+                b.mc.player.currentScreenHandler.syncId,
+                SlotUtils.indexToId(hotbarSlot),
+                0,
+                SlotActionType.PICKUP,
+                b.mc.player
+            );
+
+            if (!b.clearCursorStackToEmptySlot("findAndMoveToHotbar-cursor")) InvUtils.dropHand();
+
+            return predicate.test(b.mc.player.getInventory().getStack(hotbarSlot)) ? hotbarSlot : -1;
         }
 
         protected int findAndMoveBestToolToHotbar(HighwayBuilderTHM b, BlockState blockState, boolean noSilkTouch) {
