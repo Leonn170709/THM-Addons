@@ -21,6 +21,7 @@ import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.combat.KillAura;
 import meteordevelopment.meteorclient.systems.modules.movement.Velocity;
 import meteordevelopment.meteorclient.systems.modules.movement.speed.Speed;
+import meteordevelopment.meteorclient.systems.modules.movement.speed.SpeedModes;
 import meteordevelopment.meteorclient.systems.modules.player.*;
 import meteordevelopment.meteorclient.systems.modules.world.NoGhostBlocks;
 import meteordevelopment.meteorclient.systems.modules.world.Timer;
@@ -714,6 +715,10 @@ public class HighwayBuilderTHM extends Module {
     private int invalidRestockRecoveryRetries;
     private boolean invalidRestockRecoveryPending;
     private boolean kitbotTpHandled;
+    private CenterSpeedSnapshot centerSpeedSnapshot;
+    private boolean centerSpeedSnapshotOwned;
+    private boolean centerSpeedOverrideActive;
+    private String centerSpeedLastReason = "";
     private boolean previousPauseOnLostFocus;
     private boolean pauseOnLostFocusChanged;
     private Perspective previousPerspective;
@@ -725,6 +730,7 @@ public class HighwayBuilderTHM extends Module {
     private final MBlockPos posRender3 = new MBlockPos();
     private List<Pattern> signBreakPatterns = Collections.emptyList();
     private static final String KITBOT_NAME = "KitBot1";
+    private static final double CENTER_SPEED_OVERRIDE = 0.6;
     private static final String[] ADVERTISEMENT_SIGN_REGEXES = {
         "invite",
         "discord\\.gg",
@@ -736,6 +742,19 @@ public class HighwayBuilderTHM extends Module {
         "Join",
         "On Top",
     };
+
+    private record CenterSpeedSnapshot(
+        String speedModeName,
+        double vanillaSpeed,
+        double ncpSpeed,
+        boolean ncpSpeedLimit,
+        double timer,
+        boolean inLiquids,
+        boolean whenSneaking,
+        boolean vanillaOnGround,
+        boolean wasActive
+    ) {}
+
     public HighwayBuilderTHM() {
         super(THMAddon.MAIN, "THM-HighwayBuilder", "Automatically builds highways according to THMs standards.");
         runInMainMenu = true;
@@ -1006,6 +1025,7 @@ public class HighwayBuilderTHM extends Module {
         if (!suppressThmHwyMonitorSync) syncThmHwyMonitorOnDeactivate();
 
         Modules.get().get(Timer.class).setOverride(Timer.OFF);
+        restoreCenterSpeedIfOwned("module-deactivate");
 
         if (pauseOnLostFocusChanged) {
             togglePauseOnLostFocus(previousPauseOnLostFocus);
@@ -1490,7 +1510,8 @@ public class HighwayBuilderTHM extends Module {
         }
 
         if (restockTask.shouldTearDownRestockBlockade()) {
-            setState(State.MineShulkerBlockade, State.Restock);
+            restockTask.deferBlockadeTeardown();
+            setState(State.Forward);
             return;
         }
 
@@ -1550,6 +1571,139 @@ public class HighwayBuilderTHM extends Module {
 
     private String stateName(State state) {
         return state == null ? "null" : state.name();
+    }
+
+    private boolean ensureCenterSpeedSnapshotCaptured(String reason) {
+        if (centerSpeedSnapshotOwned && centerSpeedSnapshot != null) return true;
+        if (centerSpeedSnapshotOwned && centerSpeedSnapshot == null) clearCenterSpeedOwnership("owned-without-snapshot");
+
+        Speed speed = Modules.get().get(Speed.class);
+        if (speed == null) {
+            centerSpeedLastReason = "capture-missing-speed:" + reason;
+            restockDebug("Center/Speed snapshot skipped: Speed module not found (reason=%s).", reason);
+            return false;
+        }
+
+        centerSpeedSnapshot = new CenterSpeedSnapshot(
+            speed.speedMode.get().name(),
+            speed.vanillaSpeed.get(),
+            speed.ncpSpeed.get(),
+            speed.ncpSpeedLimit.get(),
+            speed.timer.get(),
+            speed.inLiquids.get(),
+            speed.whenSneaking.get(),
+            speed.vanillaOnGround.get(),
+            speed.isActive()
+        );
+        centerSpeedSnapshotOwned = true;
+        centerSpeedLastReason = "captured:" + reason;
+        restockDebug(
+            "Center/Speed snapshot captured (reason=%s, active=%s, mode=%s, vanilla=%.2f, ncp=%.2f, limit=%s, timer=%.2f, liquids=%s, sneaking=%s, onGround=%s).",
+            reason,
+            centerSpeedSnapshot.wasActive(),
+            centerSpeedSnapshot.speedModeName(),
+            centerSpeedSnapshot.vanillaSpeed(),
+            centerSpeedSnapshot.ncpSpeed(),
+            centerSpeedSnapshot.ncpSpeedLimit(),
+            centerSpeedSnapshot.timer(),
+            centerSpeedSnapshot.inLiquids(),
+            centerSpeedSnapshot.whenSneaking(),
+            centerSpeedSnapshot.vanillaOnGround()
+        );
+        return true;
+    }
+
+    private void applyCenterSpeedOverrideIfPossible(String reason) {
+        if (!ensureCenterSpeedSnapshotCaptured(reason)) return;
+
+        Speed speed = Modules.get().get(Speed.class);
+        if (speed == null) {
+            centerSpeedLastReason = "override-missing-speed:" + reason;
+            restockDebug("Center/Speed override skipped: Speed module not found (reason=%s).", reason);
+            return;
+        }
+
+        speed.speedMode.set(SpeedModes.Vanilla);
+        speed.vanillaSpeed.set(CENTER_SPEED_OVERRIDE);
+        speed.timer.set(1.0);
+        speed.inLiquids.set(false);
+        speed.whenSneaking.set(false);
+        speed.vanillaOnGround.set(false);
+        if (!speed.isActive()) speed.toggle();
+
+        centerSpeedOverrideActive = true;
+        centerSpeedLastReason = "override-applied:" + reason;
+        restockDebug(
+            "Center/Speed override applied (reason=%s, wasActive=%s, mode=%s, vanilla=%.2f, timer=%.2f, liquids=%s, sneaking=%s, onGround=%s).",
+            reason,
+            centerSpeedSnapshot != null && centerSpeedSnapshot.wasActive(),
+            SpeedModes.Vanilla.name(),
+            CENTER_SPEED_OVERRIDE,
+            1.0,
+            false,
+            false,
+            false
+        );
+    }
+
+    private void restoreCenterSpeedIfOwned(String reason) {
+        if (!centerSpeedSnapshotOwned || centerSpeedSnapshot == null) return;
+
+        Speed speed = Modules.get().get(Speed.class);
+        if (speed == null) {
+            centerSpeedLastReason = "restore-missing-speed:" + reason;
+            restockDebug("Center/Speed restore skipped: Speed module not found (reason=%s).", reason);
+            return;
+        }
+
+        try {
+            speed.speedMode.set(parseCenterSpeedModeOrDefault(centerSpeedSnapshot.speedModeName()));
+            speed.vanillaSpeed.set(centerSpeedSnapshot.vanillaSpeed());
+            speed.ncpSpeed.set(centerSpeedSnapshot.ncpSpeed());
+            speed.ncpSpeedLimit.set(centerSpeedSnapshot.ncpSpeedLimit());
+            speed.timer.set(centerSpeedSnapshot.timer());
+            speed.inLiquids.set(centerSpeedSnapshot.inLiquids());
+            speed.whenSneaking.set(centerSpeedSnapshot.whenSneaking());
+            speed.vanillaOnGround.set(centerSpeedSnapshot.vanillaOnGround());
+
+            boolean active = speed.isActive();
+            if (centerSpeedSnapshot.wasActive() && !active) speed.toggle();
+            else if (!centerSpeedSnapshot.wasActive() && active) speed.toggle();
+
+            restockDebug(
+                "Center/Speed override restored (reason=%s, active=%s, mode=%s, vanilla=%.2f, ncp=%.2f, limit=%s, timer=%.2f, liquids=%s, sneaking=%s, onGround=%s).",
+                reason,
+                centerSpeedSnapshot.wasActive(),
+                centerSpeedSnapshot.speedModeName(),
+                centerSpeedSnapshot.vanillaSpeed(),
+                centerSpeedSnapshot.ncpSpeed(),
+                centerSpeedSnapshot.ncpSpeedLimit(),
+                centerSpeedSnapshot.timer(),
+                centerSpeedSnapshot.inLiquids(),
+                centerSpeedSnapshot.whenSneaking(),
+                centerSpeedSnapshot.vanillaOnGround()
+            );
+            clearCenterSpeedOwnership("restored:" + reason);
+        } catch (Exception e) {
+            centerSpeedLastReason = "restore-error:" + e.getClass().getSimpleName();
+            restockDebug("Center/Speed restore failed (reason=%s, error=%s).", reason, e.getClass().getSimpleName());
+        }
+    }
+
+    private SpeedModes parseCenterSpeedModeOrDefault(String value) {
+        if (value == null || value.isBlank()) return SpeedModes.Vanilla;
+        try {
+            return SpeedModes.valueOf(value.trim());
+        } catch (IllegalArgumentException ignored) {
+            return SpeedModes.Vanilla;
+        }
+    }
+
+    private void clearCenterSpeedOwnership(String reason) {
+        centerSpeedSnapshotOwned = false;
+        centerSpeedSnapshot = null;
+        centerSpeedOverrideActive = false;
+        centerSpeedLastReason = reason == null ? "" : reason;
     }
 
     private String formatBlockPos(BlockPos pos) {
@@ -1735,8 +1889,13 @@ public class HighwayBuilderTHM extends Module {
 
     private enum State {
         Center {
+            private static final int RECENTER_TIMEOUT_TICKS = 20 * 20;
+            private int timeoutTicks;
+
             @Override
             protected void start(HighwayBuilderTHM b) {
+                timeoutTicks = RECENTER_TIMEOUT_TICKS;
+                b.applyCenterSpeedOverrideIfPossible("center-start");
                 if (b.mc.player.getEntityPos().isInRange(Vec3d.ofBottomCenter(b.mc.player.getBlockPos()), 0.1)) {
                     stop(b);
                 }
@@ -1744,6 +1903,12 @@ public class HighwayBuilderTHM extends Module {
 
             @Override
             protected void tick(HighwayBuilderTHM b) {
+                if (timeoutTicks > 0) timeoutTicks--;
+                else {
+                    restart(b);
+                    return;
+                }
+
                 // There is probably a much better way to do this
                 double x = Math.abs(b.mc.player.getX() - (int) b.mc.player.getX()) - 0.5;
                 double z = Math.abs(b.mc.player.getZ() - (int) b.mc.player.getZ()) - 0.5;
@@ -1786,8 +1951,17 @@ public class HighwayBuilderTHM extends Module {
             private void stop(HighwayBuilderTHM b) {
                 b.input.stop();
                 b.mc.player.setVelocity(0, 0, 0);
+                b.restoreCenterSpeedIfOwned("center-stop");
                 b.mc.player.setPosition((int) b.mc.player.getX() + (b.mc.player.getX() < 0 ? -0.5 : 0.5), b.mc.player.getY(), (int) b.mc.player.getZ() + (b.mc.player.getZ() < 0 ? -0.5 : 0.5));
                 b.setState(b.lastState);
+            }
+
+            private void restart(HighwayBuilderTHM b) {
+                b.input.stop();
+                b.mc.player.setVelocity(0, 0, 0);
+                b.restoreCenterSpeedIfOwned("center-timeout-restart");
+                b.restockDebug("Center/Speed timeout restart triggered (ticks=%d, target=%s, lastReason=%s).", RECENTER_TIMEOUT_TICKS, b.stateName(b.lastState), b.centerSpeedLastReason);
+                b.setState(Center, b.lastState);
             }
         },
 
@@ -1807,7 +1981,8 @@ public class HighwayBuilderTHM extends Module {
             }
 
             private void checkTasks(HighwayBuilderTHM b) {
-                if (b.destroyCrystalTraps.get() && isCrystalTrap(b)) b.setState(DefuseCrystalTraps); // Destroy crystal traps
+                if (b.restockTask.shouldTearDownRestockBlockadeFromForward()) b.setState(MineShulkerBlockade, Restock);
+                else if (b.destroyCrystalTraps.get() && isCrystalTrap(b)) b.setState(DefuseCrystalTraps); // Destroy crystal traps
                 else if (needsToPlace(b, b.blockPosProvider.getLiquids(), true)) b.setState(FillLiquids); // Fill Liquids
                 else if (needsToMine(b, b.blockPosProvider.getFront(), true)) b.setState(MineFront); // Mine Front
                 else if (b.checkBehind.get() && needsToMine(b, b.blockPosProvider.getBehindFront(), true)) b.setState(MineBehind); // Mine Behind
@@ -2510,8 +2685,20 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 if (hasPlaceableBlocks(b)) {
-                    if (breakCageTop(b)) return;
-                    b.setState(Forward);
+                    if (b.restockTask.isSequenceActive() && !b.restockTask.tasksInactive()) {
+                        if (b.restockTask.isBlockadeReady()) {
+                            if (repairExistingBlockade(b)) return;
+                            b.restockDebug("KitbotOrder restored the existing blockade, returning to Restock.");
+                        } else {
+                            if (breakCageTop(b)) return;
+                            b.restockTask.setBlockadeReady(false);
+                            b.restockDebug("KitbotOrder received supplies without a valid blockade, forcing proper blockade rebuild before returning to Restock.");
+                        }
+                        b.setState(Restock);
+                    } else {
+                        if (breakCageTop(b)) return;
+                        b.setState(Forward);
+                    }
                 }
             }
 
@@ -2561,6 +2748,72 @@ public class HighwayBuilderTHM extends Module {
 
                 b.breakTimer = b.breakDelay.get();
                 return true;
+            }
+
+            private boolean repairExistingBlockade(HighwayBuilderTHM b) {
+                if (clearKitbotOnlyBlockadeBlocks(b)) return true;
+
+                if (!hasMissingBlockadeBlocks(b)) return false;
+
+                int slot = findBlocksToPlacePrioritizeTrash(b);
+                if (slot == -1) {
+                    b.restockTask.setBlockadeReady(false);
+                    b.restockDebug("KitbotOrder could not find a block to repair the existing blockade, falling back to rebuild.");
+                    return false;
+                }
+
+                if (b.placeTimer > 0) return true;
+
+                for (MBlockPos blockadePos : b.blockPosProvider.getBlockade(false, b.blockadeType.get())) {
+                    BlockPos blockPos = blockadePos.getBlockPos();
+                    if (!BlockUtils.canPlace(blockPos)) continue;
+
+                    if (BlockUtils.place(blockPos, Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, true)) {
+                        b.placeTimer = b.placeDelay.get();
+                        b.restockDebug("KitbotOrder repaired blockade block at %s.", b.formatBlockPos(blockPos));
+                    }
+
+                    return true;
+                }
+
+                return false;
+            }
+
+            private boolean clearKitbotOnlyBlockadeBlocks(HighwayBuilderTHM b) {
+                BlockPos base = b.mc.player.getBlockPos();
+
+                for (int[] offset : CAGE_OFFSETS) {
+                    cagePos.set(base.getX() + offset[0], base.getY() + offset[1], base.getZ() + offset[2]);
+                    if (b.mc.world.getBlockState(cagePos).getBlock() != Blocks.NETHERRACK) continue;
+                    if (isDesiredBlockadePosition(b, cagePos)) continue;
+                    if (b.breakTimer > 0) return true;
+
+                    Runnable breakBlock = () -> BlockUtils.breakBlock(cagePos, true);
+                    if (b.rotation.get().mine) Rotations.rotate(Rotations.getYaw(cagePos), Rotations.getPitch(cagePos), breakBlock);
+                    else breakBlock.run();
+
+                    b.breakTimer = b.breakDelay.get();
+                    b.restockDebug("KitbotOrder cleared temporary cage block at %s while restoring existing blockade.", b.formatBlockPos(cagePos));
+                    return true;
+                }
+
+                return false;
+            }
+
+            private boolean hasMissingBlockadeBlocks(HighwayBuilderTHM b) {
+                for (MBlockPos blockadePos : b.blockPosProvider.getBlockade(false, b.blockadeType.get())) {
+                    if (BlockUtils.canPlace(blockadePos.getBlockPos())) return true;
+                }
+
+                return false;
+            }
+
+            private boolean isDesiredBlockadePosition(HighwayBuilderTHM b, BlockPos blockPos) {
+                for (MBlockPos blockadePos : b.blockPosProvider.getBlockade(false, b.blockadeType.get())) {
+                    if (blockadePos.getBlockPos().equals(blockPos)) return true;
+                }
+
+                return false;
             }
 
             private boolean hasShulkerWithMaterials(HighwayBuilderTHM b) {
@@ -4911,6 +5164,7 @@ public class HighwayBuilderTHM extends Module {
         private boolean pendingFood;
         private boolean sequenceActive;
         private boolean blockadeReady;
+        private boolean blockadeTeardownPending;
         private int pickaxeStartCount;
         private final HighwayBuilderTHM b;
 
@@ -4962,6 +5216,7 @@ public class HighwayBuilderTHM extends Module {
             clearPending();
             sequenceActive = false;
             blockadeReady = false;
+            blockadeTeardownPending = false;
         }
 
         public void completeActive() {
@@ -4998,6 +5253,10 @@ public class HighwayBuilderTHM extends Module {
             blockadeReady = value;
         }
 
+        public void deferBlockadeTeardown() {
+            blockadeTeardownPending = true;
+        }
+
         public boolean advanceToPendingTask() {
             Type next = nextPendingTask();
             if (next == null) return false;
@@ -5012,11 +5271,16 @@ public class HighwayBuilderTHM extends Module {
             return sequenceActive && blockadeReady && tasksInactive() && !hasPendingTasks();
         }
 
+        public boolean shouldTearDownRestockBlockadeFromForward() {
+            return blockadeTeardownPending && shouldTearDownRestockBlockade();
+        }
+
         public void finishSequence() {
             completeActive();
             clearPending();
             sequenceActive = false;
             blockadeReady = false;
+            blockadeTeardownPending = false;
             pickaxeStartCount = 0;
         }
 
@@ -5054,6 +5318,7 @@ public class HighwayBuilderTHM extends Module {
 
         private void activate(Type type) {
             completeActive();
+            blockadeTeardownPending = false;
             onTaskActivated(type);
 
             switch (type) {
