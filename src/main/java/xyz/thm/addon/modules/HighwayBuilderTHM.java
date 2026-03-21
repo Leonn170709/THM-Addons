@@ -60,6 +60,7 @@ import net.minecraft.item.*;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
 import net.minecraft.registry.tag.ItemTags;
+import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
@@ -568,6 +569,13 @@ public class HighwayBuilderTHM extends Module {
         .name("print-statistics")
         .description("Prints statistics in chat when disabling Highway Builder.")
         .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> restockDebugLog = sgStatistics.add(new BoolSetting.Builder()
+        .name("restock-debug-log")
+        .description("Prints detailed blockade and restock diagnostics, including placement probes and state transitions.")
+        .defaultValue(false)
         .build()
     );
 
@@ -1221,7 +1229,9 @@ public class HighwayBuilderTHM extends Module {
                 if (mineAboveRailings.get()) render(event, blockPosProvider.getBehindRailings(1), mBlockPos -> canMine(mBlockPos, true), true);
                 render(event, blockPosProvider.getBehindFront(), mBlockPos -> canMine(mBlockPos, true), true);
             }
-            if (state == State.MineEChestBlockade) render(event, blockPosProvider.getBlockade(true, blockadeType.get()), mBlockPos -> canMine(mBlockPos, true), true);
+            if (state == State.MineShulkerBlockade || state == State.MineEChestBlockade) {
+                render(event, blockPosProvider.getBlockade(true, blockadeType.get()), mBlockPos -> canMine(mBlockPos, true), true);
+            }
         }
 
         if (renderPlace.get()) {
@@ -1268,7 +1278,9 @@ public class HighwayBuilderTHM extends Module {
 
                 render(event, blockPosProvider.getBehindFloor(), mBlockPos -> canPlace(mBlockPos, false), false);
             }
-            if (state == State.PlaceEChestBlockade) render(event, blockPosProvider.getBlockade(false, blockadeType.get()), mBlockPos -> canPlace(mBlockPos, false), false);
+            if (state == State.PlaceShulkerBlockade || state == State.PlaceEChestBlockade) {
+                render(event, blockPosProvider.getBlockade(false, blockadeType.get()), mBlockPos -> canPlace(mBlockPos, false), false);
+            }
         }
     }
 
@@ -1413,11 +1425,50 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private void setState(State state, State lastState) {
+        State previousState = this.state;
         this.lastState = lastState;
         this.state = state;
 
+        if (shouldLogRestockStateTransition(previousState, state, lastState)) {
+            restockDebug("state %s -> %s (last=%s, active=%s, pending=%s, blockadeReady=%s, sequence=%s)",
+                stateName(previousState),
+                stateName(state),
+                stateName(lastState),
+                restockTask.activeSummary(),
+                restockTask.pendingSummary(),
+                restockTask.isBlockadeReady(),
+                restockTask.isSequenceActive()
+            );
+        }
+
         input.stop();
         state.start(this);
+    }
+
+    private void completeRestockTaskAndContinue() {
+        if (restockDebugLog.get()) {
+            restockDebug("completeRestockTaskAndContinue(active=%s, pending=%s, blockadeReady=%s, sequence=%s)",
+                restockTask.activeSummary(),
+                restockTask.pendingSummary(),
+                restockTask.isBlockadeReady(),
+                restockTask.isSequenceActive()
+            );
+        }
+
+        restockTask.completeActive();
+
+        if (restockTask.advanceToPendingTask()) {
+            setState(State.Restock, State.Restock);
+            return;
+        }
+
+        if (restockTask.shouldTearDownRestockBlockade()) {
+            setState(State.MineShulkerBlockade, State.Restock);
+            return;
+        }
+
+        restockTask.finishSequence();
+        setState(State.Forward);
     }
 
     private int getWidthLeft() {
@@ -1447,6 +1498,147 @@ public class HighwayBuilderTHM extends Module {
     private boolean canPlace(MBlockPos pos, boolean liquids) {
         if (pos.getBlockPos().getSquaredDistance(mc.player.getEyePos()) > placeRange.get() * placeRange.get()) return false;
         return liquids ? !pos.getState().getFluidState().isEmpty() : BlockUtils.canPlace(pos.getBlockPos());
+    }
+
+    private void restockDebug(String message, Object... args) {
+        if (!restockDebugLog.get()) return;
+        info("[restock-debug] " + message, args);
+    }
+
+    private boolean shouldLogRestockStateTransition(State previousState, State nextState, State lastState) {
+        if (!restockDebugLog.get()) return false;
+        return restockTask.isSequenceActive()
+            || isRestockState(previousState)
+            || isRestockState(nextState)
+            || isRestockState(lastState);
+    }
+
+    private boolean isRestockState(State state) {
+        if (state == null) return false;
+        return switch (state) {
+            case Center, ThrowOutTrash, Restock, PlaceShulkerBlockade, MineShulkerBlockade, PlaceEChestBlockade, MineEChestBlockade, MineEnderChests, KitbotOrder -> true;
+            default -> false;
+        };
+    }
+
+    private String stateName(State state) {
+        return state == null ? "null" : state.name();
+    }
+
+    private String formatBlockPos(BlockPos pos) {
+        return "(" + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ")";
+    }
+
+    private boolean isHotbarSlotReservedByManager(int hotbarSlot) {
+        if (hotbarSlot < 0 || hotbarSlot >= 9) return false;
+        if (!hotbarmanager.get()) return false;
+
+        HotbarManager manager = Modules.get().get(HotbarManager.class);
+        return manager != null && manager.isActive() && manager.managesSlot(hotbarSlot);
+    }
+
+    private Item getReservedHotbarItem(int hotbarSlot) {
+        HotbarManager manager = Modules.get().get(HotbarManager.class);
+        if (manager == null) return Items.AIR;
+        return manager.getManagedItem(hotbarSlot);
+    }
+
+    private int getPreferredManagedHotbarSlot(Item item) {
+        if (item == null || item == Items.AIR) return -1;
+        if (!hotbarmanager.get()) return -1;
+
+        HotbarManager manager = Modules.get().get(HotbarManager.class);
+        if (manager == null || !manager.isActive()) return -1;
+
+        for (int i = 0; i < 9; i++) {
+            if (manager.managesSlot(i) && manager.getManagedItem(i) == item) return i;
+        }
+
+        return -1;
+    }
+
+    private boolean isForwardPlaceableBlock(ItemStack stack) {
+        return stack.getItem() instanceof BlockItem blockItem && blocksToPlace.get().contains(blockItem.getBlock());
+    }
+
+    private boolean hasForwardPlaceableBlock() {
+        if (mc.player == null) return false;
+
+        for (int i = 0; i < mc.player.getInventory().getMainStacks().size(); i++) {
+            if (isForwardPlaceableBlock(mc.player.getInventory().getStack(i))) return true;
+        }
+
+        return false;
+    }
+
+    private boolean clearCursorStackToEmptySlot(String reason) {
+        if (mc.player == null || mc.player.currentScreenHandler == null) return false;
+        if (mc.player.currentScreenHandler.getCursorStack().isEmpty()) return true;
+
+        int emptySlot = -1;
+
+        for (int i = 9; i < mc.player.getInventory().getMainStacks().size(); i++) {
+            if (mc.player.getInventory().getStack(i).isEmpty()) {
+                emptySlot = i;
+                break;
+            }
+        }
+
+        if (emptySlot == -1) {
+            for (int i = 0; i < 9; i++) {
+                if (mc.player.getInventory().getStack(i).isEmpty()) {
+                    emptySlot = i;
+                    break;
+                }
+            }
+        }
+
+        if (emptySlot == -1) return false;
+
+        mc.interactionManager.clickSlot(
+            mc.player.currentScreenHandler.syncId,
+            SlotUtils.indexToId(emptySlot),
+            0,
+            SlotActionType.PICKUP,
+            mc.player
+        );
+
+        if (restockDebugLog.get()) {
+            restockDebug("Cleared cursor stack into empty slot %d (%s).", emptySlot, reason);
+        }
+
+        return mc.player.currentScreenHandler.getCursorStack().isEmpty();
+    }
+
+    private void logRestockBlockadeProbe(String label, MBPIterator it) {
+        if (!restockDebugLog.get() || mc.player == null || mc.world == null) return;
+
+        it.save();
+
+        try {
+            int index = 0;
+            while (it.hasNext()) {
+                MBlockPos pos = it.next();
+                BlockPos blockPos = pos.getBlockPos();
+                BlockState state = mc.world.getBlockState(blockPos);
+                boolean inRange = blockPos.getSquaredDistance(mc.player.getEyePos()) <= placeRange.get() * placeRange.get();
+                boolean canPlaceHere = BlockUtils.canPlace(blockPos);
+
+                restockDebug("%s probe[%d] pos=%s block=%s replaceable=%s inRange=%s canPlace=%s",
+                    label,
+                    index++,
+                    formatBlockPos(blockPos),
+                    state.getBlock(),
+                    state.isReplaceable(),
+                    inRange,
+                    canPlaceHere
+                );
+            }
+
+            if (index == 0) restockDebug("%s probe found no target positions.", label);
+        } finally {
+            it.restore();
+        }
     }
 
     private void disconnect(String message, Object... args) {
@@ -1904,7 +2096,7 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 if (!b.mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
-                    InvUtils.dropHand();
+                    if (!b.clearCursorStackToEmptySlot("ThrowOutTrash")) InvUtils.dropHand();
                     return;
                 }
 
@@ -1988,23 +2180,42 @@ public class HighwayBuilderTHM extends Module {
 
         MineEnderChests {
             private static final MBlockPos pos = new MBlockPos();
-            private int minimumObsidian;
+            private int targetEchestsToBreak;
+            private int targetObsidianCount;
             private boolean first, primed;
             private boolean stopTimerEnabled;
             private int stopTimer, moveTimer, rebreakTimer, timeout;
+            private double returnX, returnY, returnZ;
+            private boolean returnAnchorSaved;
             @Override
             protected void start(HighwayBuilderTHM b) {
-                if (b.lastState != Center && b.lastState != ThrowOutTrash && b.lastState != PlaceEChestBlockade) {
-                    b.setState(Center);
-                    return;
+                if (b.restockTask.isSequenceActive() && !b.restockTask.isBlockadeReady()) {
+                    if (b.lastState != Center && b.lastState != ThrowOutTrash && b.lastState != PlaceShulkerBlockade) {
+                        b.setState(Center);
+                        return;
+                    }
+                    else if (b.lastState == Center) {
+                        b.setState(ThrowOutTrash);
+                        return;
+                    }
+                    else if (b.lastState == ThrowOutTrash) {
+                        b.setState(PlaceShulkerBlockade);
+                        return;
+                    }
                 }
-                else if (b.lastState == Center) {
-                    b.setState(ThrowOutTrash);
-                    return;
-                }
-                else if (b.lastState == ThrowOutTrash) {
-                    b.setState(PlaceEChestBlockade);
-                    return;
+                else if (!b.restockTask.isSequenceActive()) {
+                    if (b.lastState != Center && b.lastState != ThrowOutTrash && b.lastState != PlaceEChestBlockade) {
+                        b.setState(Center);
+                        return;
+                    }
+                    else if (b.lastState == Center) {
+                        b.setState(ThrowOutTrash);
+                        return;
+                    }
+                    else if (b.lastState == ThrowOutTrash) {
+                        b.setState(PlaceEChestBlockade);
+                        return;
+                    }
                 }
 
                 int emptySlots = 0;
@@ -2012,16 +2223,21 @@ public class HighwayBuilderTHM extends Module {
                     if (b.mc.player.getInventory().getStack(i).isEmpty()) emptySlots++;
                 }
 
-                if (emptySlots == 0) {
+                int availableSlots = emptySlots - b.minEmpty.get();
+                if (availableSlots <= 0) {
                     b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", "No empty inventory slots to continue e-chest mining.");
                     b.error("No empty slots.");
                     return;
                 }
 
-                int minimumSlots = Math.max(emptySlots - b.minEmpty.get(), 1);
-                minimumObsidian = minimumSlots * 64;
+                targetEchestsToBreak = (availableSlots * 64) / 8;
+                targetObsidianCount = targetEchestsToBreak * 8;
                 first = true;
                 moveTimer = timeout = 0;
+                returnX = b.mc.player.getX();
+                returnY = b.mc.player.getY();
+                returnZ = b.mc.player.getZ();
+                returnAnchorSaved = true;
 
                 stopTimerEnabled = false;
                 primed = false;
@@ -2031,7 +2247,7 @@ public class HighwayBuilderTHM extends Module {
             protected void tick(HighwayBuilderTHM b) {
                 if (stopTimerEnabled) {
                     if (stopTimer > 0) stopTimer--;
-                    else b.setState(MineEChestBlockade);
+                    else completeAndReturnToAnchor(b);
 
                     return;
                 }
@@ -2062,7 +2278,7 @@ public class HighwayBuilderTHM extends Module {
                     if (itemStack.getItem() == Items.OBSIDIAN) obsidianCount += itemStack.getCount();
                 }
 
-                if (obsidianCount >= minimumObsidian) {
+                if (obsidianCount >= targetObsidianCount) {
                     stopTimerEnabled = true;
                     stopTimer = 12;
                     return;
@@ -2099,7 +2315,11 @@ public class HighwayBuilderTHM extends Module {
                     // Mine ender chest
                     int slot = findAndMoveBestToolToHotbar(b, blockState, true);
                     if (slot == -1) {
-                        b.error("Cannot find pickaxe without silk touch to mine ender chests.");
+                        if (b.restockTask.isActiveMaterials() && b.restockTask.hasPendingPickaxes()) {
+                            completeAndReturnToAnchor(b);
+                        } else {
+                            b.error("Cannot find pickaxe without silk touch to mine ender chests.");
+                        }
                         return;
                     }
 
@@ -2163,6 +2383,16 @@ public class HighwayBuilderTHM extends Module {
                     BlockUtils.place(bp, Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, b.silentRebreakSwap.get());
                     timeout = 0;
                 }
+            }
+
+            private void completeAndReturnToAnchor(HighwayBuilderTHM b) {
+                if (returnAnchorSaved) {
+                    b.input.stop();
+                    b.mc.player.setPosition(returnX, returnY, returnZ);
+                    returnAnchorSaved = false;
+                }
+
+                b.completeRestockTaskAndContinue();
             }
         },
 
@@ -2285,55 +2515,79 @@ public class HighwayBuilderTHM extends Module {
             private static final MBlockPos pos = new MBlockPos();
             private static final ItemStack[] ITEMS = new ItemStack[27];
             private static final int INVALID_RESTOCK_RECOVERY_MAX_RETRIES = 1;
+            private static final int SOURCE_READY_MAX_RETRIES = 3;
             private int minimumSlots, stopTimer, delayTimer;
             private boolean breakContainer, indicateStopping;
             private int restockPickaxesStartCount;
             private Predicate<ItemStack> shulkerPredicate;
-
+            private Predicate<ItemStack> sourceItemPredicate;
+            private String sourceLabel;
+            private int sourceReadyRetries;
             // if this is ever not -1 when we expect it to be, things break a lot
             private int slot = -1;
 
             @Override
             protected void start(HighwayBuilderTHM b) {
-                if (b.lastState != this) {
-                    restockPickaxesStartCount = countItem(b, itemStack -> itemStack.isIn(ItemTags.PICKAXES));
-                    b.invalidRestockRecoveryRetries = 0;
-                    b.invalidRestockRecoveryPending = false;
+                restockPickaxesStartCount = b.restockTask.getPickaxeStartCount();
+
+                b.restockDebug("Restock.start(active=%s, pending=%s, blockadeReady=%s, sequence=%s, lastState=%s)",
+                    b.restockTask.activeSummary(),
+                    b.restockTask.pendingSummary(),
+                    b.restockTask.isBlockadeReady(),
+                    b.restockTask.isSequenceActive(),
+                    b.stateName(b.lastState)
+                );
+
+                if (b.lastState == PlaceShulkerBlockade) {
+                    b.restockTask.setBlockadeReady(true);
+                    b.restockDebug("Restock.start marked blockade ready after %s.", b.stateName(b.lastState));
                 }
 
                 slot = -1; // :ptsd:
-
+                sourceItemPredicate = null;
+                sourceLabel = "unknown";
+                sourceReadyRetries = 0;
                 // set the predicate to test for shulker boxes
                 if (shulkerPredicate == null) setShulkerPredicate(b);
 
                 if (b.restockTask.tasksInactive()) {
+                    if (b.restockTask.advanceToPendingTask()) {
+                        start(b);
+                        return;
+                    }
+
+                    b.restockTask.finishSequence();
                     b.setState(Forward);
                     return;
                 }
 
-                if (b.lastState != Center && b.lastState != ThrowOutTrash && b.lastState != PlaceShulkerBlockade && b.lastState != this) {
-                    b.setState(Center);
-                    return;
-                }
-                else if (b.lastState == Center) {
-                    b.setState(ThrowOutTrash);
-                    return;
+                if (!b.restockTask.isBlockadeReady()) {
+                    if (b.lastState != Center && b.lastState != ThrowOutTrash && b.lastState != PlaceShulkerBlockade && b.lastState != this) {
+                        b.restockDebug("Restock.start requesting Center before blockade placement.");
+                        b.setState(Center);
+                        return;
+                    }
+                    else if (b.lastState == Center) {
+                        b.restockDebug("Restock.start requesting ThrowOutTrash before blockade placement.");
+                        b.setState(ThrowOutTrash);
+                        return;
+                    }
+                    else if (b.lastState == ThrowOutTrash) {
+                        b.restockDebug("Restock.start requesting PlaceShulkerBlockade using configured type %s.", b.blockadeType.get());
+                        b.setState(PlaceShulkerBlockade);
+                        return;
+                    }
                 }
 
                 // firstly search your inventory for shulkers that have the items you need
                 if (slot == -1 && b.searchShulkers.get()) {
-                    slot = findAndMoveToHotbar(b, shulkerPredicate);
-
-                    if (slot != -1 && b.lastState != PlaceShulkerBlockade) {
-                        b.setState(PlaceShulkerBlockade);
+                    sourceItemPredicate = shulkerPredicate;
+                    sourceLabel = "shulker";
+                    slot = findAndMoveToHotbar(b, shulkerPredicate, false);
+                    if (slot == -1) {
+                        sourceItemPredicate = null;
+                        sourceLabel = "unknown";
                     }
-                }
-
-                if (slot == -1 && b.kitbotRestock.get()
-                    && (b.restockTask.materials || b.restockTask.pickaxes)
-                    && !hasShulkerInInventory(b)) {
-                    b.setState(KitbotOrder);
-                    return;
                 }
 
                 // next search your ender chest for raw items and shulkers containing items
@@ -2343,7 +2597,7 @@ public class HighwayBuilderTHM extends Module {
                     if (EChestMemory.isKnown()) {
                         for (ItemStack stack : EChestMemory.ITEMS) {
                             if (b.restockTask.materials && stack.getItem() instanceof BlockItem bi) {
-                                if (b.blocksToPlace.get().contains(bi.getBlock()) || (b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && bi == Items.ENDER_CHEST)) {
+                                if (b.blocksToPlace.get().contains(bi.getBlock()) || (b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && bi == Items.ENDER_CHEST && needsMoreRawEchests(b))) {
                                     stop = false;
                                     break;
                                 }
@@ -2364,19 +2618,42 @@ public class HighwayBuilderTHM extends Module {
                         }
                     }
 
-                    if (!stop) slot = findAndMoveToHotbar(b, itemStack -> itemStack.getItem() == Items.ENDER_CHEST);
+                    if (!stop) {
+                        sourceItemPredicate = itemStack -> itemStack.getItem() == Items.ENDER_CHEST;
+                        sourceLabel = "ender_chest";
+                        slot = findAndMoveToHotbar(b, sourceItemPredicate, false);
+                        if (slot == -1) {
+                            sourceItemPredicate = null;
+                            sourceLabel = "unknown";
+                        }
+                    }
+                }
+
+                if (slot == -1 && shouldMineEnderChestsForMaterials(b)) {
+                    b.restockDebug("Restock.start found no direct source; continuing into MineEnderChests.");
+                    b.setState(MineEnderChests);
+                    return;
+                }
+
+                if (slot == -1 && b.kitbotRestock.get()
+                    && (b.restockTask.materials || b.restockTask.pickaxes)
+                    && !hasShulkerInInventory(b)) {
+                    b.restockDebug("Restock.start falling back to KitbotOrder.");
+                    b.setState(KitbotOrder);
+                    return;
                 }
 
                 // by this point we have searched shulkers and your ender chest, and no more items could be found to pull from
                 if (slot == -1) {
                     boolean restockOccurred = (
-                        (b.restockTask.materials && (hasItem(b, stack -> stack.getItem() instanceof BlockItem bi && b.blocksToPlace.get().contains(bi.getBlock())) || b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && countItem(b, itemStack -> itemStack.getItem() == Items.ENDER_CHEST) > b.saveEchests.get())) ||
+                        (b.restockTask.materials && (b.hasForwardPlaceableBlock()
+                            || (b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && countItem(b, itemStack -> itemStack.getItem() == Items.ENDER_CHEST) > b.saveEchests.get()))) ||
                             (b.restockTask.pickaxes && countItem(b, itemStack -> itemStack.isIn(ItemTags.PICKAXES)) > restockPickaxesStartCount) ||
                             (b.restockTask.food && hasItem(b, itemStack -> itemStack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(itemStack.getItem())))
                     );
 
                     if (restockOccurred) {
-                        b.setState(ThrowOutTrash, Forward);
+                        b.completeRestockTaskAndContinue();
                     } else {
                         b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", "Unable to perform restock for '" + b.restockTask.item() + "'.");
                         b.error("Unable to perform restock for '" + b.restockTask.item() + "'.");
@@ -2413,12 +2690,30 @@ public class HighwayBuilderTHM extends Module {
 
                 HorizontalDirection dir = b.dir.diagonal ? b.dir.rotateLeft().rotateLeftSkipOne() : b.dir.opposite();
                 pos.set(b.mc.player).offset(dir);
+                b.restockDebug("Restock.start container position set to %s, slot=%d, minimumSlots=%d.",
+                    b.formatBlockPos(pos.getBlockPos()),
+                    slot,
+                    minimumSlots
+                );
+                if (slot >= 0) {
+                    ItemStack hotbarStack = b.mc.player.getInventory().getStack(slot);
+                    b.restockDebug("Restock.start selected source=%s, hotbar slot %d now holds %s, ready=%s.",
+                        sourceLabel,
+                        slot,
+                        hotbarStack.getItem(),
+                        isSelectedRestockSourceReady(b)
+                    );
+                }
 
                 // Quick fix for a specific issue - if your pickaxe breaks while mining echests, it will start a new
                 // task to restock pickaxes. However, there will be an echest placed down in the same position specified
                 // above, and if you have the search echest setting enabled it will assume it needs to pull items from
                 // your echest, even if you have a shulker full of pickaxes in your inventory.
                 breakContainer = b.mc.world.getBlockState(pos.getBlockPos()).getBlock() == Blocks.ENDER_CHEST;
+                b.restockDebug("Restock.start breakContainer=%s because block at restock pos is %s.",
+                    breakContainer,
+                    b.mc.world.getBlockState(pos.getBlockPos()).getBlock()
+                );
 
                 indicateStopping = false;
                 delayTimer = b.inventoryDelay.get();
@@ -2428,6 +2723,7 @@ public class HighwayBuilderTHM extends Module {
             protected void tick(HighwayBuilderTHM b) {
                 // this should only tick if there's a valid slot we can restock from
                 if (slot == -1) {
+                    b.restockDebug("Restock.tick hit invalid slot=-1.");
                     b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", "Invalid restocking action.");
                     b.error("Invalid restocking action.");
                     return;
@@ -2435,13 +2731,7 @@ public class HighwayBuilderTHM extends Module {
 
                 if (indicateStopping && !breakContainer) {
                     if (stopTimer > 0) stopTimer--;
-                    else {
-                        if (b.lastState == PlaceShulkerBlockade) {// && !(b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && countItem(b, stack -> stack.getItem() == Items.ENDER_CHEST) > b.saveEchests.get() && !hasItem(b, stack -> stack.getItem() == Items.OBSIDIAN))) {
-                            b.setState(MineShulkerBlockade);
-                        } else {
-                            b.setState(ThrowOutTrash, Forward);
-                        }
-                    }
+                    else b.completeRestockTaskAndContinue();
 
                     return;
                 }
@@ -2458,8 +2748,9 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 if (!b.mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
+                    b.restockDebug("Restock.tick cursor stack not empty: %s.", b.mc.player.currentScreenHandler.getCursorStack().getItem());
                     if (b.mc.currentScreen != null) b.closeHandledScreen();
-                    if (!b.mc.player.currentScreenHandler.getCursorStack().isEmpty()) InvUtils.dropHand();
+                    if (!b.mc.player.currentScreenHandler.getCursorStack().isEmpty() && !b.clearCursorStackToEmptySlot("Restock.tick")) InvUtils.dropHand();
                     delayTimer = b.inventoryDelay.get();
                     return;
                 }
@@ -2467,8 +2758,7 @@ public class HighwayBuilderTHM extends Module {
                 // calculate the amount of materials we have already pulled
                 int slotsPulled = 0;
                 if (b.restockTask.materials) {
-                    slotsPulled += countSlots(b, itemStack -> itemStack.getItem() instanceof BlockItem bi && b.blocksToPlace.get().contains(bi.getBlock()));
-                    if (b.blocksToPlace.get().contains(Blocks.OBSIDIAN)) slotsPulled += ((countItem(b, itemStack -> itemStack.getItem() == Items.ENDER_CHEST) - b.saveEchests.get()) * 8) / 64;
+                    slotsPulled += countSlots(b, b::isForwardPlaceableBlock);
                 }
                 if (b.restockTask.pickaxes) {
                     int pickaxesPulled = countItem(b, itemStack -> itemStack.isIn(ItemTags.PICKAXES)) - restockPickaxesStartCount;
@@ -2487,6 +2777,14 @@ public class HighwayBuilderTHM extends Module {
                 // Check block state
                 BlockPos blockPos = pos.getBlockPos();
                 BlockState blockState = b.mc.world.getBlockState(blockPos);
+                b.restockDebug("Restock.tick container probe pos=%s block=%s breakContainer=%s indicateStopping=%s slotsPulled=%d/%d",
+                    b.formatBlockPos(blockPos),
+                    blockState.getBlock(),
+                    breakContainer,
+                    indicateStopping,
+                    slotsPulled,
+                    minimumSlots
+                );
 
                 switch (blockState.getBlock()) {
                     // if we have placed a shulker box there should be items inside we want
@@ -2559,12 +2857,32 @@ public class HighwayBuilderTHM extends Module {
                             breakContainer = false;
 
                             // if we don't signal intent to stop, we loop back to the start and continue restocking
-                            if (indicateStopping) b.restockTask.complete();
+                            if (indicateStopping) b.completeRestockTaskAndContinue();
                             else start(b);
 
                             return;
                         }
 
+                        if (!isSelectedRestockSourceReady(b)) {
+                            sourceReadyRetries++;
+                            b.restockDebug("Restock.tick waiting for source item before container placement. source=%s hotbarSlot=%d currentItem=%s retry=%d/%d",
+                                sourceLabel,
+                                slot,
+                                slot >= 0 && slot < 9 ? b.mc.player.getInventory().getStack(slot).getItem() : Items.AIR,
+                                sourceReadyRetries,
+                                SOURCE_READY_MAX_RETRIES
+                            );
+
+                            if (sourceReadyRetries >= SOURCE_READY_MAX_RETRIES) {
+                                b.restockDebug("Restock.tick source was not ready after %d retries, restarting source selection.", SOURCE_READY_MAX_RETRIES);
+                                start(b);
+                            } else {
+                                delayTimer = Math.max(delayTimer, b.inventoryDelay.get());
+                            }
+                            return;
+                        }
+
+                        sourceReadyRetries = 0;
                         BlockUtils.place(blockPos, Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, true);
                     }
 
@@ -2588,13 +2906,20 @@ public class HighwayBuilderTHM extends Module {
                 }
             }
 
+            private boolean shouldMineEnderChestsForMaterials(HighwayBuilderTHM b) {
+                return b.restockTask.materials
+                    && b.mineEnderChests.get()
+                    && b.blocksToPlace.get().contains(Blocks.OBSIDIAN)
+                    && countItem(b, stack -> stack.getItem().equals(Items.ENDER_CHEST)) > b.saveEchests.get();
+            }
+
             private boolean restockItems(HighwayBuilderTHM b, Inventory inv) {
                 if (b.restockTask.materials) {
                     // take raw material
                     if (grabFromInventory(inv, itemStack -> itemStack.getItem() instanceof BlockItem bi && b.blocksToPlace.get().contains(bi.getBlock()))) return true;
 
                     // prefer taking raw material before echests
-                    if (b.blocksToPlace.get().contains(Blocks.OBSIDIAN)) {
+                    if (b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && needsMoreRawEchests(b)) {
                         if (grabFromInventory(inv, itemStack -> itemStack.getItem() == Items.ENDER_CHEST)) return true;
                     }
                 }
@@ -2630,7 +2955,7 @@ public class HighwayBuilderTHM extends Module {
 
                     for (ItemStack stack : ITEMS) {
                         if (b.restockTask.materials && stack.getItem() instanceof BlockItem bi) {
-                            if (b.blocksToPlace.get().contains(bi.getBlock()) || (b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && bi == Items.ENDER_CHEST)) return true;
+                            if (b.blocksToPlace.get().contains(bi.getBlock()) || (b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && bi == Items.ENDER_CHEST && needsMoreRawEchests(b))) return true;
                         }
                         if (b.restockTask.pickaxes && stack.isIn(ItemTags.PICKAXES)) return true;
                         if (b.restockTask.food && stack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(stack.getItem())) return true;
@@ -2640,11 +2965,33 @@ public class HighwayBuilderTHM extends Module {
                 };
             }
 
+            private boolean needsMoreRawEchests(HighwayBuilderTHM b) {
+                if (!b.blocksToPlace.get().contains(Blocks.OBSIDIAN)) return false;
+
+                int emptySlots = 0;
+                for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
+                    if (b.mc.player.getInventory().getStack(i).isEmpty()) emptySlots++;
+                }
+
+                int availableSlots = Math.max(emptySlots - b.minEmpty.get(), 0);
+                int rawEchestsNeeded = (availableSlots * 64) / 8;
+                int roundedStackTarget = rawEchestsNeeded <= 0 ? 0 : ((rawEchestsNeeded + 63) / 64) * 64;
+                int currentExtraEchests = Math.max(countItem(b, itemStack -> itemStack.getItem() == Items.ENDER_CHEST) - b.saveEchests.get(), 0);
+
+                return currentExtraEchests < roundedStackTarget;
+            }
+
             private boolean hasShulkerInInventory(HighwayBuilderTHM b) {
                 for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
                     if (shulkerPredicate.test(b.mc.player.getInventory().getStack(i))) return true;
                 }
                 return false;
+            }
+
+            private boolean isSelectedRestockSourceReady(HighwayBuilderTHM b) {
+                if (slot < 0 || slot >= 9) return false;
+                if (sourceItemPredicate == null) return false;
+                return sourceItemPredicate.test(b.mc.player.getInventory().getStack(slot));
             }
 
             private void handleContainerBlock(HighwayBuilderTHM b, BlockPos bp) {
@@ -2683,9 +3030,12 @@ public class HighwayBuilderTHM extends Module {
             @Override
             protected void tick(HighwayBuilderTHM b) {
                 int slot = findBlocksToPlacePrioritizeTrash(b);
-                if (slot == -1) return;
+                if (slot == -1) {
+                    b.restockDebug("PlaceShulkerBlockade.tick could not find a block slot for blockade placement.");
+                    return;
+                }
 
-                place(b, b.blockPosProvider.getBlockade(false, BlockadeType.Shulker), slot, Restock);
+                place(b, b.blockPosProvider.getBlockade(false, b.blockadeType.get()), slot, Restock);
             }
         },
 
@@ -2695,10 +3045,13 @@ public class HighwayBuilderTHM extends Module {
 
             @Override
             protected void start(HighwayBuilderTHM b) {
+                b.restockTask.setBlockadeReady(false);
+                b.restockDebug("MineShulkerBlockade.start(blockadeType=%s, lastState=%s)", b.blockadeType.get(), b.stateName(b.lastState));
                 stopTimerEnabled = false;
                 if (b.lastState == this) {
                     stopTimerEnabled = true;
                     stopTimer = 12;
+                    b.restockDebug("MineShulkerBlockade.start entering stop timer cleanup.");
                 }
             }
 
@@ -2716,7 +3069,8 @@ public class HighwayBuilderTHM extends Module {
                             b.invalidRestockRecoveryPending = false;
                             b.setState(Restock, Restock);
                         } else {
-                            b.setState(ThrowOutTrash, Forward);
+                            b.restockTask.finishSequence();
+                            b.setState(Forward);
                         }
                     }
                 }
@@ -2965,15 +3319,66 @@ public class HighwayBuilderTHM extends Module {
         protected void place(HighwayBuilderTHM b, MBPIterator it, int slot, State nextState) {
             boolean placed = false;
             boolean finishedPlacing = false;
+            int scannedTargets = 0;
+
+            if (b.restockDebugLog.get() && (this == PlaceShulkerBlockade || this == PlaceEChestBlockade)) {
+                b.restockDebug("%s tick using hotbar slot %d and blockade=%s.",
+                    b.stateName(this),
+                    slot,
+                    b.blockadeType.get()
+                );
+                b.logRestockBlockadeProbe(b.stateName(this), it);
+            }
 
             for (MBlockPos pos : it) {
-                if (b.count >= it.placementsPerTick(b)) return;
-                if (b.placeTimer > 0) return;
+                scannedTargets++;
+                if (b.count >= it.placementsPerTick(b)) {
+                    if (b.restockDebugLog.get() && (this == PlaceShulkerBlockade || this == PlaceEChestBlockade)) {
+                        b.restockDebug("%s paused: placement count limit reached (%d/%d).",
+                            b.stateName(this),
+                            b.count,
+                            it.placementsPerTick(b)
+                        );
+                    }
+                    return;
+                }
+                if (b.placeTimer > 0) {
+                    if (b.restockDebugLog.get() && (this == PlaceShulkerBlockade || this == PlaceEChestBlockade)) {
+                        b.restockDebug("%s paused: placeTimer=%d before attempting %s.",
+                            b.stateName(this),
+                            b.placeTimer,
+                            b.formatBlockPos(pos.getBlockPos())
+                        );
+                    }
+                    return;
+                }
 
-                if (pos.getBlockPos().getSquaredDistance(b.mc.player.getEyePos()) > b.placeRange.get() * b.placeRange.get()) continue;
+                if (pos.getBlockPos().getSquaredDistance(b.mc.player.getEyePos()) > b.placeRange.get() * b.placeRange.get()) {
+                    if (b.restockDebugLog.get() && (this == PlaceShulkerBlockade || this == PlaceEChestBlockade)) {
+                        b.restockDebug("%s skipped %s: out of range.",
+                            b.stateName(this),
+                            b.formatBlockPos(pos.getBlockPos())
+                        );
+                    }
+                    continue;
+                }
 
                 // CheckEntities & SwapBack are disabled for waiting for better accuracy and speed of the builder
-                if (BlockUtils.place(pos.getBlockPos(), Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, true)) {
+                boolean placedThisTick = BlockUtils.place(pos.getBlockPos(), Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, true);
+
+                if (b.restockDebugLog.get() && (this == PlaceShulkerBlockade || this == PlaceEChestBlockade)) {
+                    BlockState stateAfterAttempt = b.mc.world.getBlockState(pos.getBlockPos());
+                    b.restockDebug("%s attempt %s with slot %d -> success=%s, stateNow=%s, canPlaceNow=%s",
+                        b.stateName(this),
+                        b.formatBlockPos(pos.getBlockPos()),
+                        slot,
+                        placedThisTick,
+                        stateAfterAttempt.getBlock(),
+                        BlockUtils.canPlace(pos.getBlockPos())
+                    );
+                }
+
+                if (placedThisTick) {
                     placed = true;
                     b.blocksPlaced++;
                     b.placeTimer = b.placeDelay.get();
@@ -2983,6 +3388,16 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 if (!it.hasNext()) finishedPlacing = true;
+            }
+
+            if (b.restockDebugLog.get() && (this == PlaceShulkerBlockade || this == PlaceEChestBlockade)) {
+                b.restockDebug("%s completed tick: scanned=%d placedAny=%s finishedPlacing=%s next=%s",
+                    b.stateName(this),
+                    scannedTargets,
+                    placed,
+                    finishedPlacing,
+                    b.stateName(nextState)
+                );
             }
 
             if (finishedPlacing || !placed) b.setState(nextState);
@@ -2997,14 +3412,30 @@ public class HighwayBuilderTHM extends Module {
         }
 
         protected int findHotbarSlot(HighwayBuilderTHM b, boolean replaceTools) {
+            return findHotbarSlot(b, replaceTools, true);
+        }
+
+        protected int findHotbarSlot(HighwayBuilderTHM b, boolean replaceTools, boolean failHard) {
             int thrashSlot = -1;
             int slotsWithBlocks = 0;
             int slotWithLeastBlocks = -1;
             int slotWithLeastBlocksCount = Integer.MAX_VALUE;
+            int fallbackOccupiedSlot = -1;
 
             // Loop hotbar
             for (int i = 0; i < 9; i++) {
                 ItemStack itemStack = b.mc.player.getInventory().getStack(i);
+                if (b.isHotbarSlotReservedByManager(i)) {
+                    if (b.restockDebugLog.get()) {
+                        b.restockDebug("findHotbarSlot skipping reserved hotbar slot %d for HotbarManager item %s.",
+                            i,
+                            b.getReservedHotbarItem(i)
+                        );
+                    }
+                    continue;
+                }
+
+                if (fallbackOccupiedSlot == -1) fallbackOccupiedSlot = i;
 
                 // Return if the slot is empty
                 if (itemStack.isEmpty()) return i;
@@ -3032,8 +3463,16 @@ public class HighwayBuilderTHM extends Module {
             // If there are more than 1 slots with building blocks return the slot with the lowest amount of blocks
             if (slotsWithBlocks > 0) return slotWithLeastBlocks;
 
+            // As a final fallback, use any unreserved hotbar slot even if it is occupied.
+            if (fallbackOccupiedSlot != -1) {
+                if (b.restockDebugLog.get()) {
+                    b.restockDebug("findHotbarSlot using occupied unreserved hotbar slot %d as fallback.", fallbackOccupiedSlot);
+                }
+                return fallbackOccupiedSlot;
+            }
+
             // No space found in hotbar
-            b.error("No empty space in hotbar.");
+            if (failHard) b.error("No empty space in hotbar.");
             return -1;
         }
 
@@ -3056,28 +3495,54 @@ public class HighwayBuilderTHM extends Module {
         }
 
         protected int findAndMoveToHotbar(HighwayBuilderTHM b, Predicate<ItemStack> predicate) {
+            return findAndMoveToHotbar(b, predicate, true);
+        }
+
+        protected int findAndMoveToHotbar(HighwayBuilderTHM b, Predicate<ItemStack> predicate, boolean failHardNoHotbar) {
             // Check hotbar
             int slot = findSlot(b, predicate, true);
-            if (slot != -1) return slot;
-
-            // Find hotbar slot to move to
-            int hotbarSlot = findHotbarSlot(b, false);
-            if (hotbarSlot == -1) return -1;
+            if (slot != -1) {
+                if (b.restockDebugLog.get()) b.restockDebug("findAndMoveToHotbar found matching item already in hotbar slot %d.", slot);
+                return slot;
+            }
 
             // Check inventory
             slot = findSlot(b, predicate, false);
 
             // Return if no items were found
-            if (slot == -1) return -1;
+            if (slot == -1) {
+                if (b.restockDebugLog.get()) b.restockDebug("findAndMoveToHotbar failed: no matching inventory slot found.");
+                return -1;
+            }
 
-            // Move items from inventory to hotbar
+            ItemStack inventoryStack = b.mc.player.getInventory().getStack(slot);
+            int hotbarSlot = b.getPreferredManagedHotbarSlot(inventoryStack.getItem());
+            if (hotbarSlot != -1) {
+                if (b.restockDebugLog.get()) {
+                    b.restockDebug("findAndMoveToHotbar using HotbarManager slot %d for managed item %s.", hotbarSlot, inventoryStack.getItem());
+                }
+            } else {
+                hotbarSlot = findHotbarSlot(b, false, failHardNoHotbar);
+                if (hotbarSlot == -1) {
+                    if (b.restockDebugLog.get()) b.restockDebug("findAndMoveToHotbar failed: no hotbar slot available (failHard=%s).", failHardNoHotbar);
+                    return -1;
+                }
+            }
+
+            if (b.restockDebugLog.get()) {
+                b.restockDebug("findAndMoveToHotbar moving inventory slot %d into hotbar slot %d.", slot, hotbarSlot);
+            }
             InvUtils.move().from(slot).toHotbar(hotbarSlot);
-            InvUtils.dropHand();
+            if (!b.clearCursorStackToEmptySlot("findAndMoveToHotbar")) InvUtils.dropHand();
 
             return hotbarSlot;
         }
 
         protected int findAndMoveBestToolToHotbar(HighwayBuilderTHM b, BlockState blockState, boolean noSilkTouch) {
+            return findAndMoveBestToolToHotbar(b, blockState, noSilkTouch, true);
+        }
+
+        protected int findAndMoveBestToolToHotbar(HighwayBuilderTHM b, BlockState blockState, boolean noSilkTouch, boolean failHardNoHotbar) {
             // Check for creative
             if (b.mc.player.isCreative()) return b.mc.player.getInventory().getSelectedSlot();
 
@@ -3121,13 +3586,28 @@ public class HighwayBuilderTHM extends Module {
             // Check if the tool is already in hotbar
             if (bestSlot < 9) return bestSlot;
 
-            // Find hotbar slot to move to
-            int hotbarSlot = findHotbarSlot(b, true);
-            if (hotbarSlot == -1) return -1;
+            int hotbarSlot = b.getPreferredManagedHotbarSlot(bestStack.getItem());
+            if (hotbarSlot != -1) {
+                if (b.restockDebugLog.get()) {
+                    b.restockDebug("findAndMoveBestToolToHotbar using HotbarManager slot %d for managed item %s.",
+                        hotbarSlot,
+                        bestStack.getItem()
+                    );
+                }
+            } else {
+                hotbarSlot = findHotbarSlot(b, true, failHardNoHotbar);
+                if (hotbarSlot == -1) return -1;
+            }
 
-            // Move tool from inventory to hotbar
+            if (b.restockDebugLog.get()) {
+                b.restockDebug("findAndMoveBestToolToHotbar moving inventory slot %d into hotbar slot %d for %s.",
+                    bestSlot,
+                    hotbarSlot,
+                    blockState.getBlock()
+                );
+            }
             InvUtils.move().from(bestSlot).toHotbar(hotbarSlot);
-            InvUtils.dropHand();
+            if (!b.clearCursorStackToEmptySlot("findAndMoveBestToolToHotbar")) InvUtils.dropHand();
 
             return hotbarSlot;
         }
@@ -3137,18 +3617,23 @@ public class HighwayBuilderTHM extends Module {
             int slot = findAndMoveToHotbar(b, itemStack -> itemStack.getItem() instanceof BlockItem blockItem && b.blocksToPlace.get().contains(blockItem.getBlock()));
 
             if (slot == -1) {
-                if (b.mineEnderChests.get() && b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && countItem(b, stack -> stack.getItem().equals(Items.ENDER_CHEST)) > b.saveEchests.get()) {
-                    // can grind echests for obsidian
-                    b.setState(MineEnderChests);
+                if (b.restockDebugLog.get()) {
+                    b.restockDebug("findBlocksToPlace failed. searchEnderChest=%s searchShulkers=%s mineEnderChests=%s savedEchests=%d currentEchests=%d",
+                        b.searchEnderChest.get(),
+                        b.searchShulkers.get(),
+                        b.mineEnderChests.get(),
+                        b.saveEchests.get(),
+                        countItem(b, stack -> stack.getItem().equals(Items.ENDER_CHEST))
+                    );
                 }
-                else if (b.searchEnderChest.get() || b.searchShulkers.get()) {
-                    // start restocking if we're allowed
+                if (
+                    (b.searchEnderChest.get() || b.searchShulkers.get())
+                    || (b.mineEnderChests.get() && b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && countItem(b, stack -> stack.getItem().equals(Items.ENDER_CHEST)) > b.saveEchests.get())
+                ) {
                     b.restockTask.setMaterials();
-                }
-                else if (b.kitbotRestock.get()) {
+                } else if (b.kitbotRestock.get()) {
                     b.setState(KitbotOrder);
-                }
-                else {
+                } else {
                     b.notifyDesktop(b.notifyOutOfBlocks, "THM Highway Builder", "Out of blocks to place.");
                     b.error("Out of blocks to place.");
                 }
@@ -4262,38 +4747,65 @@ public class HighwayBuilderTHM extends Module {
         public boolean materials;
         public boolean pickaxes;
         public boolean food;
+        private boolean pendingMaterials;
+        private boolean pendingPickaxes;
+        private boolean pendingFood;
+        private boolean sequenceActive;
+        private boolean blockadeReady;
+        private int pickaxeStartCount;
         private final HighwayBuilderTHM b;
+
+        private enum Type {
+            Materials,
+            Pickaxes,
+            Food
+        }
 
         public RestockTask(HighwayBuilderTHM b) {
             this.b = b;
         }
 
         public void setMaterials() {
-            setTask(0);
+            setTask(Type.Materials);
         }
 
         public void setPickaxes() {
-            setTask(1);
+            setTask(Type.Pickaxes);
         }
 
         public void setFood() {
-            setTask(2);
+            setTask(Type.Food);
         }
 
-        private void setTask(@Range(from = 0, to = 2) int value) {
-            complete();
+        private void setTask(Type type) {
+            if (isActive(type)) return;
 
-            switch (value) {
-                case 0 -> materials = true;
-                case 1 -> pickaxes = true;
-                case 2 -> food = true;
+            if (!sequenceActive) {
+                startSequence(type);
+                return;
             }
 
-            setState(State.Restock);
-            b.info("Starting new restock task for " + item());
+            if (tasksInactive()) {
+                activate(type);
+                b.info("Continuing restock with " + item() + ".");
+                return;
+            }
+
+            if (enqueue(type)) {
+                b.info("Queued follow-up restock task for " + item(type) + ".");
+            }
         }
 
         public void complete() {
+            materials = false;
+            pickaxes = false;
+            food = false;
+            clearPending();
+            sequenceActive = false;
+            blockadeReady = false;
+        }
+
+        public void completeActive() {
             materials = false;
             pickaxes = false;
             food = false;
@@ -4303,11 +4815,172 @@ public class HighwayBuilderTHM extends Module {
             return !materials && !pickaxes && !food;
         }
 
+        public boolean isSequenceActive() {
+            return sequenceActive;
+        }
+
+        public boolean isActiveMaterials() {
+            return materials;
+        }
+
+        public boolean hasPendingPickaxes() {
+            return pendingPickaxes;
+        }
+
+        public int getPickaxeStartCount() {
+            return pickaxeStartCount;
+        }
+
+        public boolean isBlockadeReady() {
+            return blockadeReady;
+        }
+
+        public void setBlockadeReady(boolean value) {
+            blockadeReady = value;
+        }
+
+        public boolean advanceToPendingTask() {
+            Type next = nextPendingTask();
+            if (next == null) return false;
+
+            clearPending(next);
+            activate(next);
+            b.info("Continuing restock with " + item() + ".");
+            return true;
+        }
+
+        public boolean shouldTearDownRestockBlockade() {
+            return sequenceActive && blockadeReady && tasksInactive() && !hasPendingTasks();
+        }
+
+        public void finishSequence() {
+            completeActive();
+            clearPending();
+            sequenceActive = false;
+            blockadeReady = false;
+            pickaxeStartCount = 0;
+        }
+
         public String item() {
             if (materials) return "building materials";
             if (pickaxes) return "pickaxes";
             if (food) return "food";
             return "unknown";
+        }
+
+        public String activeSummary() {
+            List<String> active = new ArrayList<>();
+            if (materials) active.add("materials");
+            if (pickaxes) active.add("pickaxes");
+            if (food) active.add("food");
+            return active.isEmpty() ? "none" : String.join(",", active);
+        }
+
+        public String pendingSummary() {
+            List<String> pending = new ArrayList<>();
+            if (pendingMaterials) pending.add("materials");
+            if (pendingPickaxes) pending.add("pickaxes");
+            if (pendingFood) pending.add("food");
+            return pending.isEmpty() ? "none" : String.join(",", pending);
+        }
+
+        private void startSequence(Type type) {
+            finishSequence();
+            sequenceActive = true;
+            blockadeReady = false;
+            activate(type);
+            setState(State.Restock);
+            b.info("Starting new restock task for " + item());
+        }
+
+        private void activate(Type type) {
+            completeActive();
+            onTaskActivated(type);
+
+            switch (type) {
+                case Materials -> materials = true;
+                case Pickaxes -> pickaxes = true;
+                case Food -> food = true;
+            }
+        }
+
+        private boolean enqueue(Type type) {
+            return switch (type) {
+                case Materials -> {
+                    if (pendingMaterials) yield false;
+                    pendingMaterials = true;
+                    yield true;
+                }
+                case Pickaxes -> {
+                    if (pendingPickaxes) yield false;
+                    pendingPickaxes = true;
+                    yield true;
+                }
+                case Food -> {
+                    if (pendingFood) yield false;
+                    pendingFood = true;
+                    yield true;
+                }
+            };
+        }
+
+        private boolean isActive(Type type) {
+            return switch (type) {
+                case Materials -> materials;
+                case Pickaxes -> pickaxes;
+                case Food -> food;
+            };
+        }
+
+        private boolean hasPendingTasks() {
+            return pendingMaterials || pendingPickaxes || pendingFood;
+        }
+
+        private void onTaskActivated(Type type) {
+            b.invalidRestockRecoveryRetries = 0;
+            b.invalidRestockRecoveryPending = false;
+
+            if (type == Type.Pickaxes) {
+                pickaxeStartCount = countInventoryItems(itemStack -> itemStack.isIn(ItemTags.PICKAXES));
+            }
+        }
+
+        private Type nextPendingTask() {
+            if (pendingMaterials) return Type.Materials;
+            if (pendingPickaxes) return Type.Pickaxes;
+            if (pendingFood) return Type.Food;
+            return null;
+        }
+
+        private void clearPending() {
+            pendingMaterials = false;
+            pendingPickaxes = false;
+            pendingFood = false;
+        }
+
+        private void clearPending(Type type) {
+            switch (type) {
+                case Materials -> pendingMaterials = false;
+                case Pickaxes -> pendingPickaxes = false;
+                case Food -> pendingFood = false;
+            }
+        }
+
+        private String item(Type type) {
+            return switch (type) {
+                case Materials -> "building materials";
+                case Pickaxes -> "pickaxes";
+                case Food -> "food";
+            };
+        }
+
+        private int countInventoryItems(Predicate<ItemStack> predicate) {
+            int count = 0;
+            for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
+                ItemStack stack = b.mc.player.getInventory().getStack(i);
+                if (predicate.test(stack)) count += stack.getCount();
+            }
+            return count;
         }
     }
 }

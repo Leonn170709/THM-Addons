@@ -84,6 +84,16 @@ public class HotbarManager extends Module {
         ticksLeft = 0.0;
     }
 
+    public boolean managesSlot(int hotbarSlot) {
+        if (hotbarSlot < 0 || hotbarSlot >= itemSettings.size()) return false;
+        return itemSettings.get(hotbarSlot).get() != Items.AIR;
+    }
+
+    public Item getManagedItem(int hotbarSlot) {
+        if (hotbarSlot < 0 || hotbarSlot >= itemSettings.size()) return Items.AIR;
+        return itemSettings.get(hotbarSlot).get();
+    }
+
     @EventHandler
     private void onTick(TickEvent.Post event) {
         if (mc.player == null) return;

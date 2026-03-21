@@ -18,7 +18,6 @@ import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.movement.speed.Speed;
-import meteordevelopment.meteorclient.systems.modules.misc.AutoReconnect;
 import meteordevelopment.meteorclient.systems.modules.world.Timer;
 import meteordevelopment.meteorclient.utils.misc.HorizontalDirection;
 import meteordevelopment.orbit.EventHandler;
@@ -52,7 +51,6 @@ public class THMHwyMonitor extends Module {
     private static final int RESTART_BUILDER_DISABLE_GRACE_MS = 3000;
     private static final long MAIN_SERVER_RESUME_DELAY_MS = 6_000L;
     private static final int DISCONNECT_SCREEN_EVIDENCE_TIMEOUT_MS = 3000;
-    private static final long RECONNECT_AUTO_REARM_COOLDOWN_MS = 30_000L;
     private static final String RECONNECT_RESUME_LISTENER_KEY = "thm-hwymonitor-resume";
     private static final String RECONNECT_FAILURE_LISTENER_KEY = "thm-hwymonitor-failure";
     // IMPORTANT: Any caller that arms reconnect must store cycleId and ignore stale resume/failure callbacks.
@@ -166,7 +164,6 @@ public class THMHwyMonitor extends Module {
     private boolean postJoinModuleStateCaptured;
     private boolean timerWasActiveBeforePostJoin;
     private boolean speedWasActiveBeforePostJoin;
-    private boolean suppressAutoReconnectAfterHardFail;
     private boolean nonRestartHardFailArmed;
     private boolean unresolvedMainServerDisconnectCandidate;
     private boolean deferRestartScreenshotUntilReconnect;
@@ -194,13 +191,9 @@ public class THMHwyMonitor extends Module {
     private long delayedMainServerResumeAtMs;
     private String delayedMainServerResumeContext = "";
     private boolean restartRecoveryActive;
-    private boolean startupArmedThisInstance;
-    private boolean disconnectRecoveryPending;
     private volatile boolean restartBuilderDisableGraceScheduled;
     private long restartBuilderDisableGraceId;
     private long nextRestartBuilderDisableGraceId = 1L;
-    private boolean autoRearmLockedAfterHardFail;
-    private long nextAllowedAutoRearmAtMs;
     private boolean previousAutoReconnectToggleState;
 
     public THMHwyMonitor() {
@@ -330,15 +323,13 @@ public class THMHwyMonitor extends Module {
         trackedDirection = "";
         recoveryYawBeforeMove = Float.NaN;
         clearPendingAlignmentGateRequest();
-        resetReconnectAutomationState(false);
-        resetReconnectPolicyState(true);
+        resetReconnectAutomationState(true);
         registerReconnectServiceListeners();
         wasConnectedLastTick = isSuccessfullyConnectedToServer();
         if (reconnectAutomationEnabled()) refreshTimerSpeedSnapshotFromCurrentState("activate");
         previousAutoReconnectToggleState = autoReconnect.get();
         if (autoReconnect.get()) {
             armReconnectCycle("onActivate", false);
-            setReconnectIntentForStartupArm();
         }
     }
 
@@ -358,11 +349,8 @@ public class THMHwyMonitor extends Module {
         trackedDirection = "";
         recoveryYawBeforeMove = Float.NaN;
         clearPendingAlignmentGateRequest();
-        resetReconnectAutomationState(false);
         unregisterReconnectServiceListeners();
-        clearRestartRecoveryState("deactivate", true, true);
-        clearReconnectIntentFlags();
-        syncAutoReconnectToggleEdgeState();
+        clearRestartAutomationState("deactivate", true, true);
         wasConnectedLastTick = false;
     }
 
@@ -405,9 +393,6 @@ public class THMHwyMonitor extends Module {
 
         boolean restartEvidenceMatched = restartEvidenceGateCycleId == cycleId;
         if (!restartEvidenceMatched) {
-            clearRestartRecoveryState("resume-no-gate", false, false);
-            setReconnectIntentForStartupArm();
-            syncAutoReconnectToggleEdgeState();
             return;
         }
 
@@ -440,34 +425,16 @@ public class THMHwyMonitor extends Module {
             return;
         }
 
-        clearRestartRecoveryState("failure:" + reason.name(), false, false);
-
-        if (reason == ServerReconnectService.FailureReason.MISSING_CRACKED_PASSWORD
-            || reason == ServerReconnectService.FailureReason.DISCONNECTED_AFTER_CRACKED_LOGIN_ATTEMPT) {
-            autoRearmLockedAfterHardFail = true;
-            clearReconnectIntentFlags();
-            syncAutoReconnectToggleEdgeState();
-            warning("Reconnect hard-failed (%s). Auto re-arm is now locked until auto-reconnect is toggled OFF then ON.", reason.name());
-        } else {
-            setReconnectIntentForDisconnectRecovery();
-            warning("Reconnect failed (%s): %s", reason.name(), detail == null ? "" : detail);
-        }
+        clearRestartRecoveryState("failure:" + reason.name(), false, true);
+        warning("Reconnect failed (%s): %s", reason.name(), detail == null ? "" : detail);
     }
 
-    private void resetReconnectPolicyState(boolean clearLock) {
-        clearRestartRecoveryState("reset-policy", false, clearLock);
-        clearReconnectIntentFlags();
-        syncAutoReconnectToggleEdgeState();
-    }
-
-    private void clearRestartRecoveryState(String reason, boolean disarmService, boolean clearHardFailLock) {
+    private void clearRestartRecoveryState(String reason, boolean disarmService, boolean clearCycleBinding) {
         restartRecoveryActive = false;
         clearPendingRestartBuilderDisableGrace();
-        activeReconnectCycleId = 0L;
         restartEvidenceGateCycleId = 0L;
         clearDelayedMainServerResumeState();
-        nextAllowedAutoRearmAtMs = 0L;
-        if (clearHardFailLock) autoRearmLockedAfterHardFail = false;
+        if (clearCycleBinding) activeReconnectCycleId = 0L;
         if (disarmService) reconnectService().disarmReconnect("THMHwyMonitor clearRestartRecoveryState: " + reason);
     }
 
@@ -478,30 +445,10 @@ public class THMHwyMonitor extends Module {
         delayedMainServerResumeContext = "";
     }
 
-    private void setReconnectIntentForStartupArm() {
-        startupArmedThisInstance = true;
-        disconnectRecoveryPending = false;
-    }
-
-    private void setReconnectIntentForDisconnectRecovery() {
-        startupArmedThisInstance = false;
-        disconnectRecoveryPending = true;
-    }
-
-    private void clearReconnectIntentFlags() {
-        startupArmedThisInstance = false;
-        disconnectRecoveryPending = false;
-    }
-
-    private void syncAutoReconnectToggleEdgeState() {
-        previousAutoReconnectToggleState = autoReconnect.get();
-    }
-
     private long armReconnectCycle(String source, boolean markRestartEvidenceGate) {
         long cycleId = reconnectService().armReconnect(restartRejoinDelayMinutes.get(), "THMHwyMonitor:" + source);
         activeReconnectCycleId = cycleId;
         if (markRestartEvidenceGate) restartEvidenceGateCycleId = cycleId;
-        nextAllowedAutoRearmAtMs = System.currentTimeMillis() + RECONNECT_AUTO_REARM_COOLDOWN_MS;
         return cycleId;
     }
 
@@ -556,11 +503,6 @@ public class THMHwyMonitor extends Module {
         pendingDisconnectScreenEvidenceCheck = false;
         pendingDisconnectScreenEvidenceUntilMs = 0L;
         unresolvedMainServerDisconnectCandidate = false;
-
-        if (suppressAutoReconnectAfterHardFail) {
-            suppressAutoReconnectAfterHardFail = false;
-            info("Successful server reconnection detected. AutoReconnect hard-fail suppression cleared.");
-        }
     }
 
     @EventHandler
@@ -573,7 +515,7 @@ public class THMHwyMonitor extends Module {
         pendingDisconnectScreenEvidenceCheck = false;
         pendingDisconnectScreenEvidenceUntilMs = 0L;
 
-        boolean nonRestartHardFail = suppressAutoReconnectAfterHardFail || nonRestartHardFailArmed || consumeNonRestartHardFailSignal();
+        boolean nonRestartHardFail = nonRestartHardFailArmed || consumeNonRestartHardFailSignal();
         if (!nonRestartHardFail && isKnownNonRestartHardFailMessage(disconnectScreenReason)) {
             nonRestartHardFail = true;
         }
@@ -604,16 +546,12 @@ public class THMHwyMonitor extends Module {
     }
 
     private void handleDetectedNonRestartHardFail(String source) {
-        clearRestartRecoveryState("non-restart-hard-fail:" + source, true, false);
-        clearReconnectIntentFlags();
-        syncAutoReconnectToggleEdgeState();
-        disableAutoReconnectForNonRestartHardFail("HighwayBuilder signaled non-restart hard fail");
+        clearRestartAutomationState("non-restart-hard-fail:" + source, true, true);
         clearRestartDisconnectEvidence();
         unresolvedMainServerDisconnectCandidate = false;
         deferRestartScreenshotUntilReconnect = false;
         deferredRestartScreenshotAfterReconnectPending = false;
-        info("Non-restart hard fail detected (%s). Disabling THM Hwy Monitor to prevent restart-login automation on manual rejoin.", source);
-        if (isActive()) toggle();
+        warning("Non-restart hard fail detected (%s). Reconnect handling was disarmed, but THM Hwy Monitor remains enabled.", source);
     }
 
     private void handlePendingDisconnectScreenEvidenceCheck(boolean connectedNow) {
@@ -755,68 +693,15 @@ public class THMHwyMonitor extends Module {
                     cycleId = preflight.cycleId();
                     activeReconnectCycleId = cycleId;
                     restartEvidenceGateCycleId = cycleId;
-                    nextAllowedAutoRearmAtMs = System.currentTimeMillis() + RECONNECT_AUTO_REARM_COOLDOWN_MS;
                 } else {
                     cycleId = armReconnectCycle("restart-detection", true);
                 }
 
-                suppressAutoReconnectAfterHardFail = false;
                 info("Restart reconnect handling armed through ServerReconnectService (cycle %d).", cycleId);
             });
         }, "thm-restart-disable-grace");
         thread.setDaemon(true);
         thread.start();
-    }
-
-    private void configureMeteorAutoReconnect(boolean enableIfNeeded, boolean verboseLogging) {
-        AutoReconnect autoReconnect = Modules.get().get(AutoReconnect.class);
-        if (autoReconnect == null) {
-            if (verboseLogging) warning("Meteor AutoReconnect module not found.");
-            return;
-        }
-
-        double delaySeconds = restartRejoinDelayMinutes.get() * 60.0;
-        autoReconnect.time.set(delaySeconds);
-
-        if (enableIfNeeded && !autoReconnect.isActive()) {
-            autoReconnect.toggle();
-            if (verboseLogging) {
-                if (autoReconnect.isActive()) info("Enabled Meteor AutoReconnect.");
-                else warning("Failed to enable Meteor AutoReconnect.");
-            }
-        } else if (verboseLogging) {
-            info("Meteor AutoReconnect is already enabled.");
-        }
-    }
-
-    private void disableMeteorAutoReconnect(boolean verboseLogging) {
-        AutoReconnect autoReconnect = Modules.get().get(AutoReconnect.class);
-        if (autoReconnect == null) {
-            if (verboseLogging) warning("Meteor AutoReconnect module not found.");
-            return;
-        }
-
-        if (autoReconnect.isActive()) {
-            autoReconnect.toggle();
-            if (verboseLogging) {
-                if (!autoReconnect.isActive()) info("Disabled Meteor AutoReconnect.");
-                else warning("Failed to disable Meteor AutoReconnect.");
-            }
-        }
-    }
-
-    private void disableAutoReconnectForNonRestartHardFail(String reason) {
-        clearRestartAutomationState("non-restart hard fail", true, false);
-        clearReconnectIntentFlags();
-        syncAutoReconnectToggleEdgeState();
-        suppressAutoReconnectAfterHardFail = true;
-        warning("AutoReconnect disabled due to non-restart hard fail: %s", reason);
-    }
-
-    private void ensureMeteorAutoReconnectArmedForMonitorPolicy() {
-        if (!autoReconnect.get()) return;
-        if (suppressAutoReconnectAfterHardFail) return;
-        configureMeteorAutoReconnect(true, false);
     }
 
     private boolean autoRestartHandlingEnabled() {
@@ -835,15 +720,10 @@ public class THMHwyMonitor extends Module {
             || delayedMainServerResumeAtMs != 0L
             || restartRecoveryActive
             || restartBuilderDisableGraceScheduled
-            || startupArmedThisInstance
-            || disconnectRecoveryPending
-            || autoRearmLockedAfterHardFail
-            || nextAllowedAutoRearmAtMs != 0L
             || restartDisconnectEvidenceArmed
             || restartScreenshotScheduled
             || postJoinModuleStateCaptured
             || restartModuleStateSnapshotTaken
-            || suppressAutoReconnectAfterHardFail
             || nonRestartHardFailArmed
             || unresolvedMainServerDisconnectCandidate
             || deferRestartScreenshotUntilReconnect
@@ -852,13 +732,12 @@ public class THMHwyMonitor extends Module {
             || pendingDisconnectScreenEvidenceUntilMs != 0L;
     }
 
-    private void resetReconnectAutomationState(boolean disableAutoReconnect) {
+    private void resetReconnectAutomationState(boolean clearCycleBinding) {
         restartScreenshotScheduled = false;
         clearPendingRestartBuilderDisableGrace();
         postJoinModuleStateCaptured = false;
         timerWasActiveBeforePostJoin = false;
         speedWasActiveBeforePostJoin = false;
-        suppressAutoReconnectAfterHardFail = false;
         nonRestartHardFailArmed = false;
         unresolvedMainServerDisconnectCandidate = false;
         deferRestartScreenshotUntilReconnect = false;
@@ -866,29 +745,20 @@ public class THMHwyMonitor extends Module {
         pendingDisconnectScreenEvidenceCheck = false;
         pendingDisconnectScreenEvidenceUntilMs = 0L;
         restartModuleStateSnapshotTaken = false;
-        activeReconnectCycleId = 0L;
-        restartEvidenceGateCycleId = 0L;
-        clearDelayedMainServerResumeState();
-        restartRecoveryActive = false;
-        startupArmedThisInstance = false;
-        disconnectRecoveryPending = false;
-        nextAllowedAutoRearmAtMs = 0L;
         internalTimerSpeedToggleInProgress = false;
         clearRestartDisconnectEvidence();
         clearNonRestartHardFailSignal();
         clearRestartHardFailSignal();
-
-        if (disableAutoReconnect) disableMeteorAutoReconnect(false);
+        clearRestartRecoveryState("reset-automation", false, clearCycleBinding);
     }
 
-    private void clearRestartAutomationState(String reason, boolean disableAutoReconnect, boolean includeWarning) {
+    private void clearRestartAutomationState(String reason, boolean disarmService, boolean clearCycleBinding) {
         boolean hadState = hasRestartAutomationState();
-        clearRestartRecoveryState("automation-clear:" + reason, disableAutoReconnect, false);
-        resetReconnectAutomationState(false);
-        if (disableAutoReconnect) disableMeteorAutoReconnect(false);
+        resetReconnectAutomationState(clearCycleBinding);
+        if (disarmService) reconnectService().disarmReconnect("THMHwyMonitor clearRestartAutomationState: " + reason);
 
         if (!hadState) return;
-        if (includeWarning) warning("Restart automation state cleared: %s", reason);
+        info("Restart automation state cleared: %s", reason);
     }
 
     private void ensureHighwayBuilderDisabledForRestart(String source, boolean verbose) {
@@ -912,10 +782,7 @@ public class THMHwyMonitor extends Module {
             return;
         }
 
-        // Keep reconnect service armed if already active so disconnect-observed state from
-        // GameLeft is preserved for this restart-recovery cycle.
         clearRestartRecoveryState("restart-detection-prep", false, false);
-        setReconnectIntentForDisconnectRecovery();
         deferredRestartScreenshotAfterReconnectPending = false;
         scheduleRestartScreenshot(0, "restart-detected");
         scheduleRestartBuilderDisableAndArmAfterGrace();
@@ -926,37 +793,14 @@ public class THMHwyMonitor extends Module {
         if (currentToggle == previousAutoReconnectToggleState) return;
 
         if (currentToggle) {
-            autoRearmLockedAfterHardFail = false;
-            restartEvidenceGateCycleId = 0L;
-            nextAllowedAutoRearmAtMs = 0L;
             long cycleId = armReconnectCycle("toggle-on", false);
-            setReconnectIntentForStartupArm();
             info("Auto-reconnect enabled. Armed reconnect cycle %d.", cycleId);
         } else {
-            clearRestartRecoveryState("toggle-off", true, true);
-            resetReconnectAutomationState(false);
-            clearReconnectIntentFlags();
-            syncAutoReconnectToggleEdgeState();
+            clearRestartAutomationState("toggle-off", true, true);
             info("Auto-reconnect disabled. Reconnect cycle and policy state were cleared.");
         }
 
         previousAutoReconnectToggleState = currentToggle;
-    }
-
-    private void maybeAutoRearmReconnectService() {
-        if (!autoReconnect.get()) return;
-        if (autoRearmLockedAfterHardFail) return;
-        if (restartBuilderDisableGraceScheduled) return;
-        if (!disconnectRecoveryPending) return;
-        if (startupArmedThisInstance) return;
-        if (reconnectService().isReconnectArmed()) return;
-
-        long now = System.currentTimeMillis();
-        if (now < nextAllowedAutoRearmAtMs) return;
-
-        setReconnectIntentForDisconnectRecovery();
-        long cycleId = armReconnectCycle("auto-rearm", false);
-        info("Auto-reconnect service re-armed automatically (cycle %d).", cycleId);
     }
 
     @EventHandler
@@ -1165,27 +1009,15 @@ public class THMHwyMonitor extends Module {
 
     private void handleReconnectAutomationTickLane() {
         handleAutoReconnectToggleTransitions();
-        ensureMeteorAutoReconnectArmedForMonitorPolicy();
-        maybeAutoRearmReconnectService();
         maybeRunDelayedMainServerResumeFinalization();
 
         boolean connectedNow = isSuccessfullyConnectedToServer();
         handlePendingDisconnectScreenEvidenceCheck(connectedNow);
-        boolean connectedTransitionToConnected = connectedNow && !wasConnectedLastTick;
-        if (connectedNow != wasConnectedLastTick) {
-        }
-
-        if (connectedTransitionToConnected && suppressAutoReconnectAfterHardFail) {
-            suppressAutoReconnectAfterHardFail = false;
-            nonRestartHardFailArmed = false;
-            clearNonRestartHardFailSignal();
-            info("Successful server reconnection detected (tick transition). AutoReconnect suppression cleared.");
-        }
         wasConnectedLastTick = connectedNow;
 
         if (consumeNonRestartHardFailSignal()) {
             nonRestartHardFailArmed = true;
-            disableAutoReconnectForNonRestartHardFail("HighwayBuilder signaled non-restart hard fail");
+            handleDetectedNonRestartHardFail("signal");
         }
 
         if (reconnectService().isReconnectArmed() && restartRecoveryActive) {
@@ -1223,8 +1055,6 @@ public class THMHwyMonitor extends Module {
         );
         completePostRejoinSuccessFlow();
         clearRestartRecoveryState("resume-success-delayed", false, false);
-        setReconnectIntentForStartupArm();
-        syncAutoReconnectToggleEdgeState();
     }
 
     private float resolveRecoveryDirectionYawForInference(HighwayBuilderTHM builder) {
@@ -1717,7 +1547,7 @@ public class THMHwyMonitor extends Module {
         }
 
         maybeTakeDeferredRestartScreenshotAfterReconnect("main-server-ready");
-        clearRestartAutomationState("post-main-server finalization complete", false, false);
+        clearRestartRecoveryState("post-main-server finalization complete", false, false);
     }
 
     private void applyDirectionAndEnableHighwayBuilder(HorizontalDirection workingDirection) {
