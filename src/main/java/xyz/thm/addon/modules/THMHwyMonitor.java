@@ -58,6 +58,7 @@ public class THMHwyMonitor extends Module {
     private static final String RESTOCK_FAILURE_MARKER = "unable to perform restock";
     private static final String THM_HIGHWAYBUILDER_TAG_A = "thm highwaybuilder";
     private static final String THM_HIGHWAYBUILDER_TAG_B = "thm-highwaybuilder";
+    private static final String AUTO_LOG_TAG = "[autolog]";
     private static final long RESTART_EVIDENCE_TTL_MS = 20_000L;
     private static final AtomicBoolean NON_RESTART_HARD_FAIL_SIGNAL = new AtomicBoolean(false);
     private static final AtomicBoolean RESTART_HARD_FAIL_SIGNAL = new AtomicBoolean(false);
@@ -225,12 +226,17 @@ public class THMHwyMonitor extends Module {
         return lower.contains(THM_HIGHWAYBUILDER_TAG_A) || lower.contains(THM_HIGHWAYBUILDER_TAG_B);
     }
 
+    private static boolean isAutoLogTaggedMessage(String lower) {
+        return lower != null && lower.contains(AUTO_LOG_TAG);
+    }
+
     private static boolean isRestartHardFailMessage(String lower) {
         return isHighwayBuilderTaggedMessage(lower) && lower.contains(RESTART_DETECTED_MARKER);
     }
 
     private static boolean isKnownNonRestartHardFailMessage(String lower) {
-        return isHighwayBuilderTaggedMessage(lower) && lower.contains(RESTOCK_FAILURE_MARKER);
+        return isAutoLogTaggedMessage(lower)
+            || (isHighwayBuilderTaggedMessage(lower) && lower.contains(RESTOCK_FAILURE_MARKER));
     }
 
     private void armRestartDisconnectEvidence(String source) {
