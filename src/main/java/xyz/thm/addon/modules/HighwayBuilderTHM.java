@@ -286,7 +286,7 @@ public class HighwayBuilderTHM extends Module {
         .onChanged(value -> {
             if (!isActive()) return;
             if (value) syncThmHwyMonitorOnActivate();
-            else syncThmHwyMonitorOnDeactivate();
+            else disableThmHwyMonitorIfActive();
         })
         .visible(() -> isBaritoneInstalled())
         .build()
@@ -1198,6 +1198,10 @@ public class HighwayBuilderTHM extends Module {
     private void syncThmHwyMonitorOnDeactivate() {
         if (!manageThmHwyMonitor.get()) return;
 
+        disableThmHwyMonitorIfActive();
+    }
+
+    private void disableThmHwyMonitorIfActive() {
         THMHwyMonitor monitor = Modules.get().get(THMHwyMonitor.class);
         if (monitor == null || !monitor.isActive()) return;
 
