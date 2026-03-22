@@ -251,7 +251,7 @@ public class Speedmine extends Module {
     private int swapBackTicks = 0;
     private InventoryManager inventoryManager;
     public Speedmine() {
-        super(THMAddon.MAIN, "Speedmine", "Mines blocks faster");
+        super(THMAddon.PVP, "Speedmine", "Mines blocks faster");
     }
     public Setting<Double> getSpeedConfig() {
         return speedConfig;
