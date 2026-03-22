@@ -1274,6 +1274,7 @@ public class THMHwyMonitor extends Module {
 
         recoveryPausedModules.add(module);
         if (module instanceof HighwayBuilderTHM builder) {
+            builder.preserveCenterSpeedBaselineForMonitorRecovery("thm-monitor-pause");
             builder.disableForMonitorRealignPause();
         } else {
             module.disable();
