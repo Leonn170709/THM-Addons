@@ -5,6 +5,7 @@
 
 package xyz.thm.addon.modules;
 
+import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
@@ -51,6 +52,7 @@ import net.minecraft.client.input.Input;
 import net.minecraft.client.network.ClientPlayerInteractionManager;
 import net.minecraft.client.option.Perspective;
 import net.minecraft.client.option.GameOptions;
+import net.minecraft.client.util.ScreenshotRecorder;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.Entity;
@@ -83,12 +85,21 @@ import xyz.thm.addon.system.THMSystem;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.function.Supplier;
 import java.util.function.Predicate;
@@ -100,6 +111,11 @@ import static xyz.thm.addon.utils.password.*;
 @SuppressWarnings("ConstantConditions")
 public class HighwayBuilderTHM extends Module {
     private static final String RESTART_DETECTED_MARKER = "server restart detected";
+    private static final String CENTER_SPEED_SNAPSHOT_MAGIC = "HB_CENTER_SPEED_SNAPSHOT_V1";
+    private static final String STATS_CACHE_MAGIC = "HB_STATS_CACHE_V2";
+    private static final long STATS_CHECKPOINT_INTERVAL_MS = 10 * 60 * 1000L;
+    private static final int STATS_SCREENSHOT_DELAY_MS = 250;
+    private static final DateTimeFormatter STATS_SCREENSHOT_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss").withZone(ZoneId.systemDefault());
 
     private boolean suppressThmHwyMonitorSync;
 
@@ -599,6 +615,14 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+    private final Setting<Boolean> autoScreenshotStatistics = sgStatistics.add(new BoolSetting.Builder()
+        .name("auto-screenshot-statistics")
+        .description("Captures a proof screenshot shortly after Highway Builder prints its statistics.")
+        .defaultValue(true)
+        .visible(printStatistics::get)
+        .build()
+    );
+
     private final Setting<Boolean> restockDebugLog = sgStatistics.add(new BoolSetting.Builder()
         .name("restock-debug-log")
         .description("Prints detailed blockade and restock diagnostics, including placement probes and state transitions.")
@@ -719,6 +743,14 @@ public class HighwayBuilderTHM extends Module {
     private boolean centerSpeedSnapshotOwned;
     private boolean centerSpeedOverrideActive;
     private String centerSpeedLastReason = "";
+    private String activeStatsSessionId;
+    private StatsCacheSnapshot statsCacheSnapshot;
+    private boolean resumeStatsSessionOnNextActivate;
+    private long nextStatsCheckpointAtMs;
+    private boolean statsSessionDirty;
+    private volatile boolean statsProofScreenshotScheduled;
+    private volatile boolean statsDisconnectScreenshotScheduled;
+    private String lastPrintedStatsSessionId;
     private boolean previousPauseOnLostFocus;
     private boolean pauseOnLostFocusChanged;
     private Perspective previousPerspective;
@@ -752,8 +784,29 @@ public class HighwayBuilderTHM extends Module {
         boolean inLiquids,
         boolean whenSneaking,
         boolean vanillaOnGround,
-        boolean wasActive
+        boolean wasActive,
+        boolean timerWasActive
     ) {}
+
+    private record StatsCacheSnapshot(
+        String sessionId,
+        StatsSessionState state,
+        boolean resumeAllowed,
+        double startX,
+        double startY,
+        double startZ,
+        int blocksBroken,
+        int blocksPlaced,
+        boolean displayInfo,
+        long lastCheckpointAt,
+        long printedAt
+    ) {}
+
+    private enum StatsSessionState {
+        OPEN,
+        PENDING_PRINT,
+        CLOSED
+    }
 
     public HighwayBuilderTHM() {
         super(THMAddon.MAIN, "THM-HighwayBuilder", "Automatically builds highways according to THMs standards.");
@@ -946,6 +999,7 @@ public class HighwayBuilderTHM extends Module {
         if (!Utils.canUpdate()) return;
 
         if (!suppressThmHwyMonitorSync) syncThmHwyMonitorOnActivate();
+        loadStatsCacheFromDisk();
 
         previousPauseOnLostFocus = mc.options.pauseOnLostFocus;
         pauseOnLostFocusChanged = previousPauseOnLostFocus;
@@ -961,9 +1015,31 @@ public class HighwayBuilderTHM extends Module {
         state = State.Forward;
         setState(State.Center);
         lastBreakingPos.set(0, 0, 0);
-        start = mc.player.getEntityPos();
-        blocksBroken = blocksPlaced = 0;
-        displayInfo = true;
+        if (isPendingPrintStatsSession(statsCacheSnapshot)) {
+            if (tryPrintStatsToChat(
+                new Vec3d(statsCacheSnapshot.startX(), statsCacheSnapshot.startY(), statsCacheSnapshot.startZ()),
+                statsCacheSnapshot.blocksBroken(),
+                statsCacheSnapshot.blocksPlaced(),
+                "pending-print-on-activate"
+            )) {
+                scheduleStatsProofScreenshotIfEnabled(statsCacheSnapshot.sessionId(), "pending-print-on-activate");
+                if (!closeAndRetireStatsSession(statsCacheSnapshot, "pending-print-on-activate")) {
+                    warning("Failed to retire pending HighwayBuilder statistics safely; keeping session pending.");
+                    toggle();
+                    return;
+                }
+            } else {
+                warning("Unable to print pending HighwayBuilder statistics; keeping session pending.");
+                toggle();
+                return;
+            }
+        }
+
+        boolean resumedStatsSession = isResumableStatsSession(statsCacheSnapshot);
+        if (resumedStatsSession) restoreStatsFromCache(statsCacheSnapshot, resumeStatsSessionOnNextActivate ? "monitor-resume" : "cache-resume");
+        else startFreshStatsSession();
+
+        resumeStatsSessionOnNextActivate = false;
         sentLagMessage = false;
         suspended = false;
         statusLogTimer = 6000;
@@ -1022,6 +1098,8 @@ public class HighwayBuilderTHM extends Module {
     }
     @Override
     public void onDeactivate() {
+        boolean isMonitorPauseDeactivate = resumeStatsSessionOnNextActivate;
+
         if (!suppressThmHwyMonitorSync) syncThmHwyMonitorOnDeactivate();
 
         Modules.get().get(Timer.class).setOverride(Timer.OFF);
@@ -1032,8 +1110,11 @@ public class HighwayBuilderTHM extends Module {
             pauseOnLostFocusChanged = false;
         }
 
-        if (mc.player == null || mc.world == null) return;
-        if (!Utils.canUpdate()) return;
+        if (mc.player == null || mc.world == null || !Utils.canUpdate()) {
+            if (isMonitorPauseDeactivate) persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, "monitor-pause-deactivate-no-world");
+            else persistCurrentStatsSession(StatsSessionState.PENDING_PRINT, false, 0L, "deactivate-pending-print-no-world");
+            return;
+        }
 
         mc.player.input = prevInput;
         mc.options.useKey.setPressed(false);
@@ -1044,13 +1125,20 @@ public class HighwayBuilderTHM extends Module {
         if (Modules.get().get(HotbarManager.class).isActive() && hotbarmanager.get()) { Modules.get().get(HotbarManager.class).toggle();}
         if (Modules.get().get(AntiDrop.class).isActive() && antidrop.get()) { Modules.get().get(AntiDrop.class).toggle();}
 
-        if (displayInfo && printStatistics.get()) {
-            info("Distance: (highlight)%.0f", PlayerUtils.distanceTo(start));
-            info("Blocks broken: (highlight)%d", blocksBroken);
-            info("Blocks placed: (highlight)%d", blocksPlaced);
+        if (!isMonitorPauseDeactivate) {
+            if (tryPrintStatsToChat(start, blocksBroken, blocksPlaced, "deactivate")) {
+                scheduleStatsProofScreenshotIfEnabled(activeStatsSessionId, "printed-on-deactivate");
+                if (!closeAndRetireCurrentStatsSession("printed-on-deactivate")) {
+                    persistCurrentStatsSession(StatsSessionState.PENDING_PRINT, false, 0L, "deactivate-close-failed");
+                }
+            } else {
+                persistCurrentStatsSession(StatsSessionState.PENDING_PRINT, false, 0L, "deactivate-pending-print");
+            }
+        } else {
+            persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, "monitor-pause-deactivate");
         }
         //webhook send stats part
-        if (sendStatisticsWebhhok.get()) {
+        if (!isMonitorPauseDeactivate && sendStatisticsWebhhok.get()) {
             String webhookUrl = decryptWebhook(encryptedWebhook.get(), decryptkey.get());
             if (webhookUrl != null) {
                 double distance = PlayerUtils.distanceTo(start);
@@ -1067,7 +1155,7 @@ public class HighwayBuilderTHM extends Module {
                 }
             }
         }
-        if (sendStatisticsapi.get()) {
+        if (!isMonitorPauseDeactivate && sendStatisticsapi.get()) {
             //Somone please make this code better please
             double distance = PlayerUtils.distanceTo(start);
             if (distance > 1) {
@@ -1119,6 +1207,8 @@ public class HighwayBuilderTHM extends Module {
     public void disableForMonitorRealignPause() {
         if (!isActive()) return;
 
+        resumeStatsSessionOnNextActivate = true;
+        persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, "monitor-pause-request");
         suppressThmHwyMonitorSync = true;
         try {
             toggle();
@@ -1169,6 +1259,7 @@ public class HighwayBuilderTHM extends Module {
                 statusLogTimer = 0;
             }
         }
+        maybeCheckpointStatsSession();
 
         if (dir == null) {
             onActivate();
@@ -1249,6 +1340,7 @@ public class HighwayBuilderTHM extends Module {
     @EventHandler
     private void onGameLeave(GameLeftEvent event) {
         notifyDesktop(notifyDisconnect, "THM Highway Builder", "Disconnected while Highway Builder was active.");
+        persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, "game-leave");
         suspended = true;
         inventory = false;
     }
@@ -1575,9 +1667,20 @@ public class HighwayBuilderTHM extends Module {
 
     private boolean ensureCenterSpeedSnapshotCaptured(String reason) {
         if (centerSpeedSnapshotOwned && centerSpeedSnapshot != null) return true;
-        if (centerSpeedSnapshotOwned && centerSpeedSnapshot == null) clearCenterSpeedOwnership("owned-without-snapshot");
+        if (centerSpeedSnapshotOwned && centerSpeedSnapshot == null) clearCenterSpeedOwnership("owned-without-snapshot", true);
+        loadCenterSpeedSnapshotFromDisk();
+        if (centerSpeedSnapshotOwned && centerSpeedSnapshot != null) {
+            restockDebug("Center/Speed snapshot reused from cache (reason=%s, active=%s, timerActive=%s, lastReason=%s).",
+                reason,
+                centerSpeedSnapshot.wasActive(),
+                centerSpeedSnapshot.timerWasActive(),
+                centerSpeedLastReason
+            );
+            return true;
+        }
 
         Speed speed = Modules.get().get(Speed.class);
+        Timer timer = Modules.get().get(Timer.class);
         if (speed == null) {
             centerSpeedLastReason = "capture-missing-speed:" + reason;
             restockDebug("Center/Speed snapshot skipped: Speed module not found (reason=%s).", reason);
@@ -1593,12 +1696,14 @@ public class HighwayBuilderTHM extends Module {
             speed.inLiquids.get(),
             speed.whenSneaking.get(),
             speed.vanillaOnGround.get(),
-            speed.isActive()
+            speed.isActive(),
+            timer != null && timer.isActive()
         );
         centerSpeedSnapshotOwned = true;
         centerSpeedLastReason = "captured:" + reason;
+        persistCenterSpeedSnapshotToDisk();
         restockDebug(
-            "Center/Speed snapshot captured (reason=%s, active=%s, mode=%s, vanilla=%.2f, ncp=%.2f, limit=%s, timer=%.2f, liquids=%s, sneaking=%s, onGround=%s).",
+            "Center/Speed snapshot captured (reason=%s, active=%s, mode=%s, vanilla=%.2f, ncp=%.2f, limit=%s, timer=%.2f, liquids=%s, sneaking=%s, onGround=%s, timerActive=%s).",
             reason,
             centerSpeedSnapshot.wasActive(),
             centerSpeedSnapshot.speedModeName(),
@@ -1608,7 +1713,8 @@ public class HighwayBuilderTHM extends Module {
             centerSpeedSnapshot.timer(),
             centerSpeedSnapshot.inLiquids(),
             centerSpeedSnapshot.whenSneaking(),
-            centerSpeedSnapshot.vanillaOnGround()
+            centerSpeedSnapshot.vanillaOnGround(),
+            centerSpeedSnapshot.timerWasActive()
         );
         return true;
     }
@@ -1617,10 +1723,17 @@ public class HighwayBuilderTHM extends Module {
         if (!ensureCenterSpeedSnapshotCaptured(reason)) return;
 
         Speed speed = Modules.get().get(Speed.class);
+        Timer timer = Modules.get().get(Timer.class);
         if (speed == null) {
             centerSpeedLastReason = "override-missing-speed:" + reason;
             restockDebug("Center/Speed override skipped: Speed module not found (reason=%s).", reason);
             return;
+        }
+
+        if (timer == null) {
+            restockDebug("Center/Speed override continuing without Timer module (reason=%s).", reason);
+        } else if (timer.isActive()) {
+            timer.toggle();
         }
 
         speed.speedMode.set(SpeedModes.Vanilla);
@@ -1634,7 +1747,7 @@ public class HighwayBuilderTHM extends Module {
         centerSpeedOverrideActive = true;
         centerSpeedLastReason = "override-applied:" + reason;
         restockDebug(
-            "Center/Speed override applied (reason=%s, wasActive=%s, mode=%s, vanilla=%.2f, timer=%.2f, liquids=%s, sneaking=%s, onGround=%s).",
+            "Center/Speed override applied (reason=%s, wasActive=%s, mode=%s, vanilla=%.2f, timer=%.2f, liquids=%s, sneaking=%s, onGround=%s, timerForcedOff=%s).",
             reason,
             centerSpeedSnapshot != null && centerSpeedSnapshot.wasActive(),
             SpeedModes.Vanilla.name(),
@@ -1642,7 +1755,8 @@ public class HighwayBuilderTHM extends Module {
             1.0,
             false,
             false,
-            false
+            false,
+            centerSpeedSnapshot != null && centerSpeedSnapshot.timerWasActive()
         );
     }
 
@@ -1650,6 +1764,7 @@ public class HighwayBuilderTHM extends Module {
         if (!centerSpeedSnapshotOwned || centerSpeedSnapshot == null) return;
 
         Speed speed = Modules.get().get(Speed.class);
+        Timer timer = Modules.get().get(Timer.class);
         if (speed == null) {
             centerSpeedLastReason = "restore-missing-speed:" + reason;
             restockDebug("Center/Speed restore skipped: Speed module not found (reason=%s).", reason);
@@ -1670,8 +1785,28 @@ public class HighwayBuilderTHM extends Module {
             if (centerSpeedSnapshot.wasActive() && !active) speed.toggle();
             else if (!centerSpeedSnapshot.wasActive() && active) speed.toggle();
 
+            if (timer == null) {
+                restockDebug("Center/Speed restore continuing without Timer module (reason=%s).", reason);
+            } else {
+                boolean timerActive = timer.isActive();
+                if (centerSpeedSnapshot.timerWasActive() && !timerActive) timer.toggle();
+                else if (!centerSpeedSnapshot.timerWasActive() && timerActive) timer.toggle();
+            }
+
+            if (!isCenterSpeedStateRestored(speed, timer)) {
+                centerSpeedLastReason = "restore-deferred:" + reason;
+                persistCenterSpeedSnapshotToDisk();
+                restockDebug(
+                    "Center/Speed restore deferred (reason=%s, activeNow=%s, timerActiveNow=%s, cachePreserved=true).",
+                    reason,
+                    speed.isActive(),
+                    timer != null && timer.isActive()
+                );
+                return;
+            }
+
             restockDebug(
-                "Center/Speed override restored (reason=%s, active=%s, mode=%s, vanilla=%.2f, ncp=%.2f, limit=%s, timer=%.2f, liquids=%s, sneaking=%s, onGround=%s).",
+                "Center/Speed override restored (reason=%s, active=%s, mode=%s, vanilla=%.2f, ncp=%.2f, limit=%s, timer=%.2f, liquids=%s, sneaking=%s, onGround=%s, timerActive=%s).",
                 reason,
                 centerSpeedSnapshot.wasActive(),
                 centerSpeedSnapshot.speedModeName(),
@@ -1681,11 +1816,13 @@ public class HighwayBuilderTHM extends Module {
                 centerSpeedSnapshot.timer(),
                 centerSpeedSnapshot.inLiquids(),
                 centerSpeedSnapshot.whenSneaking(),
-                centerSpeedSnapshot.vanillaOnGround()
+                centerSpeedSnapshot.vanillaOnGround(),
+                centerSpeedSnapshot.timerWasActive()
             );
-            clearCenterSpeedOwnership("restored:" + reason);
+            clearCenterSpeedOwnership("restored:" + reason, true);
         } catch (Exception e) {
             centerSpeedLastReason = "restore-error:" + e.getClass().getSimpleName();
+            persistCenterSpeedSnapshotToDisk();
             restockDebug("Center/Speed restore failed (reason=%s, error=%s).", reason, e.getClass().getSimpleName());
         }
     }
@@ -1699,11 +1836,548 @@ public class HighwayBuilderTHM extends Module {
         }
     }
 
-    private void clearCenterSpeedOwnership(String reason) {
+    private boolean isCenterSpeedStateRestored(Speed speed, Timer timer) {
+        if (speed == null || centerSpeedSnapshot == null) return false;
+
+        boolean timerStateMatches = timer != null && timer.isActive() == centerSpeedSnapshot.timerWasActive();
+        return timerStateMatches
+            && speed.isActive() == centerSpeedSnapshot.wasActive()
+            && speed.speedMode.get() == parseCenterSpeedModeOrDefault(centerSpeedSnapshot.speedModeName())
+            && Double.compare(speed.vanillaSpeed.get(), centerSpeedSnapshot.vanillaSpeed()) == 0
+            && Double.compare(speed.ncpSpeed.get(), centerSpeedSnapshot.ncpSpeed()) == 0
+            && speed.ncpSpeedLimit.get() == centerSpeedSnapshot.ncpSpeedLimit()
+            && Double.compare(speed.timer.get(), centerSpeedSnapshot.timer()) == 0
+            && speed.inLiquids.get() == centerSpeedSnapshot.inLiquids()
+            && speed.whenSneaking.get() == centerSpeedSnapshot.whenSneaking()
+            && speed.vanillaOnGround.get() == centerSpeedSnapshot.vanillaOnGround();
+    }
+
+    private void persistCenterSpeedSnapshotToDisk() {
+        Path path = resolveCenterSpeedSnapshotPath();
+        if (!centerSpeedSnapshotOwned || centerSpeedSnapshot == null) {
+            clearCenterSpeedOwnership("persist-clear", true);
+            return;
+        }
+
+        try {
+            Path parent = path.getParent();
+            if (parent != null) Files.createDirectories(parent);
+
+            StringBuilder out = new StringBuilder(512);
+            out.append(CENTER_SPEED_SNAPSHOT_MAGIC).append('\n');
+            out.append("meta|speedMode|").append(centerSpeedSnapshot.speedModeName()).append('\n');
+            out.append("meta|vanillaSpeed|").append(centerSpeedSnapshot.vanillaSpeed()).append('\n');
+            out.append("meta|ncpSpeed|").append(centerSpeedSnapshot.ncpSpeed()).append('\n');
+            out.append("meta|ncpSpeedLimit|").append(centerSpeedSnapshot.ncpSpeedLimit()).append('\n');
+            out.append("meta|timer|").append(centerSpeedSnapshot.timer()).append('\n');
+            out.append("meta|inLiquids|").append(centerSpeedSnapshot.inLiquids()).append('\n');
+            out.append("meta|whenSneaking|").append(centerSpeedSnapshot.whenSneaking()).append('\n');
+            out.append("meta|vanillaOnGround|").append(centerSpeedSnapshot.vanillaOnGround()).append('\n');
+            out.append("meta|wasActive|").append(centerSpeedSnapshot.wasActive()).append('\n');
+            out.append("meta|timerWasActive|").append(centerSpeedSnapshot.timerWasActive()).append('\n');
+            out.append("meta|savedAt|").append(System.currentTimeMillis()).append('\n');
+
+            Path tmp = path.resolveSibling(path.getFileName().toString() + ".tmp");
+            Files.writeString(tmp, out.toString(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+            try {
+                Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException ignored) {
+                Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException e) {
+            centerSpeedLastReason = "persist-error";
+            restockDebug("Center/Speed snapshot persist failed (%s).", e.getMessage());
+        }
+    }
+
+    private void loadCenterSpeedSnapshotFromDisk() {
+        if (centerSpeedSnapshotOwned && centerSpeedSnapshot != null) return;
+
+        Path path = resolveCenterSpeedSnapshotPath();
+        if (!Files.exists(path)) return;
+
+        HashMap<String, String> meta = new HashMap<>();
+        try {
+            List<String> lines = Files.readAllLines(path);
+            if (lines.isEmpty() || !CENTER_SPEED_SNAPSHOT_MAGIC.equals(lines.get(0).trim())) {
+                clearCenterSpeedOwnership("load-invalid-magic", true);
+                return;
+            }
+
+            for (int i = 1; i < lines.size(); i++) {
+                String line = lines.get(i);
+                if (line == null) continue;
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("#")) continue;
+
+                String[] parts = line.split("\\|", 3);
+                if (parts.length < 3 || !"meta".equals(parts[0])) continue;
+                meta.put(parts[1], parts[2]);
+            }
+
+            centerSpeedSnapshot = new CenterSpeedSnapshot(
+                meta.getOrDefault("speedMode", SpeedModes.Vanilla.name()),
+                parseDoubleSafe(meta.get("vanillaSpeed"), CENTER_SPEED_OVERRIDE),
+                parseDoubleSafe(meta.get("ncpSpeed"), 1.6),
+                Boolean.parseBoolean(meta.getOrDefault("ncpSpeedLimit", "false")),
+                parseDoubleSafe(meta.get("timer"), 1.0),
+                Boolean.parseBoolean(meta.getOrDefault("inLiquids", "false")),
+                Boolean.parseBoolean(meta.getOrDefault("whenSneaking", "false")),
+                Boolean.parseBoolean(meta.getOrDefault("vanillaOnGround", "false")),
+                Boolean.parseBoolean(meta.getOrDefault("wasActive", "false")),
+                Boolean.parseBoolean(meta.getOrDefault("timerWasActive", "false"))
+            );
+            centerSpeedSnapshotOwned = true;
+            centerSpeedOverrideActive = false;
+            centerSpeedLastReason = "loaded-disk";
+            restockDebug("Center/Speed snapshot loaded from disk (active=%s, timerActive=%s).",
+                centerSpeedSnapshot.wasActive(),
+                centerSpeedSnapshot.timerWasActive()
+            );
+        } catch (Exception e) {
+            centerSpeedLastReason = "load-error";
+            clearCenterSpeedOwnership("load-error", true);
+        }
+    }
+
+    private Path resolveCenterSpeedSnapshotPath() {
+        return MeteorClient.FOLDER.toPath()
+            .resolve("thm")
+            .resolve("highwaybuilder-center-speed-snapshot.txt");
+    }
+
+    private double parseDoubleSafe(String value, double fallback) {
+        if (value == null || value.isBlank()) return fallback;
+        try {
+            return Double.parseDouble(value.trim());
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private void clearCenterSpeedOwnership(String reason, boolean deleteFile) {
         centerSpeedSnapshotOwned = false;
         centerSpeedSnapshot = null;
         centerSpeedOverrideActive = false;
         centerSpeedLastReason = reason == null ? "" : reason;
+        if (!deleteFile) return;
+
+        Path path = resolveCenterSpeedSnapshotPath();
+        try {
+            if (Files.exists(path)) Files.delete(path);
+        } catch (IOException e) {
+            restockDebug("Center/Speed snapshot delete failed (%s).", e.getMessage());
+        }
+    }
+
+    private void loadStatsCacheFromDisk() {
+        statsCacheSnapshot = null;
+
+        Path path = resolveStatsCachePath();
+        if (!Files.exists(path)) return;
+
+        HashMap<String, String> meta = new HashMap<>();
+        try {
+            List<String> lines = Files.readAllLines(path);
+            if (lines.isEmpty() || !STATS_CACHE_MAGIC.equals(lines.get(0).trim())) {
+                quarantineStatsCache(path, "invalid-magic", null);
+                return;
+            }
+
+            for (int i = 1; i < lines.size(); i++) {
+                String line = lines.get(i);
+                if (line == null) continue;
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("#")) continue;
+
+                String[] parts = line.split("\\|", 3);
+                if (parts.length < 3 || !"meta".equals(parts[0])) continue;
+                meta.put(parts[1], parts[2]);
+            }
+
+            StatsSessionState state = parseStatsSessionState(meta.get("state"));
+            if (state == null) {
+                quarantineStatsCache(path, "invalid-state", null);
+                return;
+            }
+
+            StatsCacheSnapshot snapshot = new StatsCacheSnapshot(
+                meta.getOrDefault("sessionId", ""),
+                state,
+                Boolean.parseBoolean(meta.getOrDefault("resumeAllowed", "false")),
+                parseDoubleSafe(meta.get("startX"), 0.0),
+                parseDoubleSafe(meta.get("startY"), 0.0),
+                parseDoubleSafe(meta.get("startZ"), 0.0),
+                parseIntSafe(meta.get("blocksBroken"), 0),
+                parseIntSafe(meta.get("blocksPlaced"), 0),
+                Boolean.parseBoolean(meta.getOrDefault("displayInfo", "true")),
+                parseLongSafe(meta.get("lastCheckpointAt"), 0L),
+                parseLongSafe(meta.get("printedAt"), 0L)
+            );
+
+            if (snapshot.sessionId().isBlank()) {
+                quarantineStatsCache(path, "missing-session-id", null);
+                return;
+            }
+            if (snapshot.state() == StatsSessionState.OPEN && !snapshot.resumeAllowed()) {
+                quarantineStatsCache(path, "open-not-resumable", null);
+                return;
+            }
+            if (snapshot.state() != StatsSessionState.OPEN && snapshot.resumeAllowed()) {
+                quarantineStatsCache(path, "non-open-resumable", null);
+                return;
+            }
+
+            statsCacheSnapshot = snapshot;
+            THMAddon.LOG.info("[highway-stats-cache] loaded reason=startup session={} state={} resumeAllowed={} broken={} placed={}",
+                shortSessionId(snapshot.sessionId()),
+                snapshot.state(),
+                snapshot.resumeAllowed(),
+                snapshot.blocksBroken(),
+                snapshot.blocksPlaced()
+            );
+
+            if (snapshot.state() == StatsSessionState.CLOSED) {
+                tryDeleteStatsCache("cleanup-closed-on-load");
+            }
+        } catch (Exception e) {
+            quarantineStatsCache(path, "load-error", e);
+        }
+    }
+
+    private boolean isResumableStatsSession(StatsCacheSnapshot snapshot) {
+        return snapshot != null && snapshot.state() == StatsSessionState.OPEN && snapshot.resumeAllowed();
+    }
+
+    private boolean isPendingPrintStatsSession(StatsCacheSnapshot snapshot) {
+        return snapshot != null && snapshot.state() == StatsSessionState.PENDING_PRINT;
+    }
+
+    private void startFreshStatsSession() {
+        start = mc.player.getEntityPos();
+        blocksBroken = 0;
+        blocksPlaced = 0;
+        displayInfo = true;
+        activeStatsSessionId = UUID.randomUUID().toString();
+        statsSessionDirty = false;
+        persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, "fresh-activate");
+    }
+
+    private void restoreStatsFromCache(StatsCacheSnapshot snapshot, String reason) {
+        if (snapshot == null) return;
+
+        start = new Vec3d(snapshot.startX(), snapshot.startY(), snapshot.startZ());
+        blocksBroken = snapshot.blocksBroken();
+        blocksPlaced = snapshot.blocksPlaced();
+        displayInfo = snapshot.displayInfo();
+        activeStatsSessionId = snapshot.sessionId();
+        lastPrintedStatsSessionId = null;
+        statsSessionDirty = false;
+        nextStatsCheckpointAtMs = snapshot.lastCheckpointAt() <= 0 ? System.currentTimeMillis() + STATS_CHECKPOINT_INTERVAL_MS : snapshot.lastCheckpointAt() + STATS_CHECKPOINT_INTERVAL_MS;
+
+        THMAddon.LOG.info("[highway-stats-cache] restored reason={} session={} state={} broken={} placed={} start=({}, {}, {})",
+            reason,
+            shortSessionId(snapshot.sessionId()),
+            snapshot.state(),
+            blocksBroken,
+            blocksPlaced,
+            snapshot.startX(),
+            snapshot.startY(),
+            snapshot.startZ()
+        );
+    }
+
+    private void maybeCheckpointStatsSession() {
+        if (activeStatsSessionId == null || start == null) return;
+        if (System.currentTimeMillis() < nextStatsCheckpointAtMs) return;
+        persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, statsSessionDirty ? "interval-checkpoint-dirty" : "interval-checkpoint");
+    }
+
+    private boolean persistCurrentStatsSession(StatsSessionState state, boolean resumeAllowed, long printedAt, String reason) {
+        if (start == null) return false;
+        return persistStatsCacheSnapshot(createCurrentStatsSnapshot(state, resumeAllowed, printedAt), reason);
+    }
+
+    private StatsCacheSnapshot createCurrentStatsSnapshot(StatsSessionState state, boolean resumeAllowed, long printedAt) {
+        long checkpointAt = System.currentTimeMillis();
+        if (activeStatsSessionId == null || activeStatsSessionId.isBlank()) activeStatsSessionId = UUID.randomUUID().toString();
+
+        return new StatsCacheSnapshot(
+            activeStatsSessionId,
+            state,
+            resumeAllowed,
+            start.x,
+            start.y,
+            start.z,
+            blocksBroken,
+            blocksPlaced,
+            displayInfo,
+            checkpointAt,
+            printedAt
+        );
+    }
+
+    private boolean persistStatsCacheSnapshot(StatsCacheSnapshot snapshot, String reason) {
+        if (snapshot == null) return false;
+
+        Path path = resolveStatsCachePath();
+        try {
+            Path parent = path.getParent();
+            if (parent != null) Files.createDirectories(parent);
+
+            StringBuilder out = new StringBuilder(768);
+            out.append(STATS_CACHE_MAGIC).append('\n');
+            out.append("meta|sessionId|").append(snapshot.sessionId()).append('\n');
+            out.append("meta|state|").append(snapshot.state().name()).append('\n');
+            out.append("meta|resumeAllowed|").append(snapshot.resumeAllowed()).append('\n');
+            out.append("meta|startX|").append(snapshot.startX()).append('\n');
+            out.append("meta|startY|").append(snapshot.startY()).append('\n');
+            out.append("meta|startZ|").append(snapshot.startZ()).append('\n');
+            out.append("meta|blocksBroken|").append(snapshot.blocksBroken()).append('\n');
+            out.append("meta|blocksPlaced|").append(snapshot.blocksPlaced()).append('\n');
+            out.append("meta|displayInfo|").append(snapshot.displayInfo()).append('\n');
+            out.append("meta|lastCheckpointAt|").append(snapshot.lastCheckpointAt()).append('\n');
+            out.append("meta|printedAt|").append(snapshot.printedAt()).append('\n');
+
+            Path tmp = path.resolveSibling(path.getFileName().toString() + ".tmp");
+            Files.writeString(tmp, out.toString(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+            try {
+                Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException ignored) {
+                Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING);
+            }
+
+            StatsCacheSnapshot previous = statsCacheSnapshot;
+            statsCacheSnapshot = snapshot;
+            nextStatsCheckpointAtMs = snapshot.lastCheckpointAt() + STATS_CHECKPOINT_INTERVAL_MS;
+            statsSessionDirty = false;
+
+            THMAddon.LOG.info("[highway-stats-cache] saved reason={} session={} {}->{} resumeAllowed={} broken={} placed={} printedAt={}",
+                reason,
+                shortSessionId(snapshot.sessionId()),
+                previous == null ? "null" : previous.state(),
+                snapshot.state(),
+                snapshot.resumeAllowed(),
+                snapshot.blocksBroken(),
+                snapshot.blocksPlaced(),
+                snapshot.printedAt()
+            );
+            return true;
+        } catch (IOException e) {
+            THMAddon.LOG.warn("[highway-stats-cache] save failed reason={} session={} message={}",
+                reason,
+                shortSessionId(snapshot.sessionId()),
+                e.getMessage()
+            );
+            return false;
+        }
+    }
+
+    private boolean closeAndRetireCurrentStatsSession(String reason) {
+        if (activeStatsSessionId == null || start == null) return true;
+        return closeAndRetireStatsSession(createCurrentStatsSnapshot(StatsSessionState.CLOSED, false, System.currentTimeMillis()), reason);
+    }
+
+    private boolean closeAndRetireStatsSession(StatsCacheSnapshot snapshot, String reason) {
+        if (snapshot == null) return true;
+
+        StatsCacheSnapshot closedSnapshot = new StatsCacheSnapshot(
+            snapshot.sessionId(),
+            StatsSessionState.CLOSED,
+            false,
+            snapshot.startX(),
+            snapshot.startY(),
+            snapshot.startZ(),
+            snapshot.blocksBroken(),
+            snapshot.blocksPlaced(),
+            snapshot.displayInfo(),
+            System.currentTimeMillis(),
+            System.currentTimeMillis()
+        );
+
+        if (!persistStatsCacheSnapshot(closedSnapshot, reason + "-close")) {
+            THMAddon.LOG.warn("[highway-stats-cache] failed to close session={} reason={}; leaving active file untouched.",
+                shortSessionId(snapshot.sessionId()),
+                reason
+            );
+            return false;
+        }
+
+        tryDeleteStatsCache(reason + "-delete");
+        activeStatsSessionId = null;
+        nextStatsCheckpointAtMs = 0L;
+        statsSessionDirty = false;
+        return true;
+    }
+
+    private boolean tryDeleteStatsCache(String reason) {
+        Path path = resolveStatsCachePath();
+        try {
+            if (Files.exists(path)) Files.delete(path);
+            statsCacheSnapshot = null;
+            THMAddon.LOG.info("[highway-stats-cache] deleted reason={}", reason);
+            return true;
+        } catch (IOException e) {
+            THMAddon.LOG.warn("[highway-stats-cache] delete failed reason={} message={}", reason, e.getMessage());
+            return false;
+        }
+    }
+
+    private void scheduleStatsProofScreenshot(String sessionId, String reason) {
+        if (statsProofScreenshotScheduled) return;
+        statsProofScreenshotScheduled = true;
+
+        Thread thread = new Thread(() -> {
+            try {
+                Thread.sleep(STATS_SCREENSHOT_DELAY_MS);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+
+            mc.execute(() -> {
+                try {
+                    takeStatsProofScreenshot(sessionId, reason);
+                } finally {
+                    statsProofScreenshotScheduled = false;
+                }
+            });
+        }, "thm-highwaybuilder-stats-screenshot");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private void scheduleStatsProofScreenshotIfEnabled(String sessionId, String reason) {
+        if (!autoScreenshotStatistics.get()) return;
+        if (sessionId == null || sessionId.isBlank()) return;
+        scheduleStatsProofScreenshot(sessionId, reason);
+    }
+
+    private void scheduleDisconnectScreenStatsScreenshotIfEnabled(String sessionId, String reason) {
+        if (!autoScreenshotStatistics.get()) return;
+        if (sessionId == null || sessionId.isBlank()) return;
+        if (statsDisconnectScreenshotScheduled) return;
+        statsDisconnectScreenshotScheduled = true;
+
+        Thread thread = new Thread(() -> {
+            try {
+                Thread.sleep(STATS_SCREENSHOT_DELAY_MS);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+
+            mc.execute(() -> {
+                try {
+                    takeStatsProofScreenshot(sessionId, reason);
+                } finally {
+                    statsDisconnectScreenshotScheduled = false;
+                }
+            });
+        }, "thm-highwaybuilder-disconnect-stats-screenshot");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private void takeStatsProofScreenshot(String sessionId, String reason) {
+        if (mc == null || mc.getFramebuffer() == null) return;
+
+        String fileName = buildStatsScreenshotFileName(sessionId);
+        ScreenshotRecorder.saveScreenshot(mc.runDirectory, fileName, mc.getFramebuffer(), 0, message -> info(message.getString()));
+        THMAddon.LOG.info("[highway-stats-cache] screenshot saved reason={} session={} file={}",
+            reason,
+            shortSessionId(sessionId),
+            fileName
+        );
+    }
+
+    private String buildStatsScreenshotFileName(String sessionId) {
+        return "thm-highwaybuilder-session-" + STATS_SCREENSHOT_TIME_FORMAT.format(Instant.now()) + "-" + shortSessionId(sessionId) + ".png";
+    }
+
+    private String shortSessionId(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) return "unknown";
+        return sessionId.length() <= 8 ? sessionId : sessionId.substring(0, 8);
+    }
+
+    private void quarantineStatsCache(Path path, String reason, Exception error) {
+        statsCacheSnapshot = null;
+
+        Path quarantine = path.resolveSibling(path.getFileName() + ".corrupt-" + System.currentTimeMillis());
+        try {
+            Files.move(path, quarantine, StandardCopyOption.REPLACE_EXISTING);
+            THMAddon.LOG.warn("[highway-stats-cache] quarantined reason={} path={} quarantine={} error={}",
+                reason,
+                path,
+                quarantine,
+                error == null ? "none" : error.getClass().getSimpleName()
+            );
+        } catch (IOException moveError) {
+            try {
+                Files.deleteIfExists(path);
+            } catch (IOException ignored) {
+                // ignore delete fallback failure after quarantine failure
+            }
+            THMAddon.LOG.warn("[highway-stats-cache] quarantine failed reason={} path={} message={} error={}",
+                reason,
+                path,
+                moveError.getMessage(),
+                error == null ? "none" : error.getClass().getSimpleName()
+            );
+        }
+    }
+
+    private Path resolveStatsCachePath() {
+        return MeteorClient.FOLDER.toPath()
+            .resolve("thm")
+            .resolve("highwaybuilder-stats-cache.txt");
+    }
+
+    private StatsSessionState parseStatsSessionState(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return StatsSessionState.valueOf(value.trim());
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
+    }
+
+    private boolean tryPrintStatsToChat(Vec3d startPos, int broken, int placed, String reason) {
+        if (startPos == null || mc.player == null || mc.world == null) return false;
+        if (!Utils.canUpdate()) return false;
+
+        info("Distance: (highlight)%.0f", PlayerUtils.distanceTo(startPos));
+        info("Blocks broken: (highlight)%d", broken);
+        info("Blocks placed: (highlight)%d", placed);
+        lastPrintedStatsSessionId = activeStatsSessionId;
+        THMAddon.LOG.info("[highway-stats-cache] printed reason={} broken={} placed={}", reason, broken, placed);
+        return true;
+    }
+
+    private void recordBlockBroken() {
+        blocksBroken++;
+        statsSessionDirty = true;
+    }
+
+    private void recordBlockPlaced() {
+        blocksPlaced++;
+        statsSessionDirty = true;
+    }
+
+    private int parseIntSafe(String value, int fallback) {
+        if (value == null || value.isBlank()) return fallback;
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private long parseLongSafe(String value, long fallback) {
+        if (value == null || value.isBlank()) return fallback;
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
     }
 
     private String formatBlockPos(BlockPos pos) {
@@ -1833,7 +2507,13 @@ public class HighwayBuilderTHM extends Module {
             .append("\n")
             .append(getStatsText());
 
+        String screenshotSessionId = lastPrintedStatsSessionId;
+        if ((screenshotSessionId == null || screenshotSessionId.isBlank()) && activeStatsSessionId != null && !activeStatsSessionId.isBlank()) {
+            screenshotSessionId = activeStatsSessionId;
+        }
+
         mc.getNetworkHandler().getConnection().disconnect(text);
+        scheduleDisconnectScreenStatsScreenshotIfEnabled(screenshotSessionId, "disconnect-screen-stats");
     }
 
     public MutableText getStatsText() {
@@ -1863,7 +2543,7 @@ public class HighwayBuilderTHM extends Module {
             }
             else if (mc.world.getBlockState(normalMining.blockPos).getBlock() != normalMining.block) {
                 normalMining = null;
-                blocksBroken++;
+                recordBlockBroken();
                 count++;
                 DoubleMineBlock.rateLimited = false;
             }
@@ -1881,7 +2561,7 @@ public class HighwayBuilderTHM extends Module {
             }
             else if (mc.world.getBlockState(packetMining.blockPos).getBlock() != packetMining.block) {
                 packetMining = null;
-                blocksBroken++;
+                recordBlockBroken();
                 count++;
             }
         }
@@ -3644,7 +4324,7 @@ public class HighwayBuilderTHM extends Module {
 
                     if (!b.lastBreakingPos.equals(pos)) {
                         b.lastBreakingPos.set(pos);
-                        b.blocksBroken++;
+                        b.recordBlockBroken();
                     }
 
                     b.count++;
@@ -3752,7 +4432,7 @@ public class HighwayBuilderTHM extends Module {
 
                 if (placedThisTick) {
                     placed = true;
-                    b.blocksPlaced++;
+                    b.recordBlockPlaced();
                     b.placeTimer = b.placeDelay.get();
 
                     b.count++;
