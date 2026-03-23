@@ -1148,6 +1148,7 @@ public class HighwayBuilderTHM extends Module {
     @Override
     public void onDeactivate() {
         boolean isMonitorPauseDeactivate = resumeStatsSessionOnNextActivate;
+        boolean statsRetiredThisDeactivate = false;
         clearKitbotOrderTracking(isMonitorPauseDeactivate ? "monitor-pause-deactivate" : "module-deactivate");
 
         if (!suppressThmHwyMonitorSync) syncThmHwyMonitorOnDeactivate();
@@ -1189,6 +1190,8 @@ public class HighwayBuilderTHM extends Module {
                 scheduleStatsProofScreenshotIfEnabled(activeStatsSessionId, "printed-on-deactivate");
                 if (!closeAndRetireCurrentStatsSession("printed-on-deactivate")) {
                     persistCurrentStatsSession(StatsSessionState.PENDING_PRINT, false, 0L, "deactivate-close-failed");
+                } else {
+                    statsRetiredThisDeactivate = true;
                 }
             } else {
                 persistCurrentStatsSession(StatsSessionState.PENDING_PRINT, false, 0L, "deactivate-pending-print");
@@ -1197,7 +1200,7 @@ public class HighwayBuilderTHM extends Module {
             persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, "monitor-pause-deactivate");
         }
         //webhook send stats part
-        if (!isMonitorPauseDeactivate && sendStatisticsWebhhok.get()) {
+        if (!isMonitorPauseDeactivate && statsRetiredThisDeactivate && sendStatisticsWebhhok.get()) {
             String webhookUrl = decryptWebhook(encryptedWebhook.get(), decryptkey.get());
             if (webhookUrl != null) {
                 double distance = PlayerUtils.distanceTo(start);
@@ -1214,7 +1217,7 @@ public class HighwayBuilderTHM extends Module {
                 }
             }
         }
-        if (!isMonitorPauseDeactivate && sendStatisticsapi.get()) {
+        if (!isMonitorPauseDeactivate && statsRetiredThisDeactivate && sendStatisticsapi.get()) {
             //Somone please make this code better please
             double distance = PlayerUtils.distanceTo(start);
             if (distance > 1) {
@@ -1241,6 +1244,9 @@ public class HighwayBuilderTHM extends Module {
             } else {
                 warning("Statistics NOT sent to Api! Distance too small: (highlight)%.0f", distance);
             }
+        }
+        if (!isMonitorPauseDeactivate && !statsRetiredThisDeactivate && (sendStatisticsWebhhok.get() || sendStatisticsapi.get())) {
+            warning("External statistics were not sent because the HighwayBuilder session was not safely retired.");
         }
 
     }
