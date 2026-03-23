@@ -749,6 +749,8 @@ public class HighwayBuilderTHM extends Module {
     private boolean centerSpeedSnapshotOwned;
     private boolean centerSpeedOverrideActive;
     private boolean centerSpeedMonitorRecoveryOwned;
+    private boolean centerSpeedRestorePending;
+    private int centerSpeedRestoreRetryTicks;
     private String centerSpeedLastReason = "";
     private String activeStatsSessionId;
     private StatsCacheSnapshot statsCacheSnapshot;
@@ -773,6 +775,7 @@ public class HighwayBuilderTHM extends Module {
     private List<Pattern> signBreakPatterns = Collections.emptyList();
     private static final String KITBOT_NAME = "KitBot1";
     private static final double CENTER_SPEED_OVERRIDE = 0.6;
+    private static final int CENTER_SPEED_RESTORE_RETRY_WINDOW_TICKS = 60;
     private static final String[] ADVERTISEMENT_SIGN_REGEXES = {
         "invite",
         "discord\\.gg",
@@ -1322,6 +1325,7 @@ public class HighwayBuilderTHM extends Module {
         }
 
         executionPausedByServerState = false;
+        tickDeferredCenterSpeedRestore();
 
         if (statuslog.get()) {
             statusLogTimer++;
@@ -1902,17 +1906,22 @@ public class HighwayBuilderTHM extends Module {
             }
 
             if (!isCenterSpeedStateRestored(speed, timer)) {
+                centerSpeedRestorePending = true;
+                if (centerSpeedRestoreRetryTicks <= 0) centerSpeedRestoreRetryTicks = CENTER_SPEED_RESTORE_RETRY_WINDOW_TICKS;
                 centerSpeedLastReason = "restore-deferred:" + reason;
                 restockDebug(
-                    "Center/Speed restore deferred (reason=%s, activeNow=%s, timerActiveNow=%s, monitorOwned=%s, cachePreserved=true).",
+                    "Center/Speed restore deferred (reason=%s, activeNow=%s, timerActiveNow=%s, monitorOwned=%s, cachePreserved=true, retryTicks=%d).",
                     reason,
                     speed.isActive(),
                     timer != null && timer.isActive(),
-                    centerSpeedMonitorRecoveryOwned
+                    centerSpeedMonitorRecoveryOwned,
+                    centerSpeedRestoreRetryTicks
                 );
                 return;
             }
 
+            centerSpeedRestorePending = false;
+            centerSpeedRestoreRetryTicks = 0;
             restockDebug(
                 "Center/Speed baseline restored (reason=%s, active=%s, mode=%s, vanilla=%.2f, ncp=%.2f, limit=%s, timer=%.2f, liquids=%s, sneaking=%s, onGround=%s, timerActive=%s, monitorOwned=%s).",
                 reason,
@@ -1930,9 +1939,43 @@ public class HighwayBuilderTHM extends Module {
             );
             clearCenterSpeedOwnership("restored:" + reason);
         } catch (Exception e) {
+            centerSpeedRestorePending = true;
+            if (centerSpeedRestoreRetryTicks <= 0) centerSpeedRestoreRetryTicks = CENTER_SPEED_RESTORE_RETRY_WINDOW_TICKS;
             centerSpeedLastReason = "restore-error:" + e.getClass().getSimpleName();
             restockDebug("Center/Speed restore failed (reason=%s, error=%s).", reason, e.getClass().getSimpleName());
         }
+    }
+
+    private void tickDeferredCenterSpeedRestore() {
+        if (!centerSpeedRestorePending || !centerSpeedSnapshotOwned || centerSpeedSnapshot == null) return;
+
+        Speed speed = Modules.get().get(Speed.class);
+        Timer timer = Modules.get().get(Timer.class);
+        if (speed == null) {
+            centerSpeedRestorePending = false;
+            centerSpeedRestoreRetryTicks = 0;
+            centerSpeedLastReason = "restore-abandoned-missing-speed";
+            restockDebug("Center/Speed deferred restore abandoned: Speed module missing.");
+            return;
+        }
+
+        if (isCenterSpeedStateRestored(speed, timer)) {
+            centerSpeedRestorePending = false;
+            centerSpeedRestoreRetryTicks = 0;
+            restockDebug("Center/Speed deferred restore verified complete (lastReason=%s).", centerSpeedLastReason);
+            clearCenterSpeedOwnership("restored:deferred-verify");
+            return;
+        }
+
+        if (centerSpeedRestoreRetryTicks <= 0) {
+            centerSpeedRestorePending = false;
+            centerSpeedLastReason = "restore-abandoned-timeout";
+            restockDebug("Center/Speed deferred restore timed out; preserving snapshot ownership for manual inspection.");
+            return;
+        }
+
+        centerSpeedRestoreRetryTicks--;
+        restoreCenterSpeedIfOwned("deferred-tick");
     }
 
     private SpeedModes parseCenterSpeedModeOrDefault(String value) {
@@ -1976,6 +2019,8 @@ public class HighwayBuilderTHM extends Module {
         centerSpeedSnapshot = null;
         centerSpeedOverrideActive = false;
         centerSpeedMonitorRecoveryOwned = false;
+        centerSpeedRestorePending = false;
+        centerSpeedRestoreRetryTicks = 0;
         centerSpeedLastReason = reason == null ? "" : reason;
     }
 
