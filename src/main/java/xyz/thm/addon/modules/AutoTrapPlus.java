@@ -20,6 +20,7 @@ import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.ShapeContext;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
@@ -406,9 +407,16 @@ public class AutoTrapPlus extends Module {
 
     private void add(BlockPos blockPos) {
         if (placePositions.contains(blockPos)) return;
-        if (!BlockUtils.canPlace(blockPos)) return;
+        if (!canQueue(blockPos)) return;
         if (isOutOfRange(blockPos)) return;
         placePositions.add(blockPos);
+    }
+
+    private boolean canQueue(BlockPos pos) {
+        // Allow positions without neighbors; supports/air-place handle those later.
+        if (!mc.world.getBlockState(pos).isReplaceable()) return false;
+        // Ignore entity collisions here so straddling targets still queue correctly.
+        return mc.world.canPlace(Blocks.OBSIDIAN.getDefaultState(), pos, ShapeContext.absent());
     }
 
     private void markPlaced(BlockPos pos) {

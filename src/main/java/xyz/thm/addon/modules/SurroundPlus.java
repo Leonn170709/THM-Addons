@@ -41,7 +41,7 @@ public class SurroundPlus extends Module {
             .build()
     );
 
-    private final Setting<Boolean> packet = sgGeneral.add(new BoolSetting.Builder()
+    private final Setting<Boolean> packet = sgPlace.add(new BoolSetting.Builder()
             .name("packet")
             .description("Only place via packets (no client-side block set).")
             .defaultValue(false)
