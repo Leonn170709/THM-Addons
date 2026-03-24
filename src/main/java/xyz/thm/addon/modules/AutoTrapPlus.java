@@ -9,9 +9,11 @@ import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.friends.Friends;
 import meteordevelopment.meteorclient.utils.entity.EntityUtils;
 import meteordevelopment.meteorclient.utils.entity.SortPriority;
 import meteordevelopment.meteorclient.utils.entity.TargetUtils;
+import meteordevelopment.meteorclient.utils.entity.fakeplayer.FakePlayerEntity;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.PlayerUtils;
@@ -21,12 +23,14 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.ShapeContext;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.GameMode;
 import net.minecraft.world.RaycastContext;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.PacketPlaceUtils;
@@ -239,39 +243,75 @@ public class AutoTrapPlus extends Module {
         FindItemResult block = InvUtils.findInHotbar(itemStack -> blocks.get().contains(Block.getBlockFromItem(itemStack.getItem())));
         if (!block.found()) return;
 
-        // Find target
-        if (TargetUtils.isBadTarget(target, targetRange.get())) {
-            target = TargetUtils.getPlayerTarget(targetRange.get(), priority.get());
-            if (TargetUtils.isBadTarget(target, targetRange.get())) return;
+        // Find targets
+        List<PlayerEntity> targets = getTargets();
+        if (targets.isEmpty()) {
+            target = null;
+            placePositions.clear();
+            return;
         }
 
-        // Compute gap position (feet-level) to skip and to avoid filling with supports
-        gapPos = null;
-        if (gapSide.get() != GapSide.None) {
-            int feetY = (int) Math.floor(target.getBoundingBox().minY);
-            int gapY = heightMode.get() == HeightMode.Eye ? (int) Math.floor(target.getEyeY()) : feetY;
-            BlockPos center = BlockPos.ofFloored(target.getX(), gapY, target.getZ());
-            gapPos = center.add(getGapOffsetX(target), 0, getGapOffsetZ(target));
-        }
+        boolean doPlace = timer >= delay.get();
+        int placedCount = 0;
+        LinkedHashSet<BlockPos> allPositions = new LinkedHashSet<>();
 
-        // Compute trap positions
-        fillPlaceArray(target);
+        for (PlayerEntity t : targets) {
+            target = t;
 
-        // Place following sorted order (column-wise, respecting build order)
-        if (timer >= delay.get() && !placePositions.isEmpty()) {
-            int placedCount = 0;
-            for (BlockPos placePos : placePositions) {
-                if (placedCount >= blocksPerTick.get()) break;
-                if (tryPlaceWithSupports(placePos, block)) {
-                    placedAny = true;
-                    placedCount++;
+            // Compute gap position (feet-level) to skip and to avoid filling with supports
+            gapPos = null;
+            if (gapSide.get() != GapSide.None) {
+                int feetY = (int) Math.floor(t.getBoundingBox().minY);
+                int gapY = heightMode.get() == HeightMode.Eye ? (int) Math.floor(t.getEyeY()) : feetY;
+                BlockPos center = BlockPos.ofFloored(t.getX(), gapY, t.getZ());
+                gapPos = center.add(getGapOffsetX(t), 0, getGapOffsetZ(t));
+            }
+
+            // Compute trap positions for this target
+            fillPlaceArray(t);
+            allPositions.addAll(placePositions);
+
+            // Place following sorted order (column-wise, respecting build order)
+            if (doPlace && !placePositions.isEmpty()) {
+                for (BlockPos placePos : placePositions) {
+                    if (placedCount >= blocksPerTick.get()) break;
+                    if (tryPlaceWithSupports(placePos, block)) {
+                        placedAny = true;
+                        placedCount++;
+                    }
                 }
             }
-            timer = 0;
-        } else timer++;
+
+            if (placedCount >= blocksPerTick.get()) break;
+        }
+
+        placePositions.clear();
+        placePositions.addAll(allPositions);
+
+        if (doPlace) timer = 0;
+        else timer++;
+    }
+
+    private List<PlayerEntity> getTargets() {
+        List<Entity> entities = new ArrayList<>();
+        TargetUtils.getList(entities, entity -> {
+            if (!(entity instanceof PlayerEntity player) || entity == mc.player) return false;
+            if (player.isSpectator() || !player.isAlive()) return false;
+            if (!PlayerUtils.isWithin(entity, targetRange.get())) return false;
+            if (!Friends.get().shouldAttack(player)) return false;
+            if (entity instanceof FakePlayerEntity fakePlayer) return !fakePlayer.noHit;
+            return EntityUtils.getGameMode(player) == GameMode.SURVIVAL;
+        }, priority.get(), Integer.MAX_VALUE);
+
+        List<PlayerEntity> players = new ArrayList<>(entities.size());
+        for (Entity entity : entities) {
+            if (entity instanceof PlayerEntity p) players.add(p);
+        }
+        return players;
     }
 
     private boolean tryPlaceWithSupports(BlockPos placePos, FindItemResult block) {
+        if (isBlockedByOtherEntity(placePos, target)) return false;
         // Direct place if allowed
         if (airPlace.get()) {
             if (placeBlock(placePos, block)) {
@@ -313,6 +353,7 @@ public class AutoTrapPlus extends Module {
             BlockPos s = placePos.offset(d);
             // don't block the feet gap column
             if (gapPos != null && s.down().equals(gapPos)) continue;
+            if (isBlockedByOtherEntity(s, target)) continue;
             if (BlockUtils.getPlaceSide(s) == null) continue;
             if (placeBlock(s, block)) {
                 markPlaced(s);
@@ -416,7 +457,18 @@ public class AutoTrapPlus extends Module {
         // Allow positions without neighbors; supports/air-place handle those later.
         if (!mc.world.getBlockState(pos).isReplaceable()) return false;
         // Ignore entity collisions here so straddling targets still queue correctly.
-        return mc.world.canPlace(Blocks.OBSIDIAN.getDefaultState(), pos, ShapeContext.absent());
+        if (!mc.world.canPlace(Blocks.OBSIDIAN.getDefaultState(), pos, ShapeContext.absent())) return false;
+        return !isBlockedByOtherEntity(pos, target);
+    }
+
+    private boolean isBlockedByOtherEntity(BlockPos pos, PlayerEntity allowed) {
+        Box checkBox = Box.from(Vec3d.ofCenter(pos));
+        List<net.minecraft.entity.Entity> entities = mc.world.getOtherEntities(null, checkBox);
+        for (net.minecraft.entity.Entity entity : entities) {
+            if (entity == allowed) continue;
+            if (!entity.isSpectator() && entity.isAlive()) return true;
+        }
+        return false;
     }
 
     private void markPlaced(BlockPos pos) {

@@ -239,8 +239,32 @@ public class SurroundPlus extends Module {
         boolean allPlaced = true;
 
         for (BlockPos pos : surroundPositions) {
+            if (!mc.world.getBlockState(pos).isReplaceable()) continue;
+
+            // If support is enabled and the target block has no placeable side,
+            // try to place a support block underneath first.
+            if (support.get() && BlockUtils.getPlaceSide(pos) == null) {
+                BlockPos supportPos = pos.down();
+                if (mc.world.getBlockState(supportPos).isReplaceable()) {
+                    if (placed >= blocksPerTick.get()) {
+                        allPlaced = false;
+                        break;
+                    }
+                    if (placeBlock(supportPos, block)) {
+                        placed++;
+                    } else {
+                        allPlaced = false;
+                        continue;
+                    }
+                } else {
+                    // Can't place support and no side to place on: skip for now.
+                    allPlaced = false;
+                    continue;
+                }
+            }
+
             if (!BlockUtils.canPlace(pos)) {
-                if (mc.world.getBlockState(pos).isReplaceable()) allPlaced = false;
+                allPlaced = false;
                 continue;
             }
 
