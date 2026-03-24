@@ -13,11 +13,18 @@ import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.BlockItem;
+import net.minecraft.item.Item;
+import net.minecraft.sound.SoundCategory;
+import net.minecraft.sound.SoundEvents;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.utils.PacketPlaceUtils;
 
 import java.util.*;
 
@@ -31,6 +38,13 @@ public class SurroundPlus extends Module {
             .name("blocks")
             .description("Blocks to use for surrounding.")
             .defaultValue(Blocks.OBSIDIAN, Blocks.CRYING_OBSIDIAN, Blocks.NETHERITE_BLOCK)
+            .build()
+    );
+
+    private final Setting<Boolean> packet = sgPlace.add(new BoolSetting.Builder()
+            .name("packet")
+            .description("Only place via packets (no client-side block set).")
+            .defaultValue(false)
             .build()
     );
 
@@ -62,8 +76,15 @@ public class SurroundPlus extends Module {
     private final Setting<Boolean> rotate = sgPlace.add(new BoolSetting.Builder()
             .name("rotate")
             .description("Sends rotation packets when placing (Crucial for GrimAC).")
-            .defaultValue(true)
+            .defaultValue(false)
             .build()
+    );
+
+    private final Setting<Boolean> extend = sgPlace.add(new BoolSetting.Builder()
+        .name("extend")
+        .description("Encases your feet even when standing on the edge of blocks.")
+        .defaultValue(true)
+        .build()
     );
 
     private final Setting<Boolean> strict = sgPlace.add(new BoolSetting.Builder()
@@ -126,7 +147,7 @@ public class SurroundPlus extends Module {
     private final Setting<SettingColor> sideColor = sgRender.add(new ColorSetting.Builder()
             .name("side-color")
             .description("The side color.")
-            .defaultValue(new SettingColor(145, 60, 255, 75))
+            .defaultValue(new SettingColor(THMAddon.THMSideColor.r, THMAddon.THMSideColor.g, THMAddon.THMSideColor.b, THMAddon.THMSideColor.a))
             .visible(render::get)
             .build()
     );
@@ -134,7 +155,7 @@ public class SurroundPlus extends Module {
     private final Setting<SettingColor> lineColor = sgRender.add(new ColorSetting.Builder()
             .name("line-color")
             .description("The line color.")
-            .defaultValue(new SettingColor(145, 60, 255, 255))
+            .defaultValue(new SettingColor(THMAddon.THMColor.r, THMAddon.THMColor.g, THMAddon.THMColor.b, THMAddon.THMColor.a))
             .visible(render::get)
             .build()
     );
@@ -199,29 +220,51 @@ public class SurroundPlus extends Module {
         if (!block.found()) return;
 
         int placed = 0;
-        BlockPos playerPos = mc.player.getBlockPos();
+        Set<BlockPos> insideBlocks = getInsideBlocks();
 
         if (support.get()) {
-            BlockPos underPos = playerPos.down();
-            if (mc.world.getBlockState(underPos).isReplaceable()) {
-                if (placeBlock(underPos, block)) {
-                    placed++;
+            for (BlockPos inside : insideBlocks) {
+                BlockPos underPos = inside.down();
+                if (mc.world.getBlockState(underPos).isReplaceable()) {
+                    if (placed >= blocksPerTick.get()) break;
+                    if (placeBlock(underPos, block)) {
+                        placed++;
+                    }
                 }
             }
         }
 
-        BlockPos[] offsets = {
-                playerPos.north(),
-                playerPos.south(),
-                playerPos.east(),
-                playerPos.west()
-        };
+        Set<BlockPos> surroundPositions = getSurroundPositions(insideBlocks);
 
         boolean allPlaced = true;
 
-        for (BlockPos pos : offsets) {
+        for (BlockPos pos : surroundPositions) {
+            if (!mc.world.getBlockState(pos).isReplaceable()) continue;
+
+            // If support is enabled and the target block has no placeable side,
+            // try to place a support block underneath first.
+            if (support.get() && BlockUtils.getPlaceSide(pos) == null) {
+                BlockPos supportPos = pos.down();
+                if (mc.world.getBlockState(supportPos).isReplaceable()) {
+                    if (placed >= blocksPerTick.get()) {
+                        allPlaced = false;
+                        break;
+                    }
+                    if (placeBlock(supportPos, block)) {
+                        placed++;
+                    } else {
+                        allPlaced = false;
+                        continue;
+                    }
+                } else {
+                    // Can't place support and no side to place on: skip for now.
+                    allPlaced = false;
+                    continue;
+                }
+            }
+
             if (!BlockUtils.canPlace(pos)) {
-                if (mc.world.getBlockState(pos).isReplaceable()) allPlaced = false;
+                allPlaced = false;
                 continue;
             }
 
@@ -247,11 +290,26 @@ public class SurroundPlus extends Module {
     }
 
     private boolean placeBlock(BlockPos pos, FindItemResult item) {
+        if (packet.get()) {
+            if (!PacketPlaceUtils.placeBlockPacket(pos, item, rotate.get(), 50)) return false;
+            renderMap.put(pos, System.currentTimeMillis());
+            return true;
+        }
+
         if (BlockUtils.place(pos, item, rotate.get(), 50, true)) {
+            setBlock(pos, item);
             renderMap.put(pos, System.currentTimeMillis());
             return true;
         }
         return false;
+    }
+
+    private void setBlock(BlockPos pos, FindItemResult item) {
+        Item it = mc.player.getInventory().getStack(item.slot()).getItem();
+        if (!(it instanceof BlockItem block)) return;
+
+        mc.world.setBlockState(pos, block.getBlock().getDefaultState());
+        mc.world.playSound(mc.player, pos.getX(), pos.getY(), pos.getZ(), SoundEvents.BLOCK_STONE_PLACE, SoundCategory.BLOCKS, 1, 1);
     }
 
     private void handleCentering() {
@@ -270,6 +328,55 @@ public class SurroundPlus extends Module {
         double motionZ = (centerPos.z - mc.player.getZ()) / 2.0;
 
         mc.player.setVelocity(motionX, mc.player.getVelocity().y, motionZ);
+    }
+
+    private Set<BlockPos> getInsideBlocks() {
+        BlockPos base = mc.player.getBlockPos();
+        LinkedHashSet<BlockPos> inside = new LinkedHashSet<>();
+
+        if (!extend.get()) {
+            inside.add(base);
+            return inside;
+        }
+
+        int[] size = getSize(mc.player);
+        for (int x = size[0]; x <= size[1]; x++) {
+            for (int z = size[2]; z <= size[3]; z++) {
+                inside.add(base.add(x, 0, z));
+            }
+        }
+
+        return inside;
+    }
+
+    private Set<BlockPos> getSurroundPositions(Set<BlockPos> insideBlocks) {
+        LinkedHashSet<BlockPos> surround = new LinkedHashSet<>();
+        for (BlockPos pos : insideBlocks) {
+            BlockPos north = pos.north();
+            BlockPos south = pos.south();
+            BlockPos east = pos.east();
+            BlockPos west = pos.west();
+
+            if (!insideBlocks.contains(north)) surround.add(north);
+            if (!insideBlocks.contains(south)) surround.add(south);
+            if (!insideBlocks.contains(east)) surround.add(east);
+            if (!insideBlocks.contains(west)) surround.add(west);
+        }
+        return surround;
+    }
+
+    private int[] getSize(PlayerEntity player) {
+        int[] size = new int[] {0, 0, 0, 0};
+
+        double x = player.getX() - player.getBlockX();
+        double z = player.getZ() - player.getBlockZ();
+
+        if (x < 0.3) size[0] = -1;
+        if (x > 0.7) size[1] = 1;
+        if (z < 0.3) size[2] = -1;
+        if (z > 0.7) size[3] = 1;
+
+        return size;
     }
 
     @EventHandler

@@ -152,6 +152,11 @@ public final class ThmMembers {
         return cachedByMcName.get(mcName);
     }
 
+    public static synchronized boolean isNovice(String mcName) {
+        Member member = getMemberByMcName(mcName);
+        return member != null && "Novice".equalsIgnoreCase(member.rank);
+    }
+
     public static synchronized void resetCache() {
         cachedMembers = null;
         cachedByMcName = null;
@@ -160,8 +165,8 @@ public final class ThmMembers {
 
     public static Color getRankColor(String rankName) {
         return switch (rankName) {
-            case "King" -> new Color(255, 217, 94, 255); // Orange
-            case "Prince" -> new Color(218, 160, 52, 255); // Deep Pink
+            case "King","King/Owner" -> new Color(255, 217, 94, 255); // Orange
+            case "Prince", "Prince/Co-Owner" -> new Color(218, 160, 52, 255); // Deep Pink
             case "The Chosen One" -> new Color(255, 215, 0, 255); // Gold
             case "Major" -> new Color(249, 204, 158, 255); // Tan
             case "Mayor" -> new Color(156, 232, 180, 255); // Light Green

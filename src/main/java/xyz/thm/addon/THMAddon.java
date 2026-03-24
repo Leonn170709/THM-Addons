@@ -13,6 +13,7 @@ import meteordevelopment.meteorclient.systems.hud.HudGroup;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.Utils;
+import meteordevelopment.meteorclient.utils.render.color.Color;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.metadata.ModMetadata;
@@ -46,10 +47,11 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
     public static final Category MAIN;
     public static final Category PVP;
     public static final HudGroup HUD_GROUP = new HudGroup("THM");
+    public static final Color THMSideColor = new Color(145, 60, 255, 75);
+    public static final Color THMColor = new Color(145, 60, 255, 255);
 
     static {METADATA = FabricLoader.getInstance().getModContainer(MOD_ID).orElseThrow().getMetadata();
         VERSION = METADATA.getVersion().getFriendlyString();
-
         MAIN = new Category("THM Highway", Items.OBSIDIAN.getDefaultStack());
         PVP = new Category("THM PVP", Items.END_CRYSTAL.getDefaultStack());}
 
@@ -92,8 +94,8 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new AntiConcreteDetection());
         Modules.get().add(new AntiFeetPlace());
         Modules.get().add(new AutoConcrete());
-        Modules.get().add(new AutoMinePlus());
-        Modules.get().add(new PacketMinePlus());
+        Modules.get().add(new Speedmine());
+        Modules.get().add(new AutoTrapPlus());
         Modules.get().add(new ArmorNotify());
         Modules.get().add(new SurroundPlus());
         Modules.get().add(new Phase());

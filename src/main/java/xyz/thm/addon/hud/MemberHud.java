@@ -89,7 +89,8 @@ public class MemberHud extends HudElement {
 
         // Define rank hierarchy
         List<String> rankHierarchy = Arrays.asList(
-            "King",
+            "King/Owner",
+            "Prince/Co-Owner",
             "Prince",
             "The Chosen One",
             "Major",
