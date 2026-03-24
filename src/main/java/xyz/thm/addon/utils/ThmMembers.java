@@ -152,6 +152,11 @@ public final class ThmMembers {
         return cachedByMcName.get(mcName);
     }
 
+    public static synchronized boolean isNovice(String mcName) {
+        Member member = getMemberByMcName(mcName);
+        return member != null && "Novice".equalsIgnoreCase(member.rank);
+    }
+
     public static synchronized void resetCache() {
         cachedMembers = null;
         cachedByMcName = null;

@@ -70,7 +70,7 @@ public class HighwaySearcher extends Module {
     // Highway Checker Settings
     // -------------------------------------------------------------------------
     public final Setting<Boolean> obsidianGuardEnabled = sgChecker.add(new BoolSetting.Builder()
-        .name("Enable Checker")
+        .name("Enable Finder")
         .description("Monitors obsidian in your current chunk to detect the start or end of a highway.")
         .defaultValue(false)
         .build()
@@ -265,7 +265,7 @@ public class HighwaySearcher extends Module {
 
             MutableText text = Text.literal("[")
                 .styled(style -> style.withColor(Formatting.WHITE))
-                .append(Text.literal("HighwayChecker").styled(style -> style.withColor(Formatting.BLUE)))
+                .append(Text.literal("HighwayFinder").styled(style -> style.withColor(Formatting.BLUE)))
                 .append(Text.literal("] ").styled(style -> style.withColor(Formatting.WHITE)))
                 .append(Text.literal("Highway boundary reached.").styled(style -> style.withColor(Formatting.RED)));
 
