@@ -20,6 +20,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import xyz.thm.addon.mixininterface.BetterTabThmSettings;
+import xyz.thm.addon.system.THMSystem;
 import xyz.thm.addon.utils.ThmMembers;
 
 @Mixin(value = BetterTab.class, priority = 1001)
@@ -66,6 +67,15 @@ public class BetterTabMixin extends Module implements BetterTabThmSettings {
         String playerName = entry.getProfile().name();
         ThmMembers.Member member = ThmMembers.getMemberByMcName(playerName);
         if (member == null) return;
+
+        THMSystem system = THMSystem.get();
+        if (system != null) {
+            String branchFilter = system.showBranch.get();
+            if (!THMSystem.BRANCH_ALL.equalsIgnoreCase(branchFilter)) {
+                if (THMSystem.BRANCH_PVP.equalsIgnoreCase(branchFilter) && !"PvP".equalsIgnoreCase(member.branch)) return;
+                if (THMSystem.BRANCH_MAIN.equalsIgnoreCase(branchFilter) && !"Main".equalsIgnoreCase(member.branch)) return;
+            }
+        }
 
         // Let self/friends highlights take priority
         if (self.get() && mc.player != null &&
