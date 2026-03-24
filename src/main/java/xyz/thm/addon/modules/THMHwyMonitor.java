@@ -206,6 +206,10 @@ public class THMHwyMonitor extends Module {
         NON_RESTART_HARD_FAIL_SIGNAL.set(true);
     }
 
+    public static void signalRestartHardFailFromHighwayBuilder() {
+        RESTART_HARD_FAIL_SIGNAL.set(true);
+    }
+
     private static boolean consumeNonRestartHardFailSignal() {
         return NON_RESTART_HARD_FAIL_SIGNAL.getAndSet(false);
     }

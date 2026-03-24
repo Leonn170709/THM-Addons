@@ -86,19 +86,24 @@ import xyz.thm.addon.utils.ServerStatusHandler;
 import xyz.thm.addon.utils.ServerStatusHandler.ServerState;
 
 import javax.crypto.Cipher;
+import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.channels.FileChannel;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -113,10 +118,18 @@ import static xyz.thm.addon.utils.password.*;
 @SuppressWarnings("ConstantConditions")
 public class HighwayBuilderTHM extends Module {
     private static final String RESTART_DETECTED_MARKER = "server restart detected";
-    private static final String STATS_CACHE_MAGIC = "HB_STATS_CACHE_V2";
+    private static final String STATS_ARTIFACT_MAGIC = "HB_STATS_ARTIFACT_V1";
+    private static final int STATS_ARTIFACT_VERSION = 1;
     private static final long STATS_CHECKPOINT_INTERVAL_MS = 10 * 60 * 1000L;
     private static final int STATS_SCREENSHOT_DELAY_MS = 250;
+    private static final long STATS_MEMORY_RETRY_RECHECK_MS = 5_000L;
+    private static final String STATS_CANONICAL_FILE_NAME = "highwaybuildersettings";
+    private static final String STATS_FINALIZATION_FILE_NAME = "highwaybuildersettings.finalization";
+    private static final String STATS_SHADOW_FILE_NAME = "highwaybuildersettings.shadow";
+    private static final int STATS_GCM_TAG_BITS = 128;
+    private static final int STATS_GCM_NONCE_BYTES = 12;
     private static final DateTimeFormatter STATS_SCREENSHOT_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss").withZone(ZoneId.systemDefault());
+    private static final SecureRandom STATS_RANDOM = new SecureRandom();
 
     private boolean suppressThmHwyMonitorSync;
 
@@ -332,8 +345,8 @@ public class HighwayBuilderTHM extends Module {
         .name("save-pickaxes")
         .description("How many pickaxes to ensure are saved. Hitting this number in your inventory will trigger a restock or the module toggling off.")
         .defaultValue(1)
-        .range(0, 36)
-        .sliderRange(0, 36)
+        .range(1, 36)
+        .sliderRange(1, 36)
         .visible(() -> !dontBreakTools.get())
         .build()
     );
@@ -425,6 +438,8 @@ public class HighwayBuilderTHM extends Module {
 
     // Inventory
 
+    private boolean clampingFoodTypes;
+
     private final Setting<List<Item>> trashItems = sgInventory.add(new ItemListSetting.Builder()
         .name("trash-items")
         .description("Items that are considered trash and can be thrown out.")
@@ -433,6 +448,32 @@ public class HighwayBuilderTHM extends Module {
             Items.GLOWSTONE, Items.BLACKSTONE, Items.BASALT, Items.GHAST_TEAR, Items.SOUL_SAND, Items.SOUL_SOIL,
             Items.ROTTEN_FLESH, Items.MAGMA_BLOCK
         )
+        .build()
+    );
+
+    private final Setting<Boolean> foodRestock = sgInventory.add(new BoolSetting.Builder()
+        .name("food-restock")
+        .description("Restocks one configured food stack when your valid food count drops to the saved amount.")
+        .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<List<Item>> foodTypes = sgInventory.add(new ItemListSetting.Builder()
+        .name("food-types")
+        .description("Which food items count as restock food. Maximum 2 food types.")
+        .defaultValue()
+        .visible(foodRestock::get)
+        .onChanged(this::handleFoodTypesChanged)
+        .build()
+    );
+
+    private final Setting<Integer> saveFood = sgInventory.add(new IntSetting.Builder()
+        .name("save-food")
+        .description("Restock food when your total configured food count is at or below this value. Do not set higher than half a stack of your chosen food.")
+        .defaultValue(16)
+        .range(1, 32)
+        .sliderRange(1, 32)
+        .visible(foodRestock::get)
         .build()
     );
 
@@ -492,8 +533,8 @@ public class HighwayBuilderTHM extends Module {
         .name("minimum-empty-slots")
         .description("The minimum amount of empty slots you want left after mining obsidian.")
         .defaultValue(3)
-        .sliderRange(0, 9)
-        .min(0)
+        .sliderRange(2, 9)
+        .min(2)
         .build()
     );
 
@@ -753,10 +794,18 @@ public class HighwayBuilderTHM extends Module {
     private int centerSpeedRestoreRetryTicks;
     private String centerSpeedLastReason = "";
     private String activeStatsSessionId;
-    private StatsCacheSnapshot statsCacheSnapshot;
+    private long activeStatsGeneration;
+    private StatsArtifactSnapshot statsCacheSnapshot;
+    private StatsArtifactIdentity loadedStatsArtifactIdentity;
+    private final Set<String> consumedStatsArtifactKeys = new HashSet<>();
+    private RetiredStatsReportSnapshot retiredStatsReportSnapshot;
     private boolean resumeStatsSessionOnNextActivate;
+    private boolean monitorPauseDeactivateArmed;
     private long nextStatsCheckpointAtMs;
+    private long nextStatsStorageRetryAtMs;
     private boolean statsSessionDirty;
+    private boolean statsSessionTerminalOrFinalizing;
+    private boolean memoryRetryMode;
     private volatile boolean statsProofScreenshotScheduled;
     private volatile boolean statsDisconnectScreenshotScheduled;
     private String lastPrintedStatsSessionId;
@@ -801,8 +850,16 @@ public class HighwayBuilderTHM extends Module {
         boolean timerWasActive
     ) {}
 
-    private record StatsCacheSnapshot(
+    private enum StatsArtifactKind {
+        CANONICAL,
+        FINALIZATION,
+        SHADOW
+    }
+
+    private record StatsArtifactSnapshot(
+        StatsArtifactKind kind,
         String sessionId,
+        long generation,
         StatsSessionState state,
         boolean resumeAllowed,
         double startX,
@@ -812,7 +869,35 @@ public class HighwayBuilderTHM extends Module {
         int blocksPlaced,
         boolean displayInfo,
         long lastCheckpointAt,
-        long printedAt
+        long printedAt,
+        boolean printedToChat,
+        boolean webhookSendCommitted,
+        boolean apiSendCommitted,
+        String finalizationReason
+    ) {}
+
+    private record StatsArtifactIdentity(
+        StatsArtifactKind kind,
+        String sessionId,
+        long generation
+    ) {
+        private String key() {
+            return kind.name() + "|" + sessionId + "|" + generation;
+        }
+    }
+
+    private record RetiredStatsReportSnapshot(
+        String sessionId,
+        long generation,
+        Vec3d startPos,
+        int blocksBroken,
+        int blocksPlaced
+    ) {}
+
+    private record StatsArtifactLoadResult(
+        StatsArtifactSnapshot snapshot,
+        boolean transientFailure,
+        boolean unsupportedVersion
     ) {}
 
     private enum StatsSessionState {
@@ -1025,7 +1110,7 @@ public class HighwayBuilderTHM extends Module {
             return;
         }
 
-        if (previousState == ServerState.MAIN_SERVER && !offMainEpisodeCheckpointed) {
+        if (previousState == ServerState.MAIN_SERVER && !offMainEpisodeCheckpointed && hasActiveInMemoryStatsSession() && !statsSessionTerminalOrFinalizing) {
             persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, "server-state-left-main");
             offMainEpisodeCheckpointed = true;
         }
@@ -1065,30 +1150,23 @@ public class HighwayBuilderTHM extends Module {
         setState(State.Center);
         lastBreakingPos.set(0, 0, 0);
         if (isPendingPrintStatsSession(statsCacheSnapshot)) {
-            if (tryPrintStatsToChat(
-                new Vec3d(statsCacheSnapshot.startX(), statsCacheSnapshot.startY(), statsCacheSnapshot.startZ()),
-                statsCacheSnapshot.blocksBroken(),
-                statsCacheSnapshot.blocksPlaced(),
-                "pending-print-on-activate"
-            )) {
-                scheduleStatsProofScreenshotIfEnabled(statsCacheSnapshot.sessionId(), "pending-print-on-activate");
-                if (!closeAndRetireStatsSession(statsCacheSnapshot, "pending-print-on-activate")) {
-                    warning("Failed to retire pending HighwayBuilder statistics safely; keeping session pending.");
-                    toggle();
-                    return;
-                }
-            } else {
-                warning("Unable to print pending HighwayBuilder statistics; keeping session pending.");
+            if (!completeFinalizationRecord(statsCacheSnapshot, "pending-print-on-activate", true)) {
+                warning("Unable to complete pending HighwayBuilder statistics safely; keeping session pending.");
                 toggle();
                 return;
             }
+            statsCacheSnapshot = null;
         }
 
         boolean resumedStatsSession = isResumableStatsSession(statsCacheSnapshot);
-        if (resumedStatsSession) restoreStatsFromCache(statsCacheSnapshot, resumeStatsSessionOnNextActivate ? "monitor-resume" : "cache-resume");
+        if (resumedStatsSession) {
+            restoreStatsFromCache(statsCacheSnapshot, resumeStatsSessionOnNextActivate ? "monitor-resume" : "cache-resume");
+            markArtifactConsumed(statsCacheSnapshot);
+        }
         else startFreshStatsSession();
 
         resumeStatsSessionOnNextActivate = false;
+        monitorPauseDeactivateArmed = false;
         sentLagMessage = false;
         suspended = false;
         statusLogTimer = 6000;
@@ -1147,8 +1225,8 @@ public class HighwayBuilderTHM extends Module {
     }
     @Override
     public void onDeactivate() {
-        boolean isMonitorPauseDeactivate = resumeStatsSessionOnNextActivate;
-        boolean statsRetiredThisDeactivate = false;
+        boolean isMonitorPauseDeactivate = monitorPauseDeactivateArmed;
+        monitorPauseDeactivateArmed = false;
         clearKitbotOrderTracking(isMonitorPauseDeactivate ? "monitor-pause-deactivate" : "module-deactivate");
 
         if (!suppressThmHwyMonitorSync) syncThmHwyMonitorOnDeactivate();
@@ -1171,8 +1249,16 @@ public class HighwayBuilderTHM extends Module {
         }
 
         if (mc.player == null || mc.world == null || !Utils.canUpdate()) {
-            if (isMonitorPauseDeactivate) persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, "monitor-pause-deactivate-no-world");
-            else persistCurrentStatsSession(StatsSessionState.PENDING_PRINT, false, 0L, "deactivate-pending-print-no-world");
+            if (hasActiveInMemoryStatsSession()) {
+                if (isMonitorPauseDeactivate) {
+                    persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, "monitor-pause-deactivate-no-world");
+                } else {
+                    StatsArtifactSnapshot finalizationRecord = persistFinalizationRecord(createFinalizationRecord("deactivate-pending-print-no-world"), "deactivate-pending-print-no-world");
+                    if (finalizationRecord == null) warning("Unable to persist pending HighwayBuilder statistics safely before deactivate.");
+                }
+            } else {
+                THMAddon.LOG.info("[highway-stats-cache] skipped deactivate persistence because no active in-memory stats session exists.");
+            }
             return;
         }
 
@@ -1185,68 +1271,24 @@ public class HighwayBuilderTHM extends Module {
         if (Modules.get().get(HotbarManager.class).isActive() && hotbarmanager.get()) { Modules.get().get(HotbarManager.class).toggle();}
         if (Modules.get().get(AntiDrop.class).isActive() && antidrop.get()) { Modules.get().get(AntiDrop.class).toggle();}
 
-        if (!isMonitorPauseDeactivate) {
-            if (tryPrintStatsToChat(start, blocksBroken, blocksPlaced, "deactivate")) {
-                scheduleStatsProofScreenshotIfEnabled(activeStatsSessionId, "printed-on-deactivate");
-                if (!closeAndRetireCurrentStatsSession("printed-on-deactivate")) {
-                    persistCurrentStatsSession(StatsSessionState.PENDING_PRINT, false, 0L, "deactivate-close-failed");
-                } else {
-                    statsRetiredThisDeactivate = true;
-                }
-            } else {
-                persistCurrentStatsSession(StatsSessionState.PENDING_PRINT, false, 0L, "deactivate-pending-print");
-            }
-        } else {
+        if (!hasActiveInMemoryStatsSession()) {
+            THMAddon.LOG.info("[highway-stats-cache] skipped deactivate persistence because no active in-memory stats session exists.");
+            return;
+        }
+
+        if (isMonitorPauseDeactivate) {
             persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, "monitor-pause-deactivate");
+            return;
         }
-        //webhook send stats part
-        if (!isMonitorPauseDeactivate && statsRetiredThisDeactivate && sendStatisticsWebhhok.get()) {
-            String webhookUrl = decryptWebhook(encryptedWebhook.get(), decryptkey.get());
-            if (webhookUrl != null) {
-                double distance = PlayerUtils.distanceTo(start);
 
-                // Don't send if distance it's smaller than 1
-                if (distance > 1) {
-                    String playerName = mc.player.getName().getLiteralString();
-                    String statsMessage = String.format("Player: %s , Distance: %.0f , Blocks broken: %d , Blocks placed: %d",
-                        playerName, distance, blocksBroken, blocksPlaced);
-                    sendToWebhook(webhookUrl, statsMessage);
-
-                }else {
-                    warning("Statistics NOT sent to webhook! Distance too small: (highlight)%.0f", distance);
-                }
-            }
+        StatsArtifactSnapshot finalizationRecord = persistFinalizationRecord(createFinalizationRecord("deactivate"), "deactivate-finalization-record");
+        if (finalizationRecord == null) {
+            warning("Unable to persist final HighwayBuilder statistics safely before deactivate.");
+            return;
         }
-        if (!isMonitorPauseDeactivate && statsRetiredThisDeactivate && sendStatisticsapi.get()) {
-            //Somone please make this code better please
-            double distance = PlayerUtils.distanceTo(start);
-            if (distance > 1) {
-                if (distance < 50000) {
-                    if (isNot6B6T()) {
-                        warning("API not sent. You are not on 6B6T");
-                        return;
-                    }
-                    if (THMSystem.get().getHash() == null || Objects.equals(THMSystem.get().getHash(), "SetYourHash") || Objects.equals(THMSystem.get().getHash(), "")) {
-                        warning("API not sent. No Hash set.");
-                        return;
-                    }
-                    String server = mc.getCurrentServerEntry() != null
-                        ? mc.getCurrentServerEntry().address
-                        : "singleplayer";
 
-                    String playerName = mc.player.getName().getLiteralString();
-                    String statsMessageapi = String.format("%s:%s:%s:%.0f:%s:%s:%s:%s:%s",
-                        THMSystem.get().getHash(), playerName, server, distance, blocksBroken, blocksPlaced, dir, generateTimestamp(), isOnMainHighway());
-                    sendToAPI(statsMessageapi, getPassword(), getAPIHighway(), "statistics");
-                } else {
-                    warning("Statistics NOT sent to Api! Please Calculate the real Distance using the /calculate command in proof-of-work");
-                }
-            } else {
-                warning("Statistics NOT sent to Api! Distance too small: (highlight)%.0f", distance);
-            }
-        }
-        if (!isMonitorPauseDeactivate && !statsRetiredThisDeactivate && (sendStatisticsWebhhok.get() || sendStatisticsapi.get())) {
-            warning("External statistics were not sent because the HighwayBuilder session was not safely retired.");
+        if (!completeFinalizationRecord(finalizationRecord, "printed-on-deactivate", true)) {
+            warning("Unable to complete HighwayBuilder statistics safely during deactivate; keeping durable finalization record.");
         }
 
     }
@@ -1277,7 +1319,8 @@ public class HighwayBuilderTHM extends Module {
         if (!isActive()) return;
 
         resumeStatsSessionOnNextActivate = true;
-        persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, "monitor-pause-request");
+        monitorPauseDeactivateArmed = true;
+        if (!statsSessionTerminalOrFinalizing) persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, "monitor-pause-request");
         suppressThmHwyMonitorSync = true;
         try {
             toggle();
@@ -1289,7 +1332,7 @@ public class HighwayBuilderTHM extends Module {
     @Override
     public void error(String message, Object... args) {
         super.error(message, args);
-        signalMonitorHardFailIfNonRestart(message, args);
+        THMHwyMonitor.signalNonRestartHardFailFromHighwayBuilder();
         toggle();
 
         if (disconnectOnToggle.get()) {
@@ -1299,22 +1342,17 @@ public class HighwayBuilderTHM extends Module {
 
     private void errorEarly(String message, Object... args) {
         super.error(message, args);
-        signalMonitorHardFailIfNonRestart(message, args);
+        THMHwyMonitor.signalNonRestartHardFailFromHighwayBuilder();
 
         displayInfo = false;
         toggle();
     }
 
-    private void signalMonitorHardFailIfNonRestart(String message, Object... args) {
-        if (message == null || message.isEmpty()) {
-            THMHwyMonitor.signalNonRestartHardFailFromHighwayBuilder();
-            return;
-        }
-
-        String formatted = String.format(message, args);
-        if (!formatted.toLowerCase(java.util.Locale.ROOT).contains(RESTART_DETECTED_MARKER)) {
-            THMHwyMonitor.signalNonRestartHardFailFromHighwayBuilder();
-        }
+    private void errorRestart(String message, Object... args) {
+        super.error(message, args);
+        THMHwyMonitor.signalRestartHardFailFromHighwayBuilder();
+        displayInfo = false;
+        toggle();
     }
 
     @EventHandler
@@ -1388,6 +1426,7 @@ public class HighwayBuilderTHM extends Module {
 
         if (mc.player.getY() < start.y - 0.5) setState(State.ReLevel); // don't let the current state keep ticking, switch to re-levelling straight away
         tickDoubleMine();
+        maybeQueueFoodRestock();
         state.tick(this);
 
         if (breakTimer > 0) breakTimer--;
@@ -1421,7 +1460,9 @@ public class HighwayBuilderTHM extends Module {
     @EventHandler
     private void onGameLeave(GameLeftEvent event) {
         notifyDesktop(notifyDisconnect, "THM Highway Builder", "Disconnected while Highway Builder was active.");
-        persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, "game-leave");
+        if (hasActiveInMemoryStatsSession() && !statsSessionTerminalOrFinalizing) {
+            persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, "game-leave");
+        }
         suspended = true;
         inventory = false;
     }
@@ -1683,12 +1724,18 @@ public class HighwayBuilderTHM extends Module {
         }
 
         if (restockTask.shouldTearDownRestockBlockade()) {
+            if (restockDebugLog.get()) {
+                restockDebug("RestockTask queue drained; deferring blockade teardown before returning to Forward.");
+            }
             restockTask.deferBlockadeTeardown();
             clearKitbotOrderTracking("restock-sequence-finished-with-teardown");
             setState(State.Forward);
             return;
         }
 
+        if (restockDebugLog.get()) {
+            restockDebug("RestockTask finished without pending tasks or teardown requirement; returning to Forward.");
+        }
         restockTask.finishSequence();
         clearKitbotOrderTracking("restock-sequence-finished");
         setState(State.Forward);
@@ -2030,114 +2077,139 @@ public class HighwayBuilderTHM extends Module {
         centerSpeedLastReason = reason == null ? "" : reason;
     }
 
+    private boolean hasActiveInMemoryStatsSession() {
+        return start != null && activeStatsSessionId != null && !activeStatsSessionId.isBlank();
+    }
+
+    private void clearActiveInMemoryStatsSession() {
+        start = null;
+        blocksBroken = 0;
+        blocksPlaced = 0;
+        displayInfo = false;
+        activeStatsSessionId = null;
+        activeStatsGeneration = 0L;
+        lastPrintedStatsSessionId = null;
+        statsSessionDirty = false;
+        nextStatsCheckpointAtMs = 0L;
+        loadedStatsArtifactIdentity = null;
+    }
+
     private void loadStatsCacheFromDisk() {
+        clearActiveInMemoryStatsSession();
         statsCacheSnapshot = null;
+        retiredStatsReportSnapshot = null;
+        memoryRetryMode = false;
+        nextStatsStorageRetryAtMs = 0L;
 
-        Path path = resolveStatsCachePath();
-        if (!Files.exists(path)) return;
+        StatsArtifactLoadResult canonical = loadStatsArtifact(resolveCanonicalStatsArtifactPath(), StatsArtifactKind.CANONICAL);
+        StatsArtifactLoadResult finalization = loadStatsArtifact(resolveFinalizationRecordPath(), StatsArtifactKind.FINALIZATION);
+        StatsArtifactLoadResult shadow = loadStatsArtifact(resolveShadowStatsArtifactPath(), StatsArtifactKind.SHADOW);
 
-        HashMap<String, String> meta = new HashMap<>();
-        try {
-            List<String> lines = Files.readAllLines(path);
-            if (lines.isEmpty() || !STATS_CACHE_MAGIC.equals(lines.get(0).trim())) {
-                quarantineStatsCache(path, "invalid-magic", null);
-                return;
-            }
-
-            for (int i = 1; i < lines.size(); i++) {
-                String line = lines.get(i);
-                if (line == null) continue;
-                line = line.trim();
-                if (line.isEmpty() || line.startsWith("#")) continue;
-
-                String[] parts = line.split("\\|", 3);
-                if (parts.length < 3 || !"meta".equals(parts[0])) continue;
-                meta.put(parts[1], parts[2]);
-            }
-
-            StatsSessionState state = parseStatsSessionState(meta.get("state"));
-            if (state == null) {
-                quarantineStatsCache(path, "invalid-state", null);
-                return;
-            }
-
-            StatsCacheSnapshot snapshot = new StatsCacheSnapshot(
-                meta.getOrDefault("sessionId", ""),
-                state,
-                Boolean.parseBoolean(meta.getOrDefault("resumeAllowed", "false")),
-                parseDoubleSafe(meta.get("startX"), 0.0),
-                parseDoubleSafe(meta.get("startY"), 0.0),
-                parseDoubleSafe(meta.get("startZ"), 0.0),
-                parseIntSafe(meta.get("blocksBroken"), 0),
-                parseIntSafe(meta.get("blocksPlaced"), 0),
-                Boolean.parseBoolean(meta.getOrDefault("displayInfo", "true")),
-                parseLongSafe(meta.get("lastCheckpointAt"), 0L),
-                parseLongSafe(meta.get("printedAt"), 0L)
-            );
-
-            if (snapshot.sessionId().isBlank()) {
-                quarantineStatsCache(path, "missing-session-id", null);
-                return;
-            }
-            if (snapshot.state() == StatsSessionState.OPEN && !snapshot.resumeAllowed()) {
-                quarantineStatsCache(path, "open-not-resumable", null);
-                return;
-            }
-            if (snapshot.state() != StatsSessionState.OPEN && snapshot.resumeAllowed()) {
-                quarantineStatsCache(path, "non-open-resumable", null);
-                return;
-            }
-
-            statsCacheSnapshot = snapshot;
-            THMAddon.LOG.info("[highway-stats-cache] loaded reason=startup session={} state={} resumeAllowed={} broken={} placed={}",
-                shortSessionId(snapshot.sessionId()),
-                snapshot.state(),
-                snapshot.resumeAllowed(),
-                snapshot.blocksBroken(),
-                snapshot.blocksPlaced()
-            );
-
-            if (snapshot.state() == StatsSessionState.CLOSED) {
-                tryDeleteStatsCache("cleanup-closed-on-load");
-            }
-        } catch (Exception e) {
-            quarantineStatsCache(path, "load-error", e);
+        if (canonical.transientFailure()) {
+            memoryRetryMode = true;
+            nextStatsStorageRetryAtMs = System.currentTimeMillis() + STATS_MEMORY_RETRY_RECHECK_MS;
         }
+
+        StatsArtifactSnapshot selected = selectAuthoritativeStatsArtifact(canonical.snapshot(), finalization.snapshot(), shadow.snapshot());
+        if (selected == null) return;
+
+        StatsArtifactIdentity identity = identityOf(selected);
+        if (consumedStatsArtifactKeys.contains(identity.key())) {
+            THMAddon.LOG.info("[highway-stats-cache] ignored consumed artifact kind={} session={} generation={}",
+                selected.kind(),
+                shortSessionId(selected.sessionId()),
+                selected.generation()
+            );
+            return;
+        }
+
+        statsCacheSnapshot = selected;
+        loadedStatsArtifactIdentity = identity;
+        if (selected.kind() == StatsArtifactKind.SHADOW) {
+            memoryRetryMode = true;
+            nextStatsStorageRetryAtMs = System.currentTimeMillis() + STATS_MEMORY_RETRY_RECHECK_MS;
+        }
+
+        THMAddon.LOG.info("[highway-stats-cache] loaded reason=startup kind={} session={} generation={} state={} resumeAllowed={} broken={} placed={}",
+            selected.kind(),
+            shortSessionId(selected.sessionId()),
+            selected.generation(),
+            selected.state(),
+            selected.resumeAllowed(),
+            selected.blocksBroken(),
+            selected.blocksPlaced()
+        );
     }
 
-    private boolean isResumableStatsSession(StatsCacheSnapshot snapshot) {
-        return snapshot != null && snapshot.state() == StatsSessionState.OPEN && snapshot.resumeAllowed();
+    private StatsArtifactSnapshot selectAuthoritativeStatsArtifact(StatsArtifactSnapshot... snapshots) {
+        StatsArtifactSnapshot selected = null;
+        for (StatsArtifactSnapshot snapshot : snapshots) {
+            if (snapshot == null) continue;
+            if (selected == null || compareArtifactPriority(snapshot, selected) > 0) selected = snapshot;
+        }
+        return selected;
     }
 
-    private boolean isPendingPrintStatsSession(StatsCacheSnapshot snapshot) {
-        return snapshot != null && snapshot.state() == StatsSessionState.PENDING_PRINT;
+    private int compareArtifactPriority(StatsArtifactSnapshot left, StatsArtifactSnapshot right) {
+        int generationCompare = Long.compare(left.generation(), right.generation());
+        if (generationCompare != 0) return generationCompare;
+        return Integer.compare(artifactPriority(left.kind()), artifactPriority(right.kind()));
+    }
+
+    private int artifactPriority(StatsArtifactKind kind) {
+        return switch (kind) {
+            case FINALIZATION -> 3;
+            case SHADOW -> 2;
+            case CANONICAL -> 1;
+        };
+    }
+
+    private boolean isResumableStatsSession(StatsArtifactSnapshot snapshot) {
+        return snapshot != null
+            && snapshot.state() == StatsSessionState.OPEN
+            && snapshot.resumeAllowed()
+            && snapshot.kind() != StatsArtifactKind.FINALIZATION;
+    }
+
+    private boolean isPendingPrintStatsSession(StatsArtifactSnapshot snapshot) {
+        return snapshot != null && snapshot.kind() == StatsArtifactKind.FINALIZATION;
     }
 
     private void startFreshStatsSession() {
+        statsSessionTerminalOrFinalizing = false;
+        retiredStatsReportSnapshot = null;
         start = mc.player.getEntityPos();
         blocksBroken = 0;
         blocksPlaced = 0;
         displayInfo = true;
         activeStatsSessionId = UUID.randomUUID().toString();
+        activeStatsGeneration = 0L;
         statsSessionDirty = false;
         persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, "fresh-activate");
     }
 
-    private void restoreStatsFromCache(StatsCacheSnapshot snapshot, String reason) {
+    private void restoreStatsFromCache(StatsArtifactSnapshot snapshot, String reason) {
         if (snapshot == null) return;
 
+        statsSessionTerminalOrFinalizing = false;
+        retiredStatsReportSnapshot = null;
         start = new Vec3d(snapshot.startX(), snapshot.startY(), snapshot.startZ());
         blocksBroken = snapshot.blocksBroken();
         blocksPlaced = snapshot.blocksPlaced();
         displayInfo = snapshot.displayInfo();
         activeStatsSessionId = snapshot.sessionId();
-        lastPrintedStatsSessionId = null;
+        activeStatsGeneration = snapshot.generation();
+        lastPrintedStatsSessionId = snapshot.printedToChat() ? snapshot.sessionId() : null;
         statsSessionDirty = false;
-        nextStatsCheckpointAtMs = snapshot.lastCheckpointAt() <= 0 ? System.currentTimeMillis() + STATS_CHECKPOINT_INTERVAL_MS : snapshot.lastCheckpointAt() + STATS_CHECKPOINT_INTERVAL_MS;
+        nextStatsCheckpointAtMs = snapshot.lastCheckpointAt() <= 0
+            ? System.currentTimeMillis() + STATS_CHECKPOINT_INTERVAL_MS
+            : snapshot.lastCheckpointAt() + STATS_CHECKPOINT_INTERVAL_MS;
 
-        THMAddon.LOG.info("[highway-stats-cache] restored reason={} session={} state={} broken={} placed={} start=({}, {}, {})",
+        THMAddon.LOG.info("[highway-stats-cache] restored reason={} kind={} session={} generation={} state={} broken={} placed={} start=({}, {}, {})",
             reason,
+            snapshot.kind(),
             shortSessionId(snapshot.sessionId()),
+            snapshot.generation(),
             snapshot.state(),
             blocksBroken,
             blocksPlaced,
@@ -2148,22 +2220,33 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private void maybeCheckpointStatsSession() {
-        if (activeStatsSessionId == null || start == null) return;
+        if (!hasActiveInMemoryStatsSession()) return;
         if (System.currentTimeMillis() < nextStatsCheckpointAtMs) return;
         persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, statsSessionDirty ? "interval-checkpoint-dirty" : "interval-checkpoint");
     }
 
     private boolean persistCurrentStatsSession(StatsSessionState state, boolean resumeAllowed, long printedAt, String reason) {
-        if (start == null) return false;
-        return persistStatsCacheSnapshot(createCurrentStatsSnapshot(state, resumeAllowed, printedAt), reason);
+        if (!hasActiveInMemoryStatsSession()) return false;
+        if (state == StatsSessionState.OPEN && statsSessionTerminalOrFinalizing) {
+            THMAddon.LOG.info("[highway-stats-cache] skipped OPEN persist reason={} session={} because finalization is armed.",
+                reason,
+                shortSessionId(activeStatsSessionId)
+            );
+            return false;
+        }
+
+        StatsArtifactSnapshot snapshot = createCurrentStatsSnapshot(memoryRetryMode ? StatsArtifactKind.SHADOW : StatsArtifactKind.CANONICAL, state, resumeAllowed, printedAt);
+        return persistActiveStatsArtifact(snapshot, reason);
     }
 
-    private StatsCacheSnapshot createCurrentStatsSnapshot(StatsSessionState state, boolean resumeAllowed, long printedAt) {
+    private StatsArtifactSnapshot createCurrentStatsSnapshot(StatsArtifactKind kind, StatsSessionState state, boolean resumeAllowed, long printedAt) {
         long checkpointAt = System.currentTimeMillis();
         if (activeStatsSessionId == null || activeStatsSessionId.isBlank()) activeStatsSessionId = UUID.randomUUID().toString();
 
-        return new StatsCacheSnapshot(
+        return new StatsArtifactSnapshot(
+            kind,
             activeStatsSessionId,
+            nextStatsGeneration(),
             state,
             resumeAllowed,
             start.x,
@@ -2173,48 +2256,129 @@ public class HighwayBuilderTHM extends Module {
             blocksPlaced,
             displayInfo,
             checkpointAt,
-            printedAt
+            printedAt,
+            printedAt > 0L,
+            false,
+            false,
+            ""
         );
     }
 
-    private boolean persistStatsCacheSnapshot(StatsCacheSnapshot snapshot, String reason) {
+    private long nextStatsGeneration() {
+        long now = System.currentTimeMillis();
+        activeStatsGeneration = Math.max(now, activeStatsGeneration + 1L);
+        return activeStatsGeneration;
+    }
+
+    private long nextStatsGenerationAfter(long baselineGeneration) {
+        activeStatsGeneration = Math.max(activeStatsGeneration, baselineGeneration);
+        return nextStatsGeneration();
+    }
+
+    private StatsArtifactSnapshot copyStatsArtifact(
+        StatsArtifactSnapshot snapshot,
+        StatsArtifactKind kind,
+        StatsSessionState state,
+        boolean resumeAllowed,
+        long printedAt,
+        boolean printedToChat,
+        boolean webhookSendCommitted,
+        boolean apiSendCommitted,
+        String finalizationReason,
+        long generation
+    ) {
+        return new StatsArtifactSnapshot(
+            kind,
+            snapshot.sessionId(),
+            generation,
+            state,
+            resumeAllowed,
+            snapshot.startX(),
+            snapshot.startY(),
+            snapshot.startZ(),
+            snapshot.blocksBroken(),
+            snapshot.blocksPlaced(),
+            snapshot.displayInfo(),
+            System.currentTimeMillis(),
+            printedAt,
+            printedToChat,
+            webhookSendCommitted,
+            apiSendCommitted,
+            finalizationReason
+        );
+    }
+
+    private boolean persistActiveStatsArtifact(StatsArtifactSnapshot snapshot, String reason) {
         if (snapshot == null) return false;
 
-        Path path = resolveStatsCachePath();
-        try {
-            Path parent = path.getParent();
-            if (parent != null) Files.createDirectories(parent);
+        if (!memoryRetryMode) {
+            return persistStatsArtifactSnapshot(copyStatsArtifact(
+                snapshot,
+                StatsArtifactKind.CANONICAL,
+                snapshot.state(),
+                snapshot.resumeAllowed(),
+                snapshot.printedAt(),
+                snapshot.printedToChat(),
+                snapshot.webhookSendCommitted(),
+                snapshot.apiSendCommitted(),
+                snapshot.finalizationReason(),
+                snapshot.generation()
+            ), reason);
+        }
 
-            StringBuilder out = new StringBuilder(768);
-            out.append(STATS_CACHE_MAGIC).append('\n');
-            out.append("meta|sessionId|").append(snapshot.sessionId()).append('\n');
-            out.append("meta|state|").append(snapshot.state().name()).append('\n');
-            out.append("meta|resumeAllowed|").append(snapshot.resumeAllowed()).append('\n');
-            out.append("meta|startX|").append(snapshot.startX()).append('\n');
-            out.append("meta|startY|").append(snapshot.startY()).append('\n');
-            out.append("meta|startZ|").append(snapshot.startZ()).append('\n');
-            out.append("meta|blocksBroken|").append(snapshot.blocksBroken()).append('\n');
-            out.append("meta|blocksPlaced|").append(snapshot.blocksPlaced()).append('\n');
-            out.append("meta|displayInfo|").append(snapshot.displayInfo()).append('\n');
-            out.append("meta|lastCheckpointAt|").append(snapshot.lastCheckpointAt()).append('\n');
-            out.append("meta|printedAt|").append(snapshot.printedAt()).append('\n');
-
-            Path tmp = path.resolveSibling(path.getFileName().toString() + ".tmp");
-            Files.writeString(tmp, out.toString(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
-            try {
-                Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING);
+        StatsArtifactSnapshot canonicalSnapshot = copyStatsArtifact(
+            snapshot,
+            StatsArtifactKind.CANONICAL,
+            snapshot.state(),
+            snapshot.resumeAllowed(),
+            snapshot.printedAt(),
+            snapshot.printedToChat(),
+            snapshot.webhookSendCommitted(),
+            snapshot.apiSendCommitted(),
+            snapshot.finalizationReason(),
+            snapshot.generation()
+        );
+        if (System.currentTimeMillis() >= nextStatsStorageRetryAtMs && persistStatsArtifactSnapshot(canonicalSnapshot, reason + "-recover-canonical")) {
+            if (deleteStatsArtifact(resolveShadowStatsArtifactPath(), "shadow-cleared-after-canonical-recovery")) {
+                memoryRetryMode = false;
+                nextStatsStorageRetryAtMs = 0L;
+                return true;
             }
 
-            StatsCacheSnapshot previous = statsCacheSnapshot;
+            THMAddon.LOG.warn("[highway-stats-cache] canonical recovery succeeded but shadow cleanup failed; staying in memory-retry mode until shadow is cleared.");
+        }
+
+        nextStatsStorageRetryAtMs = System.currentTimeMillis() + STATS_MEMORY_RETRY_RECHECK_MS;
+        return persistStatsArtifactSnapshot(copyStatsArtifact(
+            snapshot,
+            StatsArtifactKind.SHADOW,
+            snapshot.state(),
+            snapshot.resumeAllowed(),
+            snapshot.printedAt(),
+            snapshot.printedToChat(),
+            snapshot.webhookSendCommitted(),
+            snapshot.apiSendCommitted(),
+            snapshot.finalizationReason(),
+            snapshot.generation()
+        ), reason + "-shadow");
+    }
+
+    private boolean persistStatsArtifactSnapshot(StatsArtifactSnapshot snapshot, String reason) {
+        if (snapshot == null) return false;
+
+        try {
+            writeStatsArtifact(resolveStatsArtifactPath(snapshot.kind()), snapshot);
+            StatsArtifactSnapshot previous = statsCacheSnapshot;
             statsCacheSnapshot = snapshot;
-            nextStatsCheckpointAtMs = snapshot.lastCheckpointAt() + STATS_CHECKPOINT_INTERVAL_MS;
+            if (snapshot.kind() != StatsArtifactKind.FINALIZATION) activeStatsGeneration = snapshot.generation();
+            if (snapshot.state() == StatsSessionState.OPEN) nextStatsCheckpointAtMs = snapshot.lastCheckpointAt() + STATS_CHECKPOINT_INTERVAL_MS;
             statsSessionDirty = false;
 
-            THMAddon.LOG.info("[highway-stats-cache] saved reason={} session={} {}->{} resumeAllowed={} broken={} placed={} printedAt={}",
+            THMAddon.LOG.info("[highway-stats-cache] saved reason={} kind={} session={} generation={} {}->{} resumeAllowed={} broken={} placed={} printedAt={}",
                 reason,
+                snapshot.kind(),
                 shortSessionId(snapshot.sessionId()),
+                snapshot.generation(),
                 previous == null ? "null" : previous.state(),
                 snapshot.state(),
                 snapshot.resumeAllowed(),
@@ -2223,7 +2387,7 @@ public class HighwayBuilderTHM extends Module {
                 snapshot.printedAt()
             );
             return true;
-        } catch (IOException e) {
+        } catch (IOException | GeneralSecurityException e) {
             THMAddon.LOG.warn("[highway-stats-cache] save failed reason={} session={} message={}",
                 reason,
                 shortSessionId(snapshot.sessionId()),
@@ -2234,53 +2398,393 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private boolean closeAndRetireCurrentStatsSession(String reason) {
-        if (activeStatsSessionId == null || start == null) return true;
-        return closeAndRetireStatsSession(createCurrentStatsSnapshot(StatsSessionState.CLOSED, false, System.currentTimeMillis()), reason);
+        if (!hasActiveInMemoryStatsSession()) return true;
+        return closeAndRetireStatsSession(createCurrentStatsSnapshot(StatsArtifactKind.CANONICAL, StatsSessionState.CLOSED, false, System.currentTimeMillis()), reason);
     }
 
-    private boolean closeAndRetireStatsSession(StatsCacheSnapshot snapshot, String reason) {
+    private boolean closeAndRetireStatsSession(StatsArtifactSnapshot snapshot, String reason) {
         if (snapshot == null) return true;
 
-        StatsCacheSnapshot closedSnapshot = new StatsCacheSnapshot(
-            snapshot.sessionId(),
-            StatsSessionState.CLOSED,
-            false,
-            snapshot.startX(),
-            snapshot.startY(),
-            snapshot.startZ(),
-            snapshot.blocksBroken(),
-            snapshot.blocksPlaced(),
-            snapshot.displayInfo(),
-            System.currentTimeMillis(),
-            System.currentTimeMillis()
-        );
+        boolean deletedCanonical = deleteStatsArtifact(resolveCanonicalStatsArtifactPath(), reason + "-canonical-delete");
+        boolean deletedShadow = deleteStatsArtifact(resolveShadowStatsArtifactPath(), reason + "-shadow-delete");
 
-        if (!persistStatsCacheSnapshot(closedSnapshot, reason + "-close")) {
-            THMAddon.LOG.warn("[highway-stats-cache] failed to close session={} reason={}; leaving active file untouched.",
+        if (!deletedCanonical || !deletedShadow) {
+            THMAddon.LOG.warn("[highway-stats-cache] retire failed session={} reason={}; canonical/shadow artifacts were not fully removed, leaving finalization record intact.",
                 shortSessionId(snapshot.sessionId()),
                 reason
             );
             return false;
         }
 
-        tryDeleteStatsCache(reason + "-delete");
-        activeStatsSessionId = null;
-        nextStatsCheckpointAtMs = 0L;
-        statsSessionDirty = false;
+        boolean deletedFinalization = deleteStatsArtifact(resolveFinalizationRecordPath(), reason + "-finalization-delete");
+        if (!deletedFinalization) {
+            THMAddon.LOG.warn("[highway-stats-cache] retire incomplete session={} reason={}; finalization record remains for safe recovery.",
+                shortSessionId(snapshot.sessionId()),
+                reason
+            );
+            return false;
+        }
+
+        if (statsCacheSnapshot != null && Objects.equals(statsCacheSnapshot.sessionId(), snapshot.sessionId())) statsCacheSnapshot = null;
+        loadedStatsArtifactIdentity = null;
         return true;
     }
 
-    private boolean tryDeleteStatsCache(String reason) {
-        Path path = resolveStatsCachePath();
+    private boolean deleteStatsArtifact(Path path, String reason) {
         try {
             if (Files.exists(path)) Files.delete(path);
-            statsCacheSnapshot = null;
-            THMAddon.LOG.info("[highway-stats-cache] deleted reason={}", reason);
+            THMAddon.LOG.info("[highway-stats-cache] deleted reason={} path={}", reason, path);
             return true;
         } catch (IOException e) {
-            THMAddon.LOG.warn("[highway-stats-cache] delete failed reason={} message={}", reason, e.getMessage());
+            THMAddon.LOG.warn("[highway-stats-cache] delete failed reason={} path={} message={}", reason, path, e.getMessage());
             return false;
         }
+    }
+
+    private StatsArtifactLoadResult loadStatsArtifact(Path path, StatsArtifactKind kind) {
+        if (!Files.exists(path)) return new StatsArtifactLoadResult(null, false, false);
+
+        List<String> lines;
+        try {
+            lines = Files.readAllLines(path, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            THMAddon.LOG.warn("[highway-stats-cache] transient read failure kind={} path={} message={}", kind, path, e.getMessage());
+            return new StatsArtifactLoadResult(null, true, false);
+        }
+
+        if (lines.isEmpty() || !STATS_ARTIFACT_MAGIC.equals(lines.get(0).trim())) {
+            quarantineStatsArtifact(path, kind, "invalid-magic", null);
+            return new StatsArtifactLoadResult(null, false, false);
+        }
+
+        String versionValue = null;
+        String nonceValue = null;
+        String cipherValue = null;
+        for (int i = 1; i < lines.size(); i++) {
+            String line = lines.get(i);
+            if (line == null) continue;
+            line = line.trim();
+            if (line.isEmpty()) continue;
+            String[] parts = line.split("\\|", 2);
+            if (parts.length != 2) continue;
+            switch (parts[0]) {
+                case "version" -> versionValue = parts[1];
+                case "nonce" -> nonceValue = parts[1];
+                case "ciphertext" -> cipherValue = parts[1];
+                default -> { }
+            }
+        }
+
+        int version = parseIntSafe(versionValue, -1);
+        if (version != STATS_ARTIFACT_VERSION) {
+            THMAddon.LOG.warn("[highway-stats-cache] unsupported artifact version kind={} path={} version={}", kind, path, version);
+            return new StatsArtifactLoadResult(null, false, true);
+        }
+
+        try {
+            StatsArtifactSnapshot snapshot = parseStatsArtifactPayload(kind, decryptStatsArtifactPayload(nonceValue, cipherValue));
+            if (!validateStatsArtifactSnapshot(snapshot)) {
+                quarantineStatsArtifact(path, kind, "invalid-payload", null);
+                return new StatsArtifactLoadResult(null, false, false);
+            }
+            return new StatsArtifactLoadResult(snapshot, false, false);
+        } catch (IOException e) {
+            THMAddon.LOG.warn("[highway-stats-cache] transient decode failure kind={} path={} message={}", kind, path, e.getMessage());
+            return new StatsArtifactLoadResult(null, true, false);
+        } catch (GeneralSecurityException | IllegalArgumentException e) {
+            quarantineStatsArtifact(path, kind, "decrypt-failed", e);
+            return new StatsArtifactLoadResult(null, false, false);
+        }
+    }
+
+    private boolean validateStatsArtifactSnapshot(StatsArtifactSnapshot snapshot) {
+        if (snapshot == null) return false;
+        if (snapshot.sessionId() == null || snapshot.sessionId().isBlank()) return false;
+        if (snapshot.generation() <= 0L) return false;
+        if (snapshot.state() == StatsSessionState.OPEN && !snapshot.resumeAllowed()) return false;
+        return snapshot.state() == StatsSessionState.OPEN || !snapshot.resumeAllowed();
+    }
+
+    private void writeStatsArtifact(Path path, StatsArtifactSnapshot snapshot) throws IOException, GeneralSecurityException {
+        Path parent = path.getParent();
+        if (parent != null) Files.createDirectories(parent);
+
+        String payload = serializeStatsArtifactPayload(snapshot);
+        byte[] nonce = new byte[STATS_GCM_NONCE_BYTES];
+        STATS_RANDOM.nextBytes(nonce);
+        byte[] ciphertext = encryptStatsArtifactPayload(payload, nonce);
+
+        StringBuilder out = new StringBuilder(1024);
+        out.append(STATS_ARTIFACT_MAGIC).append('\n');
+        out.append("version|").append(STATS_ARTIFACT_VERSION).append('\n');
+        out.append("nonce|").append(Base64.getEncoder().encodeToString(nonce)).append('\n');
+        out.append("ciphertext|").append(Base64.getEncoder().encodeToString(ciphertext)).append('\n');
+
+        writeBytesAtomically(path, out.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private String serializeStatsArtifactPayload(StatsArtifactSnapshot snapshot) {
+        StringBuilder out = new StringBuilder(1024);
+        out.append("meta|kind|").append(snapshot.kind().name()).append('\n');
+        out.append("meta|sessionId|").append(snapshot.sessionId()).append('\n');
+        out.append("meta|generation|").append(snapshot.generation()).append('\n');
+        out.append("meta|state|").append(snapshot.state().name()).append('\n');
+        out.append("meta|resumeAllowed|").append(snapshot.resumeAllowed()).append('\n');
+        out.append("meta|startX|").append(snapshot.startX()).append('\n');
+        out.append("meta|startY|").append(snapshot.startY()).append('\n');
+        out.append("meta|startZ|").append(snapshot.startZ()).append('\n');
+        out.append("meta|blocksBroken|").append(snapshot.blocksBroken()).append('\n');
+        out.append("meta|blocksPlaced|").append(snapshot.blocksPlaced()).append('\n');
+        out.append("meta|displayInfo|").append(snapshot.displayInfo()).append('\n');
+        out.append("meta|lastCheckpointAt|").append(snapshot.lastCheckpointAt()).append('\n');
+        out.append("meta|printedAt|").append(snapshot.printedAt()).append('\n');
+        out.append("meta|printedToChat|").append(snapshot.printedToChat()).append('\n');
+        out.append("meta|webhookSendCommitted|").append(snapshot.webhookSendCommitted()).append('\n');
+        out.append("meta|apiSendCommitted|").append(snapshot.apiSendCommitted()).append('\n');
+        out.append("meta|finalizationReason|").append(snapshot.finalizationReason() == null ? "" : snapshot.finalizationReason()).append('\n');
+        return out.toString();
+    }
+
+    private byte[] encryptStatsArtifactPayload(String payload, byte[] nonce) throws GeneralSecurityException {
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.ENCRYPT_MODE, deriveStatsArtifactKey(), new GCMParameterSpec(STATS_GCM_TAG_BITS, nonce));
+        return cipher.doFinal(payload.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private String decryptStatsArtifactPayload(String nonceValue, String cipherValue) throws IOException, GeneralSecurityException {
+        if (nonceValue == null || cipherValue == null) throw new IOException("missing encrypted fields");
+
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.DECRYPT_MODE, deriveStatsArtifactKey(), new GCMParameterSpec(STATS_GCM_TAG_BITS, Base64.getDecoder().decode(nonceValue)));
+        return new String(cipher.doFinal(Base64.getDecoder().decode(cipherValue)), StandardCharsets.UTF_8);
+    }
+
+    private SecretKeySpec deriveStatsArtifactKey() throws GeneralSecurityException {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] keyBytes = digest.digest(getPassword().getBytes(StandardCharsets.UTF_8));
+        return new SecretKeySpec(keyBytes, "AES");
+    }
+
+    private StatsArtifactSnapshot parseStatsArtifactPayload(StatsArtifactKind kind, String payload) {
+        HashMap<String, String> meta = new HashMap<>();
+        for (String line : payload.split("\n")) {
+            if (line == null) continue;
+            line = line.trim();
+            if (line.isEmpty()) continue;
+            String[] parts = line.split("\\|", 3);
+            if (parts.length < 3 || !"meta".equals(parts[0])) continue;
+            meta.put(parts[1], parts[2]);
+        }
+
+        StatsSessionState state = parseStatsSessionState(meta.get("state"));
+        if (state == null) throw new IllegalArgumentException("invalid-state");
+
+        return new StatsArtifactSnapshot(
+            kind,
+            meta.getOrDefault("sessionId", ""),
+            parseLongSafe(meta.get("generation"), 0L),
+            state,
+            Boolean.parseBoolean(meta.getOrDefault("resumeAllowed", "false")),
+            parseDoubleSafe(meta.get("startX"), 0.0),
+            parseDoubleSafe(meta.get("startY"), 0.0),
+            parseDoubleSafe(meta.get("startZ"), 0.0),
+            parseIntSafe(meta.get("blocksBroken"), 0),
+            parseIntSafe(meta.get("blocksPlaced"), 0),
+            Boolean.parseBoolean(meta.getOrDefault("displayInfo", "true")),
+            parseLongSafe(meta.get("lastCheckpointAt"), 0L),
+            parseLongSafe(meta.get("printedAt"), 0L),
+            Boolean.parseBoolean(meta.getOrDefault("printedToChat", "false")),
+            Boolean.parseBoolean(meta.getOrDefault("webhookSendCommitted", "false")),
+            Boolean.parseBoolean(meta.getOrDefault("apiSendCommitted", "false")),
+            meta.getOrDefault("finalizationReason", "")
+        );
+    }
+
+    private void writeBytesAtomically(Path path, byte[] bytes) throws IOException {
+        Path tmp = path.resolveSibling(path.getFileName().toString() + ".tmp");
+        try (FileChannel channel = FileChannel.open(tmp, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
+            channel.write(ByteBuffer.wrap(bytes));
+            channel.force(true);
+        }
+
+        try {
+            Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException ignored) {
+            Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private RetiredStatsReportSnapshot createRetiredStatsReportSnapshot(StatsArtifactSnapshot snapshot) {
+        if (snapshot == null) return null;
+        return new RetiredStatsReportSnapshot(
+            snapshot.sessionId(),
+            snapshot.generation(),
+            new Vec3d(snapshot.startX(), snapshot.startY(), snapshot.startZ()),
+            snapshot.blocksBroken(),
+            snapshot.blocksPlaced()
+        );
+    }
+
+    private RetiredStatsReportSnapshot captureRetiredStatsReportFromLiveSession() {
+        if (!hasActiveInMemoryStatsSession()) return null;
+        return new RetiredStatsReportSnapshot(activeStatsSessionId, activeStatsGeneration, start, blocksBroken, blocksPlaced);
+    }
+
+    private StatsArtifactSnapshot createFinalizationRecord(String reason) {
+        if (!hasActiveInMemoryStatsSession()) return null;
+        return new StatsArtifactSnapshot(
+            StatsArtifactKind.FINALIZATION,
+            activeStatsSessionId,
+            nextStatsGeneration(),
+            StatsSessionState.PENDING_PRINT,
+            false,
+            start.x,
+            start.y,
+            start.z,
+            blocksBroken,
+            blocksPlaced,
+            displayInfo,
+            System.currentTimeMillis(),
+            0L,
+            false,
+            false,
+            false,
+            reason == null ? "" : reason
+        );
+    }
+
+    private StatsArtifactSnapshot persistFinalizationRecord(StatsArtifactSnapshot snapshot, String reason) {
+        if (snapshot == null) return null;
+        boolean previousFinalizing = statsSessionTerminalOrFinalizing;
+        statsSessionTerminalOrFinalizing = true;
+        if (!persistStatsArtifactSnapshot(snapshot, reason)) {
+            statsSessionTerminalOrFinalizing = previousFinalizing;
+            return null;
+        }
+        return snapshot;
+    }
+
+    private StatsArtifactSnapshot updateFinalizationRecord(
+        StatsArtifactSnapshot snapshot,
+        long printedAt,
+        boolean printedToChat,
+        boolean webhookCommitted,
+        boolean apiCommitted,
+        String reason
+    ) {
+        if (snapshot == null) return null;
+        StatsArtifactSnapshot updated = copyStatsArtifact(
+            snapshot,
+            StatsArtifactKind.FINALIZATION,
+            StatsSessionState.PENDING_PRINT,
+            false,
+            printedAt,
+            printedToChat,
+            webhookCommitted,
+            apiCommitted,
+            snapshot.finalizationReason(),
+            nextStatsGenerationAfter(snapshot.generation())
+        );
+        return persistFinalizationRecord(updated, reason) != null ? updated : null;
+    }
+
+    private boolean completeFinalizationRecord(StatsArtifactSnapshot snapshot, String reason, boolean allowPrinting) {
+        if (snapshot == null) return true;
+
+        RetiredStatsReportSnapshot report = createRetiredStatsReportSnapshot(snapshot);
+        if (report == null) return false;
+
+        StatsArtifactSnapshot working = snapshot;
+        if (allowPrinting && !working.printedToChat()) {
+            if (!tryPrintStatsToChat(working.sessionId(), report.startPos(), report.blocksBroken(), report.blocksPlaced(), reason)) return false;
+            scheduleStatsProofScreenshotIfEnabled(working.sessionId(), reason);
+            working = updateFinalizationRecord(working, System.currentTimeMillis(), true, working.webhookSendCommitted(), working.apiSendCommitted(), reason + "-printed");
+            if (working == null) return false;
+        }
+
+        working = commitAndSendFinalExternalStats(working, report, reason);
+        if (working == null) return false;
+
+        if (!closeAndRetireStatsSession(working, reason)) return false;
+
+        retiredStatsReportSnapshot = report;
+        markArtifactConsumed(snapshot);
+        clearActiveInMemoryStatsSession();
+        return true;
+    }
+
+    private StatsArtifactSnapshot commitAndSendFinalExternalStats(StatsArtifactSnapshot snapshot, RetiredStatsReportSnapshot report, String reason) {
+        if (snapshot == null || report == null || mc == null || mc.player == null) return snapshot;
+
+        StatsArtifactSnapshot working = snapshot;
+
+        if (sendStatisticsWebhhok.get() && !working.webhookSendCommitted()) {
+            String webhookUrl = decryptWebhook(encryptedWebhook.get(), decryptkey.get());
+            if (webhookUrl != null) {
+                double distance = PlayerUtils.distanceTo(report.startPos());
+                if (distance > 1) {
+                    StatsArtifactSnapshot committed = updateFinalizationRecord(
+                        working,
+                        working.printedAt(),
+                        working.printedToChat(),
+                        true,
+                        working.apiSendCommitted(),
+                        reason + "-webhook-commit"
+                    );
+                    if (committed != null) {
+                        String playerName = mc.player.getName().getLiteralString();
+                        String statsMessage = String.format("Player: %s , Distance: %.0f , Blocks broken: %d , Blocks placed: %d",
+                            playerName,
+                            distance,
+                            report.blocksBroken(),
+                            report.blocksPlaced()
+                        );
+                        sendToWebhook(webhookUrl, statsMessage);
+                        working = committed;
+                    }
+                } else warning("Statistics NOT sent to webhook! Distance too small: (highlight)%.0f", distance);
+            }
+        }
+
+        if (sendStatisticsapi.get() && !working.apiSendCommitted()) {
+            double distance = PlayerUtils.distanceTo(report.startPos());
+            if (distance > 1) {
+                if (distance < 50000) {
+                    if (isNot6B6T()) warning("API not sent. You are not on 6B6T");
+                    else if (THMSystem.get().getHash() == null || Objects.equals(THMSystem.get().getHash(), "SetYourHash") || Objects.equals(THMSystem.get().getHash(), "")) {
+                        warning("API not sent. No Hash set.");
+                    } else {
+                        StatsArtifactSnapshot committed = updateFinalizationRecord(
+                            working,
+                            working.printedAt(),
+                            working.printedToChat(),
+                            working.webhookSendCommitted(),
+                            true,
+                            reason + "-api-commit"
+                        );
+                        if (committed != null) {
+                            String server = mc.getCurrentServerEntry() != null ? mc.getCurrentServerEntry().address : "singleplayer";
+                            String playerName = mc.player.getName().getLiteralString();
+                            String statsMessageapi = String.format("%s:%s:%s:%.0f:%s:%s:%s:%s:%s",
+                                THMSystem.get().getHash(),
+                                playerName,
+                                server,
+                                distance,
+                                report.blocksBroken(),
+                                report.blocksPlaced(),
+                                dir,
+                                generateTimestamp(),
+                                isOnMainHighway()
+                            );
+                            sendToAPI(statsMessageapi, getPassword(), getAPIHighway(), "statistics");
+                            working = committed;
+                        }
+                    }
+                } else warning("Statistics NOT sent to Api! Please Calculate the real Distance using the /calculate command in proof-of-work");
+            } else warning("Statistics NOT sent to Api! Distance too small: (highlight)%.0f", distance);
+        }
+
+        return working;
     }
 
     private void scheduleStatsProofScreenshot(String sessionId, String reason) {
@@ -2358,13 +2862,14 @@ public class HighwayBuilderTHM extends Module {
         return sessionId.length() <= 8 ? sessionId : sessionId.substring(0, 8);
     }
 
-    private void quarantineStatsCache(Path path, String reason, Exception error) {
-        statsCacheSnapshot = null;
+    private void quarantineStatsArtifact(Path path, StatsArtifactKind kind, String reason, Exception error) {
+        if (statsCacheSnapshot != null && statsCacheSnapshot.kind() == kind) statsCacheSnapshot = null;
 
         Path quarantine = path.resolveSibling(path.getFileName() + ".corrupt-" + System.currentTimeMillis());
         try {
             Files.move(path, quarantine, StandardCopyOption.REPLACE_EXISTING);
-            THMAddon.LOG.warn("[highway-stats-cache] quarantined reason={} path={} quarantine={} error={}",
+            THMAddon.LOG.warn("[highway-stats-cache] quarantined kind={} reason={} path={} quarantine={} error={}",
+                kind,
                 reason,
                 path,
                 quarantine,
@@ -2376,7 +2881,8 @@ public class HighwayBuilderTHM extends Module {
             } catch (IOException ignored) {
                 // ignore delete fallback failure after quarantine failure
             }
-            THMAddon.LOG.warn("[highway-stats-cache] quarantine failed reason={} path={} message={} error={}",
+            THMAddon.LOG.warn("[highway-stats-cache] quarantine failed kind={} reason={} path={} message={} error={}",
+                kind,
                 reason,
                 path,
                 moveError.getMessage(),
@@ -2385,10 +2891,37 @@ public class HighwayBuilderTHM extends Module {
         }
     }
 
-    private Path resolveStatsCachePath() {
-        return MeteorClient.FOLDER.toPath()
-            .resolve("thm")
-            .resolve("highwaybuilder-stats-cache.txt");
+    private Path resolveStatsArtifactDirectory() {
+        return MeteorClient.FOLDER.toPath().resolve("thm");
+    }
+
+    private Path resolveCanonicalStatsArtifactPath() {
+        return resolveStatsArtifactDirectory().resolve(STATS_CANONICAL_FILE_NAME);
+    }
+
+    private Path resolveFinalizationRecordPath() {
+        return resolveStatsArtifactDirectory().resolve(STATS_FINALIZATION_FILE_NAME);
+    }
+
+    private Path resolveShadowStatsArtifactPath() {
+        return resolveStatsArtifactDirectory().resolve(STATS_SHADOW_FILE_NAME);
+    }
+
+    private Path resolveStatsArtifactPath(StatsArtifactKind kind) {
+        return switch (kind) {
+            case CANONICAL -> resolveCanonicalStatsArtifactPath();
+            case FINALIZATION -> resolveFinalizationRecordPath();
+            case SHADOW -> resolveShadowStatsArtifactPath();
+        };
+    }
+
+    private StatsArtifactIdentity identityOf(StatsArtifactSnapshot snapshot) {
+        return new StatsArtifactIdentity(snapshot.kind(), snapshot.sessionId(), snapshot.generation());
+    }
+
+    private void markArtifactConsumed(StatsArtifactSnapshot snapshot) {
+        if (snapshot == null) return;
+        consumedStatsArtifactKeys.add(identityOf(snapshot).key());
     }
 
     private StatsSessionState parseStatsSessionState(String value) {
@@ -2400,15 +2933,20 @@ public class HighwayBuilderTHM extends Module {
         }
     }
 
-    private boolean tryPrintStatsToChat(Vec3d startPos, int broken, int placed, String reason) {
+    private boolean tryPrintStatsToChat(String sessionId, Vec3d startPos, int broken, int placed, String reason) {
         if (startPos == null || mc.player == null || mc.world == null) return false;
         if (!Utils.canUpdate()) return false;
 
         info("Distance: (highlight)%.0f", PlayerUtils.distanceTo(startPos));
         info("Blocks broken: (highlight)%d", broken);
         info("Blocks placed: (highlight)%d", placed);
-        lastPrintedStatsSessionId = activeStatsSessionId;
-        THMAddon.LOG.info("[highway-stats-cache] printed reason={} broken={} placed={}", reason, broken, placed);
+        lastPrintedStatsSessionId = sessionId;
+        THMAddon.LOG.info("[highway-stats-cache] printed reason={} session={} broken={} placed={}",
+            reason,
+            shortSessionId(sessionId),
+            broken,
+            placed
+        );
         return true;
     }
 
@@ -2590,10 +3128,115 @@ public class HighwayBuilderTHM extends Module {
         return -1;
     }
 
+    private void handleFoodTypesChanged(List<Item> selected) {
+        if (clampingFoodTypes || selected == null || selected.size() <= 2) return;
+
+        clampingFoodTypes = true;
+        try {
+            foodTypes.set(new ArrayList<>(selected.subList(0, 2)));
+        } finally {
+            clampingFoodTypes = false;
+        }
+
+        warning("Maximum 2 food types.");
+    }
+
+    private boolean hasConfiguredFoodTypes() {
+        return !foodTypes.get().isEmpty();
+    }
+
+    private boolean isConfiguredFoodItem(Item item) {
+        return item != null && foodTypes.get().contains(item);
+    }
+
+    private boolean isConfiguredFoodStack(ItemStack itemStack) {
+        return itemStack != null && !itemStack.isEmpty() && isConfiguredFoodItem(itemStack.getItem());
+    }
+
+    private int countConfiguredFoodItemsInInventory() {
+        if (mc.player == null) return 0;
+
+        int count = 0;
+        for (int i = 0; i < mc.player.getInventory().getMainStacks().size(); i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (isConfiguredFoodStack(stack)) count += stack.getCount();
+        }
+
+        return count;
+    }
+
+    private int countLooseConfiguredFoodItems(Item item) {
+        if (mc.player == null || item == null) return 0;
+
+        int count = 0;
+        for (int i = 0; i < mc.player.getInventory().getMainStacks().size(); i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.isOf(item)) count += stack.getCount();
+        }
+
+        return count;
+    }
+
+    private int findPreferredConfiguredFoodSlot(Inventory inventory) {
+        int firstMatch = -1;
+        int bestMergeMatch = -1;
+        int bestMergeCount = -1;
+
+        for (int i = 0; i < inventory.size(); i++) {
+            ItemStack stack = inventory.getStack(i);
+            if (!isConfiguredFoodStack(stack)) continue;
+
+            if (firstMatch == -1) firstMatch = i;
+
+            int looseCount = countLooseConfiguredFoodItems(stack.getItem());
+            if (looseCount <= 0) continue;
+
+            if (looseCount > bestMergeCount) {
+                bestMergeCount = looseCount;
+                bestMergeMatch = i;
+            }
+        }
+
+        return bestMergeMatch != -1 ? bestMergeMatch : firstMatch;
+    }
+
+    private boolean isContainerItemEmpty(ItemStack containerItem) {
+        if (containerItem == null || containerItem.isEmpty() || !Utils.isShulker(containerItem.getItem())) return true;
+
+        ItemStack[] items = new ItemStack[27];
+        Utils.getItemsInContainerItem(containerItem, items);
+
+        for (ItemStack stack : items) {
+            if (!stack.isEmpty()) return false;
+        }
+
+        return true;
+    }
+
+    private boolean isContainerInventoryEmpty(Inventory inventory) {
+        for (int i = 0; i < inventory.size(); i++) {
+            if (!inventory.getStack(i).isEmpty()) return false;
+        }
+
+        return true;
+    }
+
+    private boolean shouldTriggerFoodRestock() {
+        return foodRestock.get()
+            && hasConfiguredFoodTypes()
+            && countConfiguredFoodItemsInInventory() <= saveFood.get();
+    }
+
+    private void maybeQueueFoodRestock() {
+        if (mc.player == null || mc.world == null) return;
+        if (!shouldTriggerFoodRestock()) return;
+        restockTask.setFood();
+    }
+
     private boolean isUsefulCursorStack(ItemStack itemStack) {
         if (itemStack == null || itemStack.isEmpty()) return false;
         if (itemStack.isIn(ItemTags.PICKAXES)) return true;
-        if (itemStack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(itemStack.getItem())) return true;
+        if (isConfiguredFoodStack(itemStack)) return true;
         if (itemStack.getItem() instanceof BlockItem bi) {
             if (trashItems.get().contains(itemStack.getItem())) return false;
             if (blocksToPlace.get().contains(bi.getBlock())) return true;
@@ -2615,10 +3258,7 @@ public class HighwayBuilderTHM extends Module {
                 return true;
             }
             if (stack.isIn(ItemTags.PICKAXES)) return true;
-            if (stack.contains(DataComponentTypes.FOOD)
-                && !Modules.get().get(AutoEat.class).blacklist.get().contains(stack.getItem())) {
-                return true;
-            }
+            if (isConfiguredFoodStack(stack)) return true;
         }
 
         return false;
@@ -2667,6 +3307,9 @@ public class HighwayBuilderTHM extends Module {
             .append(getStatsText());
 
         String screenshotSessionId = lastPrintedStatsSessionId;
+        if ((screenshotSessionId == null || screenshotSessionId.isBlank()) && retiredStatsReportSnapshot != null) {
+            screenshotSessionId = retiredStatsReportSnapshot.sessionId();
+        }
         if ((screenshotSessionId == null || screenshotSessionId.isBlank()) && activeStatsSessionId != null && !activeStatsSessionId.isBlank()) {
             screenshotSessionId = activeStatsSessionId;
         }
@@ -2676,10 +3319,27 @@ public class HighwayBuilderTHM extends Module {
     }
 
     public MutableText getStatsText() {
-        MutableText text = Text.literal(String.format("%sDistance: %s%.0f\n", Formatting.GRAY, Formatting.WHITE, mc.player == null ? 0.0f : PlayerUtils.distanceTo(start)));
-        text.append(String.format("%sBlocks broken: %s%d\n", Formatting.GRAY, Formatting.WHITE, blocksBroken));
-        text.append(String.format("%sBlocks placed: %s%d\n", Formatting.GRAY, Formatting.WHITE, blocksPlaced));
-        if (mc.player != null && PlayerUtils.distanceTo(start) > 50000) {
+        Vec3d statsStart = null;
+        int statsBroken = 0;
+        int statsPlaced = 0;
+
+        if (hasActiveInMemoryStatsSession()) {
+            statsStart = start;
+            statsBroken = blocksBroken;
+            statsPlaced = blocksPlaced;
+        } else if (retiredStatsReportSnapshot != null) {
+            statsStart = retiredStatsReportSnapshot.startPos();
+            statsBroken = retiredStatsReportSnapshot.blocksBroken();
+            statsPlaced = retiredStatsReportSnapshot.blocksPlaced();
+        }
+
+        double distance = 0.0;
+        if (mc.player != null && statsStart != null) distance = PlayerUtils.distanceTo(statsStart);
+
+        MutableText text = Text.literal(String.format("%sDistance: %s%.0f\n", Formatting.GRAY, Formatting.WHITE, distance));
+        text.append(String.format("%sBlocks broken: %s%d\n", Formatting.GRAY, Formatting.WHITE, statsBroken));
+        text.append(String.format("%sBlocks placed: %s%d\n", Formatting.GRAY, Formatting.WHITE, statsPlaced));
+        if (mc.player != null && statsStart != null && distance > 50000) {
             text.append(String.format("%sRestart Detected. Please calculate the real distance using /calculate in proof-of-work",
                 Formatting.YELLOW));
         }
@@ -3266,10 +3926,7 @@ public class HighwayBuilderTHM extends Module {
                         return true;
                     }
                     if (stack.isIn(ItemTags.PICKAXES)) return true;
-                    if (stack.contains(DataComponentTypes.FOOD)
-                        && !Modules.get().get(AutoEat.class).blacklist.get().contains(stack.getItem())) {
-                        return true;
-                    }
+                    if (b.isConfiguredFoodStack(stack)) return true;
                 }
 
                 return false;
@@ -3304,6 +3961,8 @@ public class HighwayBuilderTHM extends Module {
             private boolean returnAnchorSaved;
             @Override
             protected void start(HighwayBuilderTHM b) {
+                b.restockTask.ensureSessionInitialized();
+                b.restockTask.notePhase(RestockTask.SourcePhase.MineEnderChests);
                 if (b.restockTask.isSequenceActive() && !b.restockTask.isBlockadeReady()) {
                     if (b.lastState != Center && b.lastState != ThrowOutTrash && b.lastState != PlaceShulkerBlockade) {
                         b.setState(Center);
@@ -3333,20 +3992,26 @@ public class HighwayBuilderTHM extends Module {
                     }
                 }
 
-                int emptySlots = 0;
-                for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
-                    if (b.mc.player.getInventory().getStack(i).isEmpty()) emptySlots++;
-                }
-
-                int availableSlots = emptySlots - b.minEmpty.get();
-                if (availableSlots <= 0) {
-                    b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", "No empty inventory slots to continue e-chest mining.");
-                    b.error("No empty slots.");
+                if (b.restockTask.getSession() == null) {
+                    b.error("Unable to continue e-chest mining without an active restock session.");
                     return;
                 }
 
-                targetEchestsToBreak = (availableSlots * 64) / 8;
-                targetObsidianCount = targetEchestsToBreak * 8;
+                RestockTask.RestockSession session = b.restockTask.getSession();
+                session.refreshProgress();
+                targetEchestsToBreak = session.getTargetEchestsToBreak();
+                targetObsidianCount = session.getMiningGoalObsidianCount();
+                if (targetEchestsToBreak <= 0) {
+                    b.restockTask.markCurrentSourceExhausted(RestockTask.SourcePhase.MineEnderChests);
+                    if (b.restockTask.isTargetSatisfied()) {
+                        completeAndReturnToAnchor(b);
+                    } else if (b.kitbotRestock.get()) {
+                        b.setState(KitbotOrder);
+                    } else {
+                        b.error("No usable ender chests available to continue obsidian restock.");
+                    }
+                    return;
+                }
                 first = true;
                 moveTimer = timeout = 0;
                 returnX = b.mc.player.getX();
@@ -3394,6 +4059,9 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 if (obsidianCount >= targetObsidianCount) {
+                    if (b.restockTask.getSession() != null && b.restockTask.getSession().getRemainingObsidianItems() > targetEchestsToBreak * 8) {
+                        b.restockTask.getSession().markGreatestAvailable();
+                    }
                     stopTimerEnabled = true;
                     stopTimer = 12;
                     return;
@@ -3482,6 +4150,7 @@ public class HighwayBuilderTHM extends Module {
                     // Place ender chest
                     int slot = findAndMoveToHotbar(b, itemStack -> itemStack.getItem() == Items.ENDER_CHEST);
                     if (slot == -1 || countItem(b, stack -> stack.getItem().equals(Items.ENDER_CHEST)) <= b.saveEchests.get()) {
+                        b.restockTask.markCurrentSourceExhausted(RestockTask.SourcePhase.MineEnderChests);
                         stopTimerEnabled = true;
                         stopTimer = 12;
                         return;
@@ -3524,12 +4193,18 @@ public class HighwayBuilderTHM extends Module {
             private final BlockPos.Mutable cagePos = new BlockPos.Mutable();
             private boolean orderSent;
             private boolean cageReady;
+            private double returnX, returnY, returnZ;
+            private boolean returnAnchorSaved;
 
             @Override
             protected void start(HighwayBuilderTHM b) {
                 orderSent = b.kitbotOrderInFlight;
                 cageReady = false;
                 b.kitbotTpHandled = false;
+                returnX = b.mc.player.getX();
+                returnY = b.mc.player.getY();
+                returnZ = b.mc.player.getZ();
+                returnAnchorSaved = true;
                 b.input.stop();
             }
 
@@ -3539,7 +4214,7 @@ public class HighwayBuilderTHM extends Module {
 
                 if (!b.kitbotRestock.get()) {
                     b.clearKitbotOrderTracking("kitbot-restock-disabled");
-                    b.setState(Forward);
+                    returnToAnchorAndSetState(b, Forward);
                     return;
                 }
 
@@ -3567,6 +4242,10 @@ public class HighwayBuilderTHM extends Module {
                 if (hasExpectedKitDelivery(b)) {
                     if (b.restockTask.isSequenceActive() && !b.restockTask.tasksInactive()) {
                         if (b.restockTask.isBlockadeReady()) {
+                            if (!b.restockTask.validateOrInvalidateBlockadeLease()) {
+                                b.restockTask.setBlockadeReady(false);
+                                b.restockDebug("KitbotOrder invalidated blockade lease after fallback; forcing rebuild.");
+                            }
                             if (repairExistingBlockade(b)) return;
                             b.restockDebug("KitbotOrder restored the existing blockade, returning to Restock.");
                         } else {
@@ -3574,11 +4253,11 @@ public class HighwayBuilderTHM extends Module {
                             b.restockTask.setBlockadeReady(false);
                             b.restockDebug("KitbotOrder received supplies without a valid blockade, forcing proper blockade rebuild before returning to Restock.");
                         }
-                        b.setState(Restock);
+                        returnToAnchorAndSetState(b, Restock);
                     } else {
                         b.clearKitbotOrderTracking("kitbot-order-supplies-ready-no-restock-sequence");
                         if (breakCageTop(b)) return;
-                        b.setState(Forward);
+                        returnToAnchorAndSetState(b, Forward);
                     }
                 }
             }
@@ -3608,14 +4287,14 @@ public class HighwayBuilderTHM extends Module {
                     return true;
                 }
 
-                b.error("Kitbot restock failed.");
+                failKitbotOrder(b, "Kitbot restock failed.");
                 return true;
             }
 
             private boolean buildCage(HighwayBuilderTHM b) {
                 int slot = findAndMoveToHotbar(b, itemStack -> itemStack.getItem() instanceof BlockItem bi && bi.getBlock() == Blocks.NETHERRACK);
                 if (slot == -1) {
-                    b.error("No netherrack available to encase before kit order.");
+                    failKitbotOrder(b, "No netherrack available to encase before kit order.");
                     return false;
                 }
 
@@ -3685,10 +4364,7 @@ public class HighwayBuilderTHM extends Module {
                         return true;
                     }
                     if (b.restockTask.pickaxes && stack.isIn(ItemTags.PICKAXES)) return true;
-                    if (b.restockTask.food && stack.contains(DataComponentTypes.FOOD)
-                        && !Modules.get().get(AutoEat.class).blacklist.get().contains(stack.getItem())) {
-                        return true;
-                    }
+                    if (b.restockTask.food && b.isConfiguredFoodStack(stack)) return true;
                 }
 
                 return false;
@@ -3791,6 +4467,26 @@ public class HighwayBuilderTHM extends Module {
                 }
                 return false;
             }
+
+            private void returnToAnchorAndSetState(HighwayBuilderTHM b, State nextState) {
+                if (returnAnchorSaved) {
+                    b.input.stop();
+                    b.mc.player.setPosition(returnX, returnY, returnZ);
+                    returnAnchorSaved = false;
+                }
+
+                b.setState(nextState);
+            }
+
+            private void failKitbotOrder(HighwayBuilderTHM b, String message) {
+                b.clearKitbotOrderTracking("kitbot-order-failed");
+                if (returnAnchorSaved) {
+                    b.input.stop();
+                    b.mc.player.setPosition(returnX, returnY, returnZ);
+                    returnAnchorSaved = false;
+                }
+                b.errorEarly(message);
+            }
         },
 
         // this one was rough to do
@@ -3800,18 +4496,27 @@ public class HighwayBuilderTHM extends Module {
             private static final int INVALID_RESTOCK_RECOVERY_MAX_RETRIES = 1;
             private static final int SOURCE_READY_MAX_RETRIES = 3;
             private int minimumSlots, stopTimer, delayTimer;
-            private boolean breakContainer, indicateStopping;
+            private boolean breakContainer, indicateStopping, transitionToMineEnderChests;
             private int restockPickaxesStartCount;
             private Predicate<ItemStack> shulkerPredicate;
             private Predicate<ItemStack> sourceItemPredicate;
             private String sourceLabel;
             private int sourceReadyRetries;
+            private boolean extractedFoodShulkerFromEnderChest;
+            private boolean foodShulkerReturnPending;
+            private boolean foodShulkerReturnRetryUsed;
+            private boolean foodShulkerReturnFinalizeAfterBreak;
+            private int foodShulkerReturnWaitTicks;
+            private int foodShulkerReturnInventorySlot = -1;
             // if this is ever not -1 when we expect it to be, things break a lot
             private int slot = -1;
 
             @Override
             protected void start(HighwayBuilderTHM b) {
                 restockPickaxesStartCount = b.restockTask.getPickaxeStartCount();
+                b.restockTask.ensureSessionInitialized();
+                b.restockTask.notePhase(RestockTask.SourcePhase.Inventory);
+                b.restockTask.clearBlockedByStaging();
 
                 b.restockDebug("Restock.start(active=%s, pending=%s, blockadeReady=%s, sequence=%s, lastState=%s)",
                     b.restockTask.activeSummary(),
@@ -3825,11 +4530,16 @@ public class HighwayBuilderTHM extends Module {
                     b.restockTask.setBlockadeReady(true);
                     b.restockDebug("Restock.start marked blockade ready after %s.", b.stateName(b.lastState));
                 }
+                else if (b.restockTask.isBlockadeReady() && !b.restockTask.validateOrInvalidateBlockadeLease()) {
+                    b.restockDebug("Restock.start invalidated stale blockade lease; requesting rebuild.");
+                }
 
                 slot = -1; // :ptsd:
                 sourceItemPredicate = null;
                 sourceLabel = "unknown";
                 sourceReadyRetries = 0;
+                transitionToMineEnderChests = false;
+                if (!b.restockTask.food) clearFoodReturnTracking();
                 // set the predicate to test for shulker boxes
                 if (shulkerPredicate == null) setShulkerPredicate(b);
 
@@ -3863,18 +4573,24 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 // firstly search your inventory for shulkers that have the items you need
-                if (slot == -1 && b.searchShulkers.get()) {
+                if (slot == -1 && b.searchShulkers.get() && (b.restockTask.getSession() == null || !b.restockTask.getSession().isInventoryShulkersExhausted())) {
+                    b.restockTask.notePhase(RestockTask.SourcePhase.InventoryShulkers);
                     sourceItemPredicate = shulkerPredicate;
                     sourceLabel = "shulker";
                     slot = findAndMoveToHotbar(b, shulkerPredicate, false);
                     if (slot == -1) {
+                        b.restockTask.markCurrentSourceExhausted(RestockTask.SourcePhase.InventoryShulkers);
                         sourceItemPredicate = null;
                         sourceLabel = "unknown";
                     }
                 }
 
                 // next search your ender chest for raw items and shulkers containing items
-                if (slot == -1 && b.searchEnderChest.get() && countItem(b, stack -> stack.getItem().equals(Items.ENDER_CHEST)) > 0) {
+                if (slot == -1
+                    && b.searchEnderChest.get()
+                    && countItem(b, stack -> stack.getItem().equals(Items.ENDER_CHEST)) > 0
+                    && (b.restockTask.getSession() == null || !b.restockTask.getSession().isEnderChestExhausted())) {
+                    b.restockTask.notePhase(RestockTask.SourcePhase.EnderChest);
 
                     boolean stop = EChestMemory.isKnown();
                     if (EChestMemory.isKnown()) {
@@ -3889,7 +4605,7 @@ public class HighwayBuilderTHM extends Module {
                                 stop = false;
                                 break;
                             }
-                            if (b.restockTask.food && stack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(stack.getItem())) {
+                            if (b.restockTask.food && b.isConfiguredFoodStack(stack)) {
                                 stop = false;
                                 break;
                             }
@@ -3906,13 +4622,16 @@ public class HighwayBuilderTHM extends Module {
                         sourceLabel = "ender_chest";
                         slot = findAndMoveToHotbar(b, sourceItemPredicate, false);
                         if (slot == -1) {
+                            b.restockTask.markCurrentSourceExhausted(RestockTask.SourcePhase.EnderChest);
                             sourceItemPredicate = null;
                             sourceLabel = "unknown";
                         }
+                    } else {
+                        b.restockTask.markCurrentSourceExhausted(RestockTask.SourcePhase.EnderChest);
                     }
                 }
 
-                if (slot == -1 && shouldMineEnderChestsForMaterials(b)) {
+                if (slot == -1 && shouldMineEnderChestsForMaterials(b) && (b.restockTask.getSession() == null || !b.restockTask.getSession().isMineEnderChestsExhausted())) {
                     b.restockDebug("Restock.start found no direct source; continuing into MineEnderChests.");
                     b.setState(MineEnderChests);
                     return;
@@ -3920,7 +4639,9 @@ public class HighwayBuilderTHM extends Module {
 
                 if (slot == -1 && b.kitbotRestock.get()
                     && (b.restockTask.materials || b.restockTask.pickaxes)
-                    && !hasShulkerInInventory(b)) {
+                    && !hasShulkerInInventory(b)
+                    && b.restockTask.shouldAttemptKitbot()) {
+                    b.restockTask.notePhase(RestockTask.SourcePhase.Kitbot);
                     b.restockDebug("Restock.start falling back to KitbotOrder.");
                     b.setState(KitbotOrder);
                     return;
@@ -3928,16 +4649,13 @@ public class HighwayBuilderTHM extends Module {
 
                 // by this point we have searched shulkers and your ender chest, and no more items could be found to pull from
                 if (slot == -1) {
-                    boolean restockOccurred = (
-                        (b.restockTask.materials && (b.hasForwardPlaceableBlock()
-                            || (b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && countItem(b, itemStack -> itemStack.getItem() == Items.ENDER_CHEST) > b.saveEchests.get()))) ||
-                            (b.restockTask.pickaxes && countItem(b, itemStack -> itemStack.isIn(ItemTags.PICKAXES)) > restockPickaxesStartCount) ||
-                            (b.restockTask.food && hasItem(b, itemStack -> itemStack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(itemStack.getItem())))
-                    );
-
-                    if (restockOccurred) {
+                    b.restockTask.refreshSessionProgress();
+                    if (b.restockTask.isTargetSatisfied()) {
+                        b.completeRestockTaskAndContinue();
+                    } else if (b.restockTask.isObsidianRestockSession() && b.restockTask.getSession() != null && b.restockTask.getSession().usingGreatestAvailable && b.restockTask.getSession().getProgressTowardsTarget() > 0) {
                         b.completeRestockTaskAndContinue();
                     } else {
+                        if (b.restockTask.getSession() != null) b.restockTask.getSession().fail();
                         b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", "Unable to perform restock for '" + b.restockTask.item() + "'.");
                         b.error("Unable to perform restock for '" + b.restockTask.item() + "'.");
                     }
@@ -3950,7 +4668,10 @@ public class HighwayBuilderTHM extends Module {
                     if (b.mc.player.getInventory().getStack(i).isEmpty()) emptySlots++;
                 }
 
-                if (b.restockTask.pickaxes) {
+                if (b.restockTask.getSession() != null && b.restockTask.getSession().targetInitialized) {
+                    minimumSlots = b.restockTask.getSession().targetFinal;
+                }
+                else if (b.restockTask.pickaxes) {
                     int pickaxeRestockSlots = emptySlots - 1;
                     if (pickaxeRestockSlots <= 0) {
                         b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", "Not enough empty slots to restock pickaxes.");
@@ -4005,7 +4726,7 @@ public class HighwayBuilderTHM extends Module {
             @Override
             protected void tick(HighwayBuilderTHM b) {
                 // this should only tick if there's a valid slot we can restock from
-                if (slot == -1) {
+                if (slot == -1 && !foodShulkerReturnPending) {
                     b.restockDebug("Restock.tick hit invalid slot=-1.");
                     b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", "Invalid restocking action.");
                     b.error("Invalid restocking action.");
@@ -4013,13 +4734,6 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 if (clearCursor(b)) return;
-
-                if (indicateStopping && !breakContainer) {
-                    if (stopTimer > 0) stopTimer--;
-                    else b.completeRestockTaskAndContinue();
-
-                    return;
-                }
 
                 // prevent tasks executing when they shouldn't
                 if (b.restockTask.tasksInactive()) {
@@ -4045,18 +4759,36 @@ public class HighwayBuilderTHM extends Module {
                     return;
                 }
 
-                // calculate the amount of materials we have already pulled
-                int slotsPulled = 0;
-                if (b.restockTask.materials) {
-                    slotsPulled += countSlots(b, b::isForwardPlaceableBlock);
+                BlockPos blockPos = pos.getBlockPos();
+                if (foodShulkerReturnPending && handleFoodShulkerReturn(b, blockPos)) return;
+
+                if (indicateStopping && !breakContainer) {
+                    if (stopTimer > 0) stopTimer--;
+                    else if (transitionToMineEnderChests) b.setState(MineEnderChests);
+                    else b.completeRestockTaskAndContinue();
+
+                    return;
                 }
-                if (b.restockTask.pickaxes) {
-                    int pickaxesPulled = countItem(b, itemStack -> itemStack.isIn(ItemTags.PICKAXES)) - restockPickaxesStartCount;
-                    slotsPulled += Math.max(pickaxesPulled, 0);
-                }
-                if (b.restockTask.food) slotsPulled += countSlots(b, itemStack -> itemStack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(itemStack.getItem()));
+
+                b.restockTask.refreshSessionProgress();
+                int slotsPulled = b.restockTask.getSession() != null ? b.restockTask.getSession().getProgressTowardsTarget() : 0;
                 // whether we have pulled the minimum amount of items we want
                 if (slotsPulled >= minimumSlots && !indicateStopping) {
+                    if (b.restockTask.food
+                        && extractedFoodShulkerFromEnderChest
+                        && b.mc.currentScreen instanceof ShulkerBoxScreen screen
+                        && screen.getScreenHandler().syncId == b.syncId) {
+                        Inventory inv = ((ShulkerBoxScreenHandlerAccessor) screen.getScreenHandler()).meteor$getInventory();
+                        prepareFoodShulkerReturn(b, inv);
+                    }
+                    indicateStopping = true;
+                    breakContainer = true;
+                    stopTimer = 12;
+                    if (b.mc.currentScreen != null) b.closeHandledScreen();
+                    return;
+                }
+                if (b.restockTask.canTransitionToMineEnderChests() && !indicateStopping) {
+                    transitionToMineEnderChests = true;
                     indicateStopping = true;
                     breakContainer = true;
                     stopTimer = 12;
@@ -4065,7 +4797,6 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 // Check block state
-                BlockPos blockPos = pos.getBlockPos();
                 BlockState blockState = b.mc.world.getBlockState(blockPos);
                 b.restockDebug("Restock.tick container probe pos=%s block=%s breakContainer=%s indicateStopping=%s slotsPulled=%d/%d",
                     b.formatBlockPos(blockPos),
@@ -4092,6 +4823,11 @@ public class HighwayBuilderTHM extends Module {
 
                             // we have taken everything we can from the shulker box, and since slotsPulled >= minimumSlots is false, we should keep going
                             // close the screen, break the shulker box, look for more containers to loot from
+                            if ("shulker".equals(sourceLabel) && b.restockTask.shouldCompleteAfterInventoryShulkers()) {
+                                indicateStopping = true;
+                                stopTimer = 12;
+                            }
+                            b.restockTask.markCurrentSourceExhausted(RestockTask.SourcePhase.InventoryShulkers);
                             b.closeHandledScreen();
                             breakContainer = true;
                         }
@@ -4119,18 +4855,21 @@ public class HighwayBuilderTHM extends Module {
                                 int moveTo = InvUtils.findEmpty().slot();
 
                                 if (moveTo != -1) {
-                                    for (int i = 0; i < inv.size(); i++) {
-                                        if (shulkerPredicate.test(inv.getStack(i))) {
-                                            InvUtils.shiftClick().slotId(i);
-                                            delayTimer = b.inventoryDelay.get();
-                                            break;
-                                        }
+                                    int shulkerSlot = findShulkerSlotInInventory(inv);
+                                    if (shulkerSlot != -1) {
+                                        InvUtils.shiftClick().slotId(shulkerSlot);
+                                        if (b.restockTask.food) trackExtractedFoodShulkerFromEnderChest(b, moveTo);
+                                        delayTimer = b.inventoryDelay.get();
                                     }
+                                } else {
+                                    b.restockTask.markBlockedByStaging(RestockTask.SourcePhase.EnderChest);
+                                    b.restockDebug("Restock.tick marked source blocked by staging while extracting shulkers from ender chest.");
                                 }
                             }
 
                             // if it reaches here, we have taken everything we can from your ender chest, and may have also grabbed a shulker
                             // we should be finished in your ender chest, so we can break it and either continue on our way or start checking shulkers
+                            b.restockTask.markCurrentSourceExhausted(RestockTask.SourcePhase.EnderChest);
                             b.closeHandledScreen();
                             breakContainer = true;
                         }
@@ -4147,7 +4886,10 @@ public class HighwayBuilderTHM extends Module {
                             breakContainer = false;
 
                             // if we don't signal intent to stop, we loop back to the start and continue restocking
-                            if (indicateStopping) b.completeRestockTaskAndContinue();
+                            if (indicateStopping) {
+                                if (transitionToMineEnderChests) b.setState(MineEnderChests);
+                                else b.completeRestockTaskAndContinue();
+                            }
                             else start(b);
 
                             return;
@@ -4200,6 +4942,7 @@ public class HighwayBuilderTHM extends Module {
                 return b.restockTask.materials
                     && b.mineEnderChests.get()
                     && b.blocksToPlace.get().contains(Blocks.OBSIDIAN)
+                    && b.restockTask.needsMoreRawEchestsForSession()
                     && countItem(b, stack -> stack.getItem().equals(Items.ENDER_CHEST)) > b.saveEchests.get();
             }
 
@@ -4217,7 +4960,7 @@ public class HighwayBuilderTHM extends Module {
                     if (grabFromInventory(b, inv, itemStack -> itemStack.isIn(ItemTags.PICKAXES))) return true;
                 }
                 if (b.restockTask.food) {
-                    return grabFromInventory(b, inv, itemStack -> itemStack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(itemStack.getItem()));
+                    return grabFromInventory(b, inv, b::isConfiguredFoodStack);
                 }
 
                 return false;
@@ -4225,19 +4968,29 @@ public class HighwayBuilderTHM extends Module {
 
             // scans the inventory, takes out the first item that matches the predicate and returns
             private boolean grabFromInventory(HighwayBuilderTHM b, Inventory inv, Predicate<ItemStack> filterItem) {
+                if (b.restockTask.food) {
+                    int preferredFoodSlot = b.findPreferredConfiguredFoodSlot(inv);
+                    if (preferredFoodSlot != -1 && shiftClickInventorySlot(b, inv, preferredFoodSlot)) return true;
+                    return false;
+                }
+
                 for (int i = 0; i < inv.size(); i++) {
-                    if (filterItem.test(inv.getStack(i))) {
-                        ItemStack before = inv.getStack(i).copy();
-                        InvUtils.shiftClick().slotId(i);
-                        ItemStack after = inv.getStack(i);
-
-                        if (clearCursor(b)) return true;
-
-                        if (after.getCount() < before.getCount() || after.getItem() != before.getItem()) return true;
-                    }
+                    if (filterItem.test(inv.getStack(i)) && shiftClickInventorySlot(b, inv, i)) return true;
                 }
 
                 return false;
+            }
+
+            private boolean shiftClickInventorySlot(HighwayBuilderTHM b, Inventory inv, int slotId) {
+                if (slotId < 0 || slotId >= inv.size()) return false;
+
+                ItemStack before = inv.getStack(slotId).copy();
+                InvUtils.shiftClick().slotId(slotId);
+                ItemStack after = inv.getStack(slotId);
+
+                if (clearCursor(b)) return true;
+
+                return after.getCount() < before.getCount() || after.getItem() != before.getItem();
             }
 
             private boolean clearCursor(HighwayBuilderTHM b) {
@@ -4289,27 +5042,156 @@ public class HighwayBuilderTHM extends Module {
                             if (b.blocksToPlace.get().contains(bi.getBlock()) || (b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && bi == Items.ENDER_CHEST && needsMoreRawEchests(b))) return true;
                         }
                         if (b.restockTask.pickaxes && stack.isIn(ItemTags.PICKAXES)) return true;
-                        if (b.restockTask.food && stack.contains(DataComponentTypes.FOOD) && !Modules.get().get(AutoEat.class).blacklist.get().contains(stack.getItem())) return true;
+                        if (b.restockTask.food && b.isConfiguredFoodStack(stack)) return true;
                     }
 
                     return false;
                 };
             }
 
-            private boolean needsMoreRawEchests(HighwayBuilderTHM b) {
-                if (!b.blocksToPlace.get().contains(Blocks.OBSIDIAN)) return false;
-
-                int emptySlots = 0;
-                for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
-                    if (b.mc.player.getInventory().getStack(i).isEmpty()) emptySlots++;
+            private int findShulkerSlotInInventory(Inventory inv) {
+                for (int i = 0; i < inv.size(); i++) {
+                    if (shulkerPredicate.test(inv.getStack(i))) return i;
                 }
 
-                int availableSlots = Math.max(emptySlots - b.minEmpty.get(), 0);
-                int rawEchestsNeeded = (availableSlots * 64) / 8;
-                int roundedStackTarget = rawEchestsNeeded <= 0 ? 0 : ((rawEchestsNeeded + 63) / 64) * 64;
-                int currentExtraEchests = Math.max(countItem(b, itemStack -> itemStack.getItem() == Items.ENDER_CHEST) - b.saveEchests.get(), 0);
+                return -1;
+            }
 
-                return currentExtraEchests < roundedStackTarget;
+            private void trackExtractedFoodShulkerFromEnderChest(HighwayBuilderTHM b, int inventorySlot) {
+                ItemStack movedStack = inventorySlot >= 0 && inventorySlot < b.mc.player.getInventory().getMainStacks().size()
+                    ? b.mc.player.getInventory().getStack(inventorySlot)
+                    : ItemStack.EMPTY;
+                if (movedStack.isEmpty() || !Utils.isShulker(movedStack.getItem())) return;
+
+                extractedFoodShulkerFromEnderChest = true;
+                foodShulkerReturnPending = false;
+                foodShulkerReturnRetryUsed = false;
+                foodShulkerReturnFinalizeAfterBreak = false;
+                foodShulkerReturnWaitTicks = 0;
+                foodShulkerReturnInventorySlot = inventorySlot;
+                b.restockDebug("Tracked extracted food shulker in inventory slot %d for eventual ender chest return.", inventorySlot);
+            }
+
+            private void prepareFoodShulkerReturn(HighwayBuilderTHM b, Inventory inv) {
+                if (!extractedFoodShulkerFromEnderChest || foodShulkerReturnPending) return;
+
+                foodShulkerReturnInventorySlot = slot;
+                if (b.isContainerInventoryEmpty(inv)) {
+                    b.restockDebug("Extracted food shulker became empty after pull; keeping it in inventory for later cleanup.");
+                    clearFoodReturnTracking();
+                    return;
+                }
+
+                foodShulkerReturnPending = true;
+                foodShulkerReturnRetryUsed = false;
+                foodShulkerReturnFinalizeAfterBreak = false;
+                foodShulkerReturnWaitTicks = 20;
+                b.restockDebug("Queued extracted food shulker return to ender chest from slot %d.", foodShulkerReturnInventorySlot);
+            }
+
+            private boolean handleFoodShulkerReturn(HighwayBuilderTHM b, BlockPos blockPos) {
+                BlockState blockState = b.mc.world.getBlockState(blockPos);
+
+                if (breakContainer) {
+                    if (!(blockState.getBlock() instanceof AirBlock)) {
+                        handleContainerBlock(b, blockPos);
+                        return true;
+                    }
+
+                    breakContainer = false;
+                    if (foodShulkerReturnFinalizeAfterBreak) {
+                        clearFoodReturnTracking();
+                        b.completeRestockTaskAndContinue();
+                        return true;
+                    }
+                }
+
+                if (foodShulkerReturnWaitTicks > 0) {
+                    foodShulkerReturnWaitTicks--;
+                    return true;
+                }
+
+                if (blockState.getBlock() instanceof AirBlock) {
+                    int echestSlot = findAndMoveToHotbar(b, itemStack -> itemStack.getItem() == Items.ENDER_CHEST, false);
+                    if (echestSlot == -1) {
+                        b.warning("Unable to find an ender chest to return the extracted food shulker. Keeping it in inventory.");
+                        clearFoodReturnTracking();
+                        b.completeRestockTaskAndContinue();
+                        return true;
+                    }
+
+                    BlockUtils.place(blockPos, Hand.MAIN_HAND, echestSlot, b.rotation.get().place, 0, true, true, true);
+                    delayTimer = b.inventoryDelay.get();
+                    return true;
+                }
+
+                if (blockState.getBlock() != Blocks.ENDER_CHEST) {
+                    handleContainerBlock(b, blockPos);
+                    return true;
+                }
+
+                if (!(b.mc.currentScreen instanceof GenericContainerScreen screen)) {
+                    handleContainerBlock(b, blockPos);
+                    return true;
+                }
+
+                if (screen.getScreenHandler().syncId != b.syncId) return true;
+
+                int trackedSlot = resolveFoodReturnInventorySlot(b);
+                boolean moved = false;
+
+                if (trackedSlot != -1) {
+                    ItemStack trackedShulker = b.mc.player.getInventory().getStack(trackedSlot);
+                    if (!b.isContainerItemEmpty(trackedShulker)) {
+                        ItemStack before = trackedShulker.copy();
+                        b.mc.interactionManager.clickSlot(
+                            b.mc.player.currentScreenHandler.syncId,
+                            SlotUtils.indexToId(trackedSlot),
+                            0,
+                            SlotActionType.QUICK_MOVE,
+                            b.mc.player
+                        );
+                        ItemStack after = b.mc.player.getInventory().getStack(trackedSlot);
+                        moved = after.isEmpty() || after.getCount() < before.getCount() || !ItemStack.areItemsAndComponentsEqual(before, after);
+                    }
+                }
+
+                if (!moved && !foodShulkerReturnRetryUsed) {
+                    foodShulkerReturnRetryUsed = true;
+                    foodShulkerReturnWaitTicks = 20;
+                    foodShulkerReturnFinalizeAfterBreak = false;
+                    b.warning("Retrying extracted food shulker return after the first attempt failed.");
+                } else {
+                    if (!moved) {
+                        b.warning("Keeping extracted food shulker in inventory after return retry failed.");
+                    }
+                    foodShulkerReturnFinalizeAfterBreak = true;
+                }
+
+                b.closeHandledScreen();
+                breakContainer = true;
+                delayTimer = b.inventoryDelay.get();
+                return true;
+            }
+
+            private int resolveFoodReturnInventorySlot(HighwayBuilderTHM b) {
+                if (foodShulkerReturnInventorySlot < 0 || foodShulkerReturnInventorySlot >= b.mc.player.getInventory().getMainStacks().size()) return -1;
+                ItemStack stack = b.mc.player.getInventory().getStack(foodShulkerReturnInventorySlot);
+                return Utils.isShulker(stack.getItem()) ? foodShulkerReturnInventorySlot : -1;
+            }
+
+            private void clearFoodReturnTracking() {
+                extractedFoodShulkerFromEnderChest = false;
+                foodShulkerReturnPending = false;
+                foodShulkerReturnRetryUsed = false;
+                foodShulkerReturnFinalizeAfterBreak = false;
+                foodShulkerReturnWaitTicks = 0;
+                foodShulkerReturnInventorySlot = -1;
+            }
+
+            private boolean needsMoreRawEchests(HighwayBuilderTHM b) {
+                if (!b.blocksToPlace.get().contains(Blocks.OBSIDIAN)) return false;
+                return b.restockTask.needsMoreRawEchestsForSession();
             }
 
             private boolean hasShulkerInInventory(HighwayBuilderTHM b) {
@@ -6125,12 +7007,309 @@ public class HighwayBuilderTHM extends Module {
         private boolean blockadeReady;
         private boolean blockadeTeardownPending;
         private int pickaxeStartCount;
+        private long blockadeLeaseGenerationCounter;
+        private RestockSession session;
+        private final Deque<Type> pendingQueue = new ArrayDeque<>();
         private final HighwayBuilderTHM b;
 
         private enum Type {
             Materials,
             Pickaxes,
             Food
+        }
+
+        private enum SourcePhase {
+            Inventory,
+            InventoryShulkers,
+            EnderChest,
+            MineEnderChests,
+            Kitbot,
+            Complete,
+            Failed
+        }
+
+        private enum SourceAttemptResult {
+            NO_PROGRESS,
+            PARTIAL_PROGRESS,
+            TARGET_SATISFIED,
+            SOURCE_EXHAUSTED,
+            BLOCKED_BY_STAGING
+        }
+
+        private enum BlockadeLeaseState {
+            NOT_BUILT,
+            BUILT,
+            INVALIDATED,
+            TEARDOWN_PENDING
+        }
+
+        private final class BlockadeLease {
+            private long generationId;
+            private final BlockPos.Mutable anchorPos = new BlockPos.Mutable();
+            private BlockadeType blockadeType = BlockadeType.Partial;
+            private BlockadeLeaseState state = BlockadeLeaseState.NOT_BUILT;
+            private long lastValidatedTick;
+
+            private void markBuilt() {
+                generationId = ++blockadeLeaseGenerationCounter;
+                blockadeType = b.blockadeType.get();
+                if (b.mc.player != null) anchorPos.set(b.mc.player.getBlockPos());
+                state = BlockadeLeaseState.BUILT;
+                lastValidatedTick = b.mc.player != null ? b.mc.player.age : 0L;
+            }
+
+            private void markTeardownPending() {
+                state = BlockadeLeaseState.TEARDOWN_PENDING;
+                lastValidatedTick = b.mc.player != null ? b.mc.player.age : lastValidatedTick;
+            }
+
+            private void invalidate() {
+                state = BlockadeLeaseState.INVALIDATED;
+                lastValidatedTick = b.mc.player != null ? b.mc.player.age : lastValidatedTick;
+            }
+
+            private void reset() {
+                generationId = 0L;
+                anchorPos.set(0, 0, 0);
+                blockadeType = BlockadeType.Partial;
+                state = BlockadeLeaseState.NOT_BUILT;
+                lastValidatedTick = 0L;
+            }
+
+            private boolean validateCurrentAnchor() {
+                if (state != BlockadeLeaseState.BUILT) return false;
+                if (b.mc.player == null || b.mc.world == null) return false;
+                BlockPos playerPos = b.mc.player.getBlockPos();
+                if (Math.abs(playerPos.getY() - anchorPos.getY()) > 3) {
+                    invalidate();
+                    return false;
+                }
+
+                // The blockade is always centered adjacent to the player during restock.
+                boolean nearAnchor = Math.abs(playerPos.getX() - anchorPos.getX()) <= 6
+                    && Math.abs(playerPos.getZ() - anchorPos.getZ()) <= 6;
+                if (!nearAnchor) {
+                    invalidate();
+                    return false;
+                }
+
+                lastValidatedTick = b.mc.player.age;
+                return true;
+            }
+        }
+
+        private final class RestockSession {
+            private final Type taskType;
+            private final BlockadeLease blockadeLease = new BlockadeLease();
+            private SourcePhase phase;
+            private SourceAttemptResult lastResult;
+            private boolean usingGreatestAvailable;
+            private boolean targetInitialized;
+            private boolean inventoryShulkersExhausted;
+            private boolean enderChestExhausted;
+            private boolean mineEnderChestsExhausted;
+            private boolean blockedByStaging;
+            private int targetFinal;
+            private int remainingTarget;
+            private int workingStageCapacity;
+            private int pickaxesStartCount;
+            private int materialStartStacks;
+            private int foodStartItems;
+            private int obsidianStartItems;
+            private int pickaxesAcquiredCount;
+            private int materialStacksAcquired;
+            private int foodItemsAcquired;
+            private int obsidianItemsAcquired;
+            private int saveEchestsReserve;
+            private int reserveRemaining;
+            private int usablePulledEchests;
+
+            private RestockSession(Type taskType) {
+                this.taskType = taskType;
+                this.phase = SourcePhase.Inventory;
+                this.lastResult = SourceAttemptResult.NO_PROGRESS;
+                this.saveEchestsReserve = b.saveEchests.get();
+                refreshBaselines();
+                refreshProgress();
+            }
+
+            private void refreshBaselines() {
+                pickaxesStartCount = countInventoryItems(itemStack -> itemStack.isIn(ItemTags.PICKAXES));
+                materialStartStacks = countInventorySlots(this::isTrackedMaterialStack);
+                foodStartItems = countInventoryItems(this::isTrackedFoodStack);
+                obsidianStartItems = countInventoryItems(itemStack -> itemStack.getItem() == Items.OBSIDIAN);
+            }
+
+            private void ensureTargetInitialized() {
+                if (targetInitialized || b.mc.player == null) return;
+
+                int freeSlots = countEmptyInventorySlots();
+                int usableFreeSlots = Math.max(freeSlots - b.minEmpty.get(), 0);
+                workingStageCapacity = usableFreeSlots;
+
+                targetFinal = switch (taskType) {
+                    case Pickaxes -> Math.min(Math.max(freeSlots - 1, 0), b.restockPickaxesAmount.get());
+                    case Materials -> isObsidianTask() ? usableFreeSlots * 64 : usableFreeSlots;
+                    case Food -> 1;
+                };
+
+                remainingTarget = Math.max(targetFinal, 0);
+                targetInitialized = targetFinal > 0;
+                refreshProgress();
+            }
+
+            private void refreshProgress() {
+                if (b.mc.player == null) return;
+
+                workingStageCapacity = Math.max(countEmptyInventorySlots() - b.minEmpty.get(), 0);
+                pickaxesAcquiredCount = Math.max(countInventoryItems(itemStack -> itemStack.isIn(ItemTags.PICKAXES)) - pickaxesStartCount, 0);
+                materialStacksAcquired = Math.max(countInventorySlots(this::isTrackedMaterialStack) - materialStartStacks, 0);
+                foodItemsAcquired = Math.max(countInventoryItems(this::isTrackedFoodStack) - foodStartItems, 0);
+                obsidianItemsAcquired = Math.max(countInventoryItems(itemStack -> itemStack.getItem() == Items.OBSIDIAN) - obsidianStartItems, 0);
+
+                int looseEchestsInInventory = countInventoryItems(itemStack -> itemStack.getItem() == Items.ENDER_CHEST);
+                reserveRemaining = Math.max(saveEchestsReserve - looseEchestsInInventory, 0);
+                usablePulledEchests = Math.max(looseEchestsInInventory - saveEchestsReserve, 0);
+
+                remainingTarget = Math.max(targetFinal - getProgressTowardsTarget(), 0);
+                if (isTargetSatisfied()) phase = SourcePhase.Complete;
+            }
+
+            private void notePhase(SourcePhase phase) {
+                this.phase = phase;
+                if (b.restockDebugLog.get()) {
+                    b.restockDebug("RestockSession phase=%s task=%s target=%d remaining=%d greatest=%s staging=%d reserveRemaining=%d usableEchests=%d.",
+                        phase,
+                        item(taskType),
+                        targetFinal,
+                        remainingTarget,
+                        usingGreatestAvailable,
+                        workingStageCapacity,
+                        reserveRemaining,
+                        usablePulledEchests
+                    );
+                }
+            }
+
+            private boolean isObsidianTask() {
+                return taskType == Type.Materials && b.blocksToPlace.get().contains(Blocks.OBSIDIAN);
+            }
+
+            private int getProgressTowardsTarget() {
+                return switch (taskType) {
+                    case Pickaxes -> pickaxesAcquiredCount;
+                    case Materials -> isObsidianTask() ? obsidianItemsAcquired : materialStacksAcquired;
+                    case Food -> foodItemsAcquired;
+                };
+            }
+
+            private boolean isTargetSatisfied() {
+                return targetInitialized && getProgressTowardsTarget() >= targetFinal;
+            }
+
+            private boolean shouldCompleteAfterInventoryShulkers() {
+                if (taskType == Type.Materials && isObsidianTask()) return false;
+                return getProgressTowardsTarget() > 0;
+            }
+
+            private boolean canTransitionToMineEnderChests() {
+                if (!isObsidianTask()) return false;
+                return usablePulledEchests > 0 && remainingTarget > 0;
+            }
+
+            private int getRemainingObsidianItems() {
+                return Math.max(targetFinal - obsidianItemsAcquired, 0);
+            }
+
+            private int getObsidianItemsTarget() {
+                return targetFinal;
+            }
+
+            private int getMiningGoalObsidianCount() {
+                int achievable = usablePulledEchests * 8;
+                if (achievable <= 0) return obsidianStartItems + obsidianItemsAcquired;
+                if (usingGreatestAvailable) return obsidianStartItems + obsidianItemsAcquired + achievable;
+                return obsidianStartItems + obsidianItemsAcquired + Math.min(remainingTarget, achievable);
+            }
+
+            private int getTargetEchestsToBreak() {
+                int achievable = usablePulledEchests;
+                if (achievable <= 0) return 0;
+                if (usingGreatestAvailable) return achievable;
+                return Math.min((remainingTarget + 7) / 8, achievable);
+            }
+
+            private void markSourceExhausted(SourcePhase phase) {
+                lastResult = SourceAttemptResult.SOURCE_EXHAUSTED;
+                switch (phase) {
+                    case InventoryShulkers -> inventoryShulkersExhausted = true;
+                    case EnderChest -> enderChestExhausted = true;
+                    case MineEnderChests -> mineEnderChestsExhausted = true;
+                    default -> { }
+                }
+            }
+
+            private void markBlockedByStaging(SourcePhase phase) {
+                blockedByStaging = true;
+                lastResult = SourceAttemptResult.BLOCKED_BY_STAGING;
+                markSourceExhausted(phase);
+            }
+
+            private void clearBlockedByStaging() {
+                blockedByStaging = false;
+            }
+
+            private boolean isInventoryShulkersExhausted() {
+                return inventoryShulkersExhausted;
+            }
+
+            private boolean isEnderChestExhausted() {
+                return enderChestExhausted;
+            }
+
+            private boolean isMineEnderChestsExhausted() {
+                return mineEnderChestsExhausted;
+            }
+
+            private void markGreatestAvailable() {
+                usingGreatestAvailable = true;
+            }
+
+            private void finishSuccessfully() {
+                phase = SourcePhase.Complete;
+                lastResult = SourceAttemptResult.TARGET_SATISFIED;
+                remainingTarget = 0;
+            }
+
+            private void fail() {
+                phase = SourcePhase.Failed;
+            }
+
+            private boolean shouldAttemptKitbot() {
+                return !isTargetSatisfied() && !isMineEnderChestsExhausted();
+            }
+
+            private boolean hasBlockingStagingShortage() {
+                return blockedByStaging && workingStageCapacity <= 0;
+            }
+
+            private boolean needsMoreRawEchests() {
+                if (!isObsidianTask()) return false;
+                int remainingObsidianItems = getRemainingObsidianItems();
+                int usableLooseEchests = Math.max(countInventoryItems(itemStack -> itemStack.getItem() == Items.ENDER_CHEST) - saveEchestsReserve, 0);
+                int remainingAfterLooseEchests = remainingObsidianItems - (usableLooseEchests * 8);
+                return remainingAfterLooseEchests > 0;
+            }
+
+            private boolean isTrackedMaterialStack(ItemStack stack) {
+                if (!(stack.getItem() instanceof BlockItem bi)) return false;
+                if (isObsidianTask()) return bi.getBlock() == Blocks.OBSIDIAN;
+                return b.blocksToPlace.get().contains(bi.getBlock()) && bi.getBlock() != Blocks.OBSIDIAN;
+            }
+
+            private boolean isTrackedFoodStack(ItemStack stack) {
+                return b.isConfiguredFoodStack(stack);
+            }
         }
 
         public RestockTask(HighwayBuilderTHM b) {
@@ -6157,14 +7336,22 @@ public class HighwayBuilderTHM extends Module {
                 return;
             }
 
-            if (tasksInactive()) {
-                activate(type);
-                b.info("Continuing restock with " + item() + ".");
-                return;
-            }
-
             if (enqueue(type)) {
                 b.info("Queued follow-up restock task for " + item(type) + ".");
+                if (b.restockDebugLog.get()) {
+                    b.restockDebug("RestockTask queued follow-up task=%s active=%s pending=%s sequence=%s.",
+                        item(type),
+                        activeSummary(),
+                        pendingSummary(),
+                        sequenceActive
+                    );
+                }
+            } else if (sequenceActive && b.restockDebugLog.get()) {
+                b.restockDebug("RestockTask ignored duplicate queued task=%s active=%s pending=%s.",
+                    item(type),
+                    activeSummary(),
+                    pendingSummary()
+                );
             }
         }
 
@@ -6176,6 +7363,7 @@ public class HighwayBuilderTHM extends Module {
             sequenceActive = false;
             blockadeReady = false;
             blockadeTeardownPending = false;
+            session = null;
         }
 
         public void completeActive() {
@@ -6210,10 +7398,14 @@ public class HighwayBuilderTHM extends Module {
 
         public void setBlockadeReady(boolean value) {
             blockadeReady = value;
+            if (session == null) return;
+            if (value) session.blockadeLease.markBuilt();
+            else session.blockadeLease.invalidate();
         }
 
         public void deferBlockadeTeardown() {
             blockadeTeardownPending = true;
+            if (session != null) session.blockadeLease.markTeardownPending();
         }
 
         public boolean advanceToPendingTask() {
@@ -6223,6 +7415,14 @@ public class HighwayBuilderTHM extends Module {
             clearPending(next);
             activate(next);
             b.info("Continuing restock with " + item() + ".");
+            if (b.restockDebugLog.get()) {
+                b.restockDebug("RestockTask advanced to queued task=%s remainingPending=%s blockadeReady=%s sequence=%s.",
+                    item(),
+                    pendingSummary(),
+                    blockadeReady,
+                    sequenceActive
+                );
+            }
             return true;
         }
 
@@ -6241,6 +7441,8 @@ public class HighwayBuilderTHM extends Module {
             blockadeReady = false;
             blockadeTeardownPending = false;
             pickaxeStartCount = 0;
+            if (session != null) session.blockadeLease.reset();
+            session = null;
         }
 
         public String item() {
@@ -6279,6 +7481,7 @@ public class HighwayBuilderTHM extends Module {
             completeActive();
             blockadeTeardownPending = false;
             onTaskActivated(type);
+            session = new RestockSession(type);
 
             switch (type) {
                 case Materials -> materials = true;
@@ -6292,16 +7495,19 @@ public class HighwayBuilderTHM extends Module {
                 case Materials -> {
                     if (pendingMaterials) yield false;
                     pendingMaterials = true;
+                    pendingQueue.addLast(type);
                     yield true;
                 }
                 case Pickaxes -> {
                     if (pendingPickaxes) yield false;
                     pendingPickaxes = true;
+                    pendingQueue.addLast(type);
                     yield true;
                 }
                 case Food -> {
                     if (pendingFood) yield false;
                     pendingFood = true;
+                    pendingQueue.addLast(type);
                     yield true;
                 }
             };
@@ -6328,10 +7534,78 @@ public class HighwayBuilderTHM extends Module {
             }
         }
 
+        public RestockSession getSession() {
+            return session;
+        }
+
+        public void ensureSessionInitialized() {
+            if (session == null) return;
+            session.ensureTargetInitialized();
+            session.refreshProgress();
+        }
+
+        public void notePhase(SourcePhase phase) {
+            if (session != null) session.notePhase(phase);
+        }
+
+        public void refreshSessionProgress() {
+            if (session != null) session.refreshProgress();
+        }
+
+        public boolean isTargetSatisfied() {
+            return session != null && session.isTargetSatisfied();
+        }
+
+        public boolean shouldCompleteAfterInventoryShulkers() {
+            return session != null && session.shouldCompleteAfterInventoryShulkers();
+        }
+
+        public boolean canTransitionToMineEnderChests() {
+            return session != null && session.canTransitionToMineEnderChests();
+        }
+
+        public boolean needsMoreRawEchestsForSession() {
+            return session != null && session.needsMoreRawEchests();
+        }
+
+        public boolean validateOrInvalidateBlockadeLease() {
+            if (session == null) return false;
+            boolean valid = session.blockadeLease.validateCurrentAnchor();
+            if (!valid) blockadeReady = false;
+            return valid;
+        }
+
+        public void markCurrentSourceExhausted(SourcePhase phase) {
+            if (session != null) session.markSourceExhausted(phase);
+        }
+
+        public void markBlockedByStaging(SourcePhase phase) {
+            if (session != null) session.markBlockedByStaging(phase);
+        }
+
+        public boolean hasBlockingStagingShortage() {
+            return session != null && session.hasBlockingStagingShortage();
+        }
+
+        public void clearBlockedByStaging() {
+            if (session != null) session.clearBlockedByStaging();
+        }
+
+        public boolean shouldAttemptKitbot() {
+            return session != null && session.shouldAttemptKitbot();
+        }
+
+        public boolean isObsidianRestockSession() {
+            return session != null && session.isObsidianTask();
+        }
+
         private Type nextPendingTask() {
-            if (pendingMaterials) return Type.Materials;
-            if (pendingPickaxes) return Type.Pickaxes;
-            if (pendingFood) return Type.Food;
+            while (!pendingQueue.isEmpty()) {
+                Type next = pendingQueue.peekFirst();
+                if (next == null) break;
+                if (isPending(next)) return next;
+                pendingQueue.removeFirst();
+            }
             return null;
         }
 
@@ -6339,6 +7613,7 @@ public class HighwayBuilderTHM extends Module {
             pendingMaterials = false;
             pendingPickaxes = false;
             pendingFood = false;
+            pendingQueue.clear();
         }
 
         private void clearPending(Type type) {
@@ -6347,6 +7622,15 @@ public class HighwayBuilderTHM extends Module {
                 case Pickaxes -> pendingPickaxes = false;
                 case Food -> pendingFood = false;
             }
+            pendingQueue.removeFirstOccurrence(type);
+        }
+
+        private boolean isPending(Type type) {
+            return switch (type) {
+                case Materials -> pendingMaterials;
+                case Pickaxes -> pendingPickaxes;
+                case Food -> pendingFood;
+            };
         }
 
         private String item(Type type) {
@@ -6362,6 +7646,23 @@ public class HighwayBuilderTHM extends Module {
             for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
                 ItemStack stack = b.mc.player.getInventory().getStack(i);
                 if (predicate.test(stack)) count += stack.getCount();
+            }
+            return count;
+        }
+
+        private int countInventorySlots(Predicate<ItemStack> predicate) {
+            int count = 0;
+            for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
+                ItemStack stack = b.mc.player.getInventory().getStack(i);
+                if (predicate.test(stack)) count++;
+            }
+            return count;
+        }
+
+        private int countEmptyInventorySlots() {
+            int count = 0;
+            for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
+                if (b.mc.player.getInventory().getStack(i).isEmpty()) count++;
             }
             return count;
         }
