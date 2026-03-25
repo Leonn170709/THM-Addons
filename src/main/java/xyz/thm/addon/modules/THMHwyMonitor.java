@@ -8,6 +8,7 @@ import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.events.meteor.ActiveModulesChangedEvent;
+import meteordevelopment.meteorclient.events.render.Render2DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.pathing.BaritoneUtils;
 import meteordevelopment.meteorclient.settings.BoolSetting;
@@ -22,10 +23,13 @@ import meteordevelopment.meteorclient.systems.modules.world.Timer;
 import meteordevelopment.meteorclient.utils.misc.HorizontalDirection;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Blocks;
+import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.DisconnectedScreen;
+import net.minecraft.client.gui.screen.TitleScreen;
 import net.minecraft.client.util.ScreenshotRecorder;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.chunk.ChunkStatus;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.ServerReconnectService;
 import xyz.thm.addon.utils.ServerStatusHandler;
@@ -46,7 +50,12 @@ public class THMHwyMonitor extends Module {
     private static final int BARITONE_PATH_STARTUP_TICKS = 10;
     private static final int BARITONE_PATH_TIMEOUT_TICKS = 20 * 20;
     private static final long ALIGNMENT_GATE_TIMEOUT_MS = 10_000L;
-    private static final int POST_REJOIN_AXIS_PROBE_DISTANCE = 5;
+    private static final int POST_REJOIN_AXIS_PROBE_DISTANCE = 20;
+    private static final int POST_REJOIN_AXIS_NEAR_PROBE_DISTANCE = 8;
+    private static final double RECONNECT_LINE_AMBIGUITY_THRESHOLD = 0.05;
+    private static final double RECONNECT_LINE_MAX_DISTANCE = 6.0;
+    private static final long POST_REJOIN_DIRECTION_RETRY_DELAY_MS = 1_000L;
+    private static final int POST_REJOIN_DIRECTION_RETRY_LIMIT = 30;
     private static final int RESTART_SCREENSHOT_DELAY_MS = 2000;
     private static final int RESTART_BUILDER_DISABLE_GRACE_MS = 3000;
     private static final long MAIN_SERVER_RESUME_DELAY_MS = 6_000L;
@@ -192,10 +201,53 @@ public class THMHwyMonitor extends Module {
     private long delayedMainServerResumeAtMs;
     private String delayedMainServerResumeContext = "";
     private boolean restartRecoveryActive;
+    private boolean postRejoinDirectionGateActive;
+    private int postRejoinDirectionRetryCount;
+    private long postRejoinDirectionNextAttemptAtMs;
+    private String postRejoinDirectionBlockReason = "";
+    private String postRejoinDirectionBlockSummary = "";
+    private boolean postRejoinBlockedScreenshotTaken;
+    private boolean postRejoinTerminalScreenshotTaken;
+    private HorizontalDirection postRejoinLastCompleteProbeWinner;
+    private boolean intentionalSafetyDisconnectArmed;
+    private boolean disableMonitorAfterIntentionalSafetyDisconnect;
     private volatile boolean restartBuilderDisableGraceScheduled;
     private long restartBuilderDisableGraceId;
     private long nextRestartBuilderDisableGraceId = 1L;
     private boolean previousAutoReconnectToggleState;
+
+    private record AxisProbeResult(
+        boolean allSamplesLoaded,
+        boolean strongWinner,
+        HorizontalDirection selectedDirection,
+        HorizontalDirection dirA,
+        int dirAScore,
+        HorizontalDirection dirB,
+        int dirBScore
+    ) {}
+
+    private record PostRejoinDirectionResult(
+        HorizontalDirection direction,
+        String reason,
+        String summary
+    ) {
+        private static PostRejoinDirectionResult success(HorizontalDirection direction, String summary) {
+            return new PostRejoinDirectionResult(direction, "", summary);
+        }
+
+        private static PostRejoinDirectionResult blocked(String reason, String summary) {
+            return new PostRejoinDirectionResult(null, reason, summary);
+        }
+
+        private boolean conclusive() {
+            return direction != null;
+        }
+    }
+
+    private record ReconnectLineResolution(
+        WorkLine line,
+        double distance
+    ) {}
 
     public THMHwyMonitor() {
         super(THMAddon.MAIN, "THM Highway Monitor", "Monitors alignment and recovers HighwayBuilder from drift.");
@@ -333,6 +385,7 @@ public class THMHwyMonitor extends Module {
         trackedDirection = "";
         recoveryYawBeforeMove = Float.NaN;
         clearPendingAlignmentGateRequest();
+        clearPostRejoinDirectionGateState();
         resetReconnectAutomationState(true);
         registerReconnectServiceListeners();
         wasConnectedLastTick = isSuccessfullyConnectedToServer();
@@ -359,6 +412,7 @@ public class THMHwyMonitor extends Module {
         trackedDirection = "";
         recoveryYawBeforeMove = Float.NaN;
         clearPendingAlignmentGateRequest();
+        clearPostRejoinDirectionGateState();
         unregisterReconnectServiceListeners();
         clearRestartAutomationState("deactivate", true, true);
         wasConnectedLastTick = false;
@@ -444,6 +498,7 @@ public class THMHwyMonitor extends Module {
         clearPendingRestartBuilderDisableGrace();
         restartEvidenceGateCycleId = 0L;
         clearDelayedMainServerResumeState();
+        clearPostRejoinDirectionGateState();
         if (clearCycleBinding) activeReconnectCycleId = 0L;
         if (disarmService) reconnectService().disarmReconnect("THMHwyMonitor clearRestartRecoveryState: " + reason);
     }
@@ -453,6 +508,17 @@ public class THMHwyMonitor extends Module {
         delayedMainServerResumeCycleId = 0L;
         delayedMainServerResumeAtMs = 0L;
         delayedMainServerResumeContext = "";
+    }
+
+    private void clearPostRejoinDirectionGateState() {
+        postRejoinDirectionGateActive = false;
+        postRejoinDirectionRetryCount = 0;
+        postRejoinDirectionNextAttemptAtMs = 0L;
+        postRejoinDirectionBlockReason = "";
+        postRejoinDirectionBlockSummary = "";
+        postRejoinBlockedScreenshotTaken = false;
+        postRejoinTerminalScreenshotTaken = false;
+        postRejoinLastCompleteProbeWinner = null;
     }
 
     private long armReconnectCycle(String source, boolean markRestartEvidenceGate) {
@@ -506,6 +572,8 @@ public class THMHwyMonitor extends Module {
 
     @EventHandler
     private void onGameJoined(GameJoinedEvent event) {
+        intentionalSafetyDisconnectArmed = false;
+        disableMonitorAfterIntentionalSafetyDisconnect = false;
         wasConnectedLastTick = true;
         clearNonRestartHardFailSignal();
         clearRestartHardFailSignal();
@@ -513,17 +581,36 @@ public class THMHwyMonitor extends Module {
         pendingDisconnectScreenEvidenceCheck = false;
         pendingDisconnectScreenEvidenceUntilMs = 0L;
         unresolvedMainServerDisconnectCandidate = false;
+        clearStaleDisconnectedScreenIfLiveConnected();
     }
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        wasConnectedLastTick = false;
+        pendingDisconnectScreenEvidenceCheck = false;
+        pendingDisconnectScreenEvidenceUntilMs = 0L;
+
+        if (intentionalSafetyDisconnectArmed) {
+            intentionalSafetyDisconnectArmed = false;
+            clearRestartAutomationState("intentional-safety-disconnect", true, true);
+            unresolvedMainServerDisconnectCandidate = false;
+            if (disableMonitorAfterIntentionalSafetyDisconnect) {
+                disableMonitorAfterIntentionalSafetyDisconnect = false;
+                if (isActive()) toggle();
+            }
+            return;
+        }
+
+        if (reconnectRecoveryInFlight()) {
+            unresolvedMainServerDisconnectCandidate = false;
+            info("Reconnect transfer hop observed while reconnect recovery is already in flight; suppressing fresh disconnect-evidence cycle.");
+            return;
+        }
+
         HighwayBuilderTHM builderBeforeDisconnect = Modules.get().get(HighwayBuilderTHM.class);
         boolean builderWasActiveAtDisconnect = builderBeforeDisconnect != null && builderBeforeDisconnect.isActive();
         unresolvedMainServerDisconnectCandidate = builderWasActiveAtDisconnect;
-        wasConnectedLastTick = false;
         String disconnectScreenReason = readDisconnectedScreenReasonLower();
-        pendingDisconnectScreenEvidenceCheck = false;
-        pendingDisconnectScreenEvidenceUntilMs = 0L;
 
         boolean nonRestartHardFail = nonRestartHardFailArmed || consumeNonRestartHardFailSignal();
         if (!nonRestartHardFail && isKnownNonRestartHardFailMessage(disconnectScreenReason)) {
@@ -775,6 +862,11 @@ public class THMHwyMonitor extends Module {
         HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
         if (builder == null || !builder.isActive()) return;
 
+        if (!builder.prepareForMonitorReconnectPause(activeReconnectCycleId)) {
+            enterReconnectSafetyStop("Unable to establish reconnect baseline before restart pause.");
+            return;
+        }
+
         builder.disableForMonitorRealignPause();
         boolean disabled = !builder.isActive();
 
@@ -899,8 +991,39 @@ public class THMHwyMonitor extends Module {
         beginRecoveryRoutine(builder, target, yOffset, recoveryDirectionYaw);
     }
 
+    @EventHandler
+    private void onRender2D(Render2DEvent event) {
+        if (!postRejoinDirectionGateActive) return;
+        if (mc == null || mc.textRenderer == null) return;
+
+        DrawContext context = event.drawContext;
+        List<String> lines = new ArrayList<>();
+        lines.add("THMHwyMonitor reconnect blocked");
+        lines.add(String.format(Locale.ROOT, "Retry %d/%d", postRejoinDirectionRetryCount, POST_REJOIN_DIRECTION_RETRY_LIMIT));
+        lines.add("Reason: " + postRejoinDirectionBlockReason);
+        if (!postRejoinDirectionBlockSummary.isBlank()) lines.add(postRejoinDirectionBlockSummary);
+
+        int x = 8;
+        int y = 8;
+        int width = 0;
+        for (String line : lines) width = Math.max(width, mc.textRenderer.getWidth(line));
+
+        int lineHeight = mc.textRenderer.fontHeight + 2;
+        int height = (lines.size() * lineHeight) + 6;
+        context.fill(x - 4, y - 4, x + width + 6, y + height, 0xCC000000);
+
+        int drawY = y;
+        for (String line : lines) {
+            context.drawText(mc.textRenderer, line, x, drawY, 0xFFFFAA00, false);
+            drawY += lineHeight;
+        }
+    }
+
     private RecoveryTarget computeCurrentRecoveryTarget(float recoveryDirectionYaw, int recoveryGoalY) {
         if (mc == null || mc.player == null) return null;
+        HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
+        String preferredDirection = normalizeDirection(directionCode(builder != null ? builder.getWorkingDirection() : null));
+        if (preferredDirection.isEmpty() || Float.isNaN(recoveryDirectionYaw)) return null;
 
         RecoveryTarget target = determineRecoveryTarget(
             mc.player.getX(),
@@ -909,13 +1032,12 @@ public class THMHwyMonitor extends Module {
             recoveryGoalY,
             trueCenterMode.get(),
             trackedLine,
-            trackedDirection
+            preferredDirection
         );
         if (target == null) return null;
 
         if (trackedLine == null && target.distance() <= ALIGN_TOLERANCE) {
             trackedLine = target.line();
-            trackedDirection = target.direction();
         }
 
         if (trackedLine != null) {
@@ -926,11 +1048,12 @@ public class THMHwyMonitor extends Module {
                 recoveryGoalY,
                 trueCenterMode.get(),
                 trackedLine,
-                trackedDirection
+                preferredDirection
             );
             if (target == null) return null;
         }
 
+        trackedDirection = target.direction();
         return target;
     }
 
@@ -1019,11 +1142,14 @@ public class THMHwyMonitor extends Module {
 
     private void handleReconnectAutomationTickLane() {
         handleAutoReconnectToggleTransitions();
+        refreshReconnectBaselineValidity();
         maybeRunDelayedMainServerResumeFinalization();
+        maybeRunPostRejoinDirectionGate();
 
-        boolean connectedNow = isSuccessfullyConnectedToServer();
-        handlePendingDisconnectScreenEvidenceCheck(connectedNow);
-        wasConnectedLastTick = connectedNow;
+        boolean liveConnectedNow = hasLiveServerConnection();
+        clearStaleDisconnectedScreenIfLiveConnected();
+        handlePendingDisconnectScreenEvidenceCheck(liveConnectedNow);
+        wasConnectedLastTick = liveConnectedNow;
 
         if (consumeNonRestartHardFailSignal()) {
             nonRestartHardFailArmed = true;
@@ -1034,7 +1160,50 @@ public class THMHwyMonitor extends Module {
             ensureHighwayBuilderDisabledForRestart("tick guard", false);
         }
 
-        if (connectedNow) maybeTakeDeferredRestartScreenshotAfterReconnect("tick");
+        if (liveConnectedNow) maybeTakeDeferredRestartScreenshotAfterReconnect("tick");
+    }
+
+    private boolean hasLiveServerConnection() {
+        return mc != null
+            && mc.player != null
+            && mc.world != null
+            && mc.getNetworkHandler() != null
+            && mc.getNetworkHandler().getConnection() != null
+            && mc.getNetworkHandler().getConnection().isOpen();
+    }
+
+    private boolean reconnectRecoveryInFlight() {
+        if (activeReconnectCycleId == 0L) return false;
+
+        return reconnectService().isReconnectArmed()
+            || restartBuilderDisableGraceScheduled
+            || restartRecoveryActive
+            || restartEvidenceGateCycleId == activeReconnectCycleId
+            || delayedMainServerResumePending
+            || delayedMainServerResumeCycleId == activeReconnectCycleId
+            || postRejoinDirectionGateActive
+            || deferredRestartScreenshotAfterReconnectPending;
+    }
+
+    private void clearStaleDisconnectedScreenIfLiveConnected() {
+        if (!hasLiveServerConnection()) return;
+        if (!(mc.currentScreen instanceof DisconnectedScreen)) return;
+        info("Clearing stale DisconnectedScreen while client is already live in-world.");
+        mc.setScreen(null);
+    }
+
+    private void clearRestartAutomationStateForTerminalStop(String reason) {
+        boolean preserveIntentionalSafetyDisconnect = intentionalSafetyDisconnectArmed;
+        boolean preserveDeferredDisable = disableMonitorAfterIntentionalSafetyDisconnect;
+        clearRestartAutomationState(reason, true, true);
+        intentionalSafetyDisconnectArmed = preserveIntentionalSafetyDisconnect;
+        disableMonitorAfterIntentionalSafetyDisconnect = preserveDeferredDisable;
+    }
+
+    private void refreshReconnectBaselineValidity() {
+        HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
+        if (builder == null) return;
+        builder.refreshReconnectBaselineValidity(activeReconnectCycleId);
     }
 
     private void maybeRunDelayedMainServerResumeFinalization() {
@@ -1059,32 +1228,17 @@ public class THMHwyMonitor extends Module {
         clearDelayedMainServerResumeState();
 
         info(
-            "Reconnect MAIN_SERVER delay complete (%s). Running post-main-server finalization (cycle %d).",
+            "Reconnect MAIN_SERVER delay complete (%s). Entering reconnect direction gate (cycle %d).",
             contextTag,
             cycleId
         );
-        completePostRejoinSuccessFlow();
-        clearRestartRecoveryState("resume-success-delayed", false, false);
+        beginPostRejoinDirectionGate(cycleId, contextTag);
     }
 
     private float resolveRecoveryDirectionYawForInference(HighwayBuilderTHM builder) {
-        if (mc == null || mc.player == null) return Float.NaN;
-
-        float liveYaw = mc.player.getYaw();
-        float candidateYaw = liveYaw;
-        if (!Float.isNaN(preTickYawSnapshot)) {
-            long ageMs = System.currentTimeMillis() - preTickYawSnapshotAtMs;
-            if (ageMs >= 0L && ageMs <= 500L) candidateYaw = preTickYawSnapshot;
-        }
-
-        if (isLikelyCenterYawOverride(builder, candidateYaw)) {
-            if (!Float.isNaN(lastReliableRecoveryYaw)) return lastReliableRecoveryYaw;
-            if (builder != null && builder.dir != null) return builder.dir.yaw;
-            return liveYaw;
-        }
-
-        lastReliableRecoveryYaw = candidateYaw;
-        return candidateYaw;
+        if (builder == null) return Float.NaN;
+        HorizontalDirection direction = builder.getWorkingDirection();
+        return direction == null ? Float.NaN : direction.yaw;
     }
 
     private boolean isLikelyCenterYawOverride(HighwayBuilderTHM builder, float yaw) {
@@ -1488,7 +1642,7 @@ public class THMHwyMonitor extends Module {
         }
 
         String direction = normalizeDirection(preferredDirection);
-        if (!isDirectionCompatible(line, direction)) direction = inferDirectionForLine(line, playerYaw);
+        if (!isDirectionCompatible(line, direction)) return null;
 
         double distance = Math.hypot(playerX - targetX, playerZ - targetZ);
         int goalX = floorToBlock(targetX);
@@ -1542,97 +1696,121 @@ public class THMHwyMonitor extends Module {
         ScreenshotRecorder.saveScreenshot(mc.runDirectory, mc.getFramebuffer(), message -> info(message.getString()));
     }
 
-    private void completePostRejoinSuccessFlow() {
+    private void beginPostRejoinDirectionGate(long cycleId, String contextTag) {
+        if (!isActive()) return;
+        if (cycleId <= 0L || cycleId != activeReconnectCycleId) return;
 
-        restorePostJoinModuleStatesIfNeeded();
-
-        HorizontalDirection direction = determinePostRejoinWorkingDirection();
-        if (direction == null && mc != null && mc.player != null) {
-            direction = HorizontalDirection.get(mc.player.getYaw());
-        }
-
-        if (direction != null) {
-            applyDirectionAndEnableHighwayBuilder(direction);
-        } else {
-            warning("Unable to resolve post-rejoin working direction. THM HighwayBuilder enable skipped.");
-        }
-
-        maybeTakeDeferredRestartScreenshotAfterReconnect("main-server-ready");
-        clearRestartRecoveryState("post-main-server finalization complete", false, false);
+        postRejoinDirectionGateActive = true;
+        postRejoinDirectionRetryCount = 0;
+        postRejoinDirectionNextAttemptAtMs = 0L;
+        postRejoinDirectionBlockReason = "waiting";
+        postRejoinDirectionBlockSummary = contextTag == null ? "" : contextTag;
+        postRejoinBlockedScreenshotTaken = false;
+        postRejoinTerminalScreenshotTaken = false;
+        postRejoinLastCompleteProbeWinner = null;
     }
 
-    private void applyDirectionAndEnableHighwayBuilder(HorizontalDirection workingDirection) {
+    private void maybeRunPostRejoinDirectionGate() {
+        if (!postRejoinDirectionGateActive) return;
+        if (!isActive()) {
+            clearPostRejoinDirectionGateState();
+            return;
+        }
+        if (activeReconnectCycleId <= 0L || mc == null || mc.player == null || mc.world == null) return;
+        if (postRejoinDirectionNextAttemptAtMs > System.currentTimeMillis()) return;
+
+        PostRejoinDirectionResult result = determineConclusivePostRejoinWorkingDirection();
+        if (result.conclusive()) {
+            if (applyDirectionAndEnableHighwayBuilder(result.direction())) finishSuccessfulReconnectResume();
+            return;
+        }
+
+        postRejoinDirectionRetryCount++;
+        postRejoinDirectionBlockReason = result.reason();
+        postRejoinDirectionBlockSummary = result.summary();
+        postRejoinDirectionNextAttemptAtMs = System.currentTimeMillis() + POST_REJOIN_DIRECTION_RETRY_DELAY_MS;
+
+        if (autoScreenshotOnRestartDetection.get() && postRejoinDirectionRetryCount >= 3 && !postRejoinBlockedScreenshotTaken) {
+            postRejoinBlockedScreenshotTaken = true;
+            takeRestartScreenshot();
+        }
+
+        if (postRejoinDirectionRetryCount >= POST_REJOIN_DIRECTION_RETRY_LIMIT) {
+            enterReconnectSafetyStop("Reconnect resume stopped: " + result.reason());
+        }
+    }
+
+    private boolean applyDirectionAndEnableHighwayBuilder(HorizontalDirection workingDirection) {
         applyPostRejoinYaw(workingDirection);
         info("Post-rejoin direction selected: %s.", workingDirection.name);
 
         HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
         if (builder == null) {
-            warning("THM HighwayBuilder module not found, cannot resume.");
-            return;
+            enterReconnectSafetyStop("THM HighwayBuilder module not found, cannot resume.");
+            return false;
         }
 
-        if (!builder.isActive()) {
-            builder.toggle();
-            if (builder.isActive()) info("Resumed THM HighwayBuilder after post-rejoin checks.");
-            else warning("Failed to resume THM HighwayBuilder after post-rejoin checks.");
-        } else {
-            info("THM HighwayBuilder already active after post-rejoin checks.");
+        if (!builder.resumeFromReconnect(workingDirection, activeReconnectCycleId)) {
+            enterReconnectSafetyStop("HighwayBuilder refused reconnect resume for locked direction.");
+            return false;
         }
+
+        info("Resumed THM HighwayBuilder after post-rejoin checks.");
+        return true;
     }
 
-    private HorizontalDirection determinePostRejoinWorkingDirection() {
-        if (mc.player == null || mc.world == null) return null;
-        int probeDistance = postRejoinAxisProbeDistanceForCurrentAttempt();
+    private void finishSuccessfulReconnectResume() {
+        maybeTakeDeferredRestartScreenshotAfterReconnect("main-server-ready");
+        clearRestartAutomationState("post-main-server finalization complete", true, true);
+    }
+
+    private PostRejoinDirectionResult determineConclusivePostRejoinWorkingDirection() {
+        if (mc.player == null || mc.world == null) return PostRejoinDirectionResult.blocked("player-or-world-missing", "");
 
         HorizontalDirection[] axisDirections = resolvePostRejoinAxisDirections();
         if (axisDirections == null) {
-            warning("Unable to resolve highway axis after rejoin. Using current facing direction.");
-            return HorizontalDirection.get(mc.player.getYaw());
+            postRejoinLastCompleteProbeWinner = null;
+            return PostRejoinDirectionResult.blocked("axis-unresolved", "line=unresolved");
         }
 
         HorizontalDirection dirA = axisDirections[0];
         HorizontalDirection dirB = axisDirections[1];
         HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
         boolean pavingSelected = builder != null && isPavingMode(builder);
+        AxisProbeResult probe = pavingSelected
+            ? probeAxis(dirA, dirB, 119, true)
+            : probeAxis(dirA, dirB, 122, false);
 
-        if (pavingSelected) {
-            boolean dirAObsidianY119 = isObsidianAtAxisProbe(dirA, probeDistance, 119);
-            boolean dirBObsidianY119 = isObsidianAtAxisProbe(dirB, probeDistance, 119);
-            if (dirAObsidianY119 != dirBObsidianY119) {
-                HorizontalDirection selected = dirAObsidianY119 ? dirB : dirA;
-                return selected;
-            }
+        String summary = String.format(Locale.ROOT, "%s=%d %s=%d",
+            probe.dirA().name,
+            probe.dirAScore(),
+            probe.dirB().name,
+            probe.dirBScore()
+        );
 
-            warning("Post-rejoin obsidian direction checks at Y=119 were ambiguous. Deferring HighwayBuilder enable.");
-            return null;
+        if (!probe.allSamplesLoaded()) {
+            postRejoinLastCompleteProbeWinner = null;
+            return PostRejoinDirectionResult.blocked("probe-unloaded", summary);
         }
 
-        boolean dirAAirY122 = isAirAtAxisProbe(dirA, probeDistance, 122);
-        boolean dirBAirY122 = isAirAtAxisProbe(dirB, probeDistance, 122);
-        if (dirAAirY122 != dirBAirY122) {
-            HorizontalDirection selected = dirAAirY122 ? dirB : dirA;
-            return selected;
+        if (!probe.strongWinner() || probe.selectedDirection() == null) {
+            postRejoinLastCompleteProbeWinner = null;
+            return PostRejoinDirectionResult.blocked("probe-ambiguous", summary);
         }
 
-        if (dirAAirY122 && dirBAirY122) {
-            warning("Post-rejoin direction not ready yet: both axis directions are air at Y=122. Deferring HighwayBuilder enable.");
-            return null;
+        if (postRejoinLastCompleteProbeWinner == probe.selectedDirection()) {
+            postRejoinLastCompleteProbeWinner = probe.selectedDirection();
+            return PostRejoinDirectionResult.success(probe.selectedDirection(), summary);
         }
 
-        warning("Post-rejoin direction checks were ambiguous. Deferring HighwayBuilder enable.");
-        return null;
-    }
-
-    private int postRejoinAxisProbeDistanceForCurrentAttempt() {
-        return POST_REJOIN_AXIS_PROBE_DISTANCE;
+        postRejoinLastCompleteProbeWinner = probe.selectedDirection();
+        return PostRejoinDirectionResult.blocked("probe-ambiguous", summary);
     }
 
     private HorizontalDirection[] resolvePostRejoinAxisDirections() {
-        WorkLine line = trackedLine;
-        if (line == null && mc.player != null) {
-            double centerOffset = trueCenterMode.get() ? 0.5 : 0.0;
-            line = nearestWorkLine(mc.player.getX(), mc.player.getZ(), centerOffset, trueCenterMode.get());
-        }
+        if (mc.player == null) return null;
+
+        WorkLine line = resolveReconnectLineFromCurrentPosition();
         if (line == null) return null;
 
         return switch (line) {
@@ -1643,24 +1821,111 @@ public class THMHwyMonitor extends Module {
         };
     }
 
-    private boolean isObsidianAtAxisProbe(HorizontalDirection direction, int distance, int y) {
-        if (mc.player == null || mc.world == null) return false;
-        BlockPos probe = BlockPos.ofFloored(
-            mc.player.getX() + (direction.offsetX * distance),
-            y,
-            mc.player.getZ() + (direction.offsetZ * distance)
+    private WorkLine resolveReconnectLineFromCurrentPosition() {
+        if (mc == null || mc.player == null) return null;
+        double centerOffset = trueCenterMode.get() ? 0.5 : 0.0;
+        ReconnectLineResolution resolved = nearestWorkLineWithAmbiguityBlock(
+            mc.player.getX(),
+            mc.player.getZ(),
+            centerOffset,
+            trueCenterMode.get(),
+            RECONNECT_LINE_AMBIGUITY_THRESHOLD
         );
-        return mc.world.getBlockState(probe).getBlock() == Blocks.OBSIDIAN;
+        if (resolved == null || resolved.distance() > RECONNECT_LINE_MAX_DISTANCE) return null;
+        return resolved.line();
     }
 
-    private boolean isAirAtAxisProbe(HorizontalDirection direction, int distance, int y) {
-        if (mc.player == null || mc.world == null) return false;
-        BlockPos probe = BlockPos.ofFloored(
-            mc.player.getX() + (direction.offsetX * distance),
-            y,
-            mc.player.getZ() + (direction.offsetZ * distance)
-        );
-        return mc.world.getBlockState(probe).isAir();
+    private AxisProbeResult probeAxis(HorizontalDirection dirA, HorizontalDirection dirB, int y, boolean obsidianProbe) {
+        if (mc.player == null || mc.world == null) {
+            return new AxisProbeResult(false, false, null, dirA, 0, dirB, 0);
+        }
+
+        int totalA = 0;
+        int totalB = 0;
+        int nearA = 0;
+        int nearB = 0;
+
+        for (int distance = 1; distance <= POST_REJOIN_AXIS_PROBE_DISTANCE; distance++) {
+            BlockPos probeA = BlockPos.ofFloored(
+                mc.player.getX() + (dirA.offsetX * distance),
+                y,
+                mc.player.getZ() + (dirA.offsetZ * distance)
+            );
+            BlockPos probeB = BlockPos.ofFloored(
+                mc.player.getX() + (dirB.offsetX * distance),
+                y,
+                mc.player.getZ() + (dirB.offsetZ * distance)
+            );
+
+            if (!isReconnectProbeChunkLoaded(probeA) || !isReconnectProbeChunkLoaded(probeB)) {
+                return new AxisProbeResult(false, false, null, dirA, totalA, dirB, totalB);
+            }
+
+            boolean matchA = obsidianProbe
+                ? mc.world.getBlockState(probeA).getBlock() == Blocks.OBSIDIAN
+                : mc.world.getBlockState(probeA).isAir();
+            boolean matchB = obsidianProbe
+                ? mc.world.getBlockState(probeB).getBlock() == Blocks.OBSIDIAN
+                : mc.world.getBlockState(probeB).isAir();
+
+            if (matchA) totalA++;
+            if (matchB) totalB++;
+            if (distance <= POST_REJOIN_AXIS_NEAR_PROBE_DISTANCE) {
+                if (matchA) nearA++;
+                if (matchB) nearB++;
+            }
+        }
+
+        int totalMargin = Math.abs(totalA - totalB);
+        int nearMargin = Math.abs(nearA - nearB);
+        if (totalMargin < 2 || nearMargin < 1 || totalA == totalB) {
+            return new AxisProbeResult(true, false, null, dirA, totalA, dirB, totalB);
+        }
+
+        HorizontalDirection selected = totalA > totalB ? dirB : dirA;
+        return new AxisProbeResult(true, true, selected, dirA, totalA, dirB, totalB);
+    }
+
+    private boolean isReconnectProbeChunkLoaded(BlockPos probe) {
+        if (mc == null || mc.world == null) return false;
+        return mc.world.getChunkManager().getChunk(probe.getX() >> 4, probe.getZ() >> 4, ChunkStatus.FULL, false) != null;
+    }
+
+    private void enterReconnectSafetyStop(String reason) {
+        HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
+        long cycleId = activeReconnectCycleId;
+
+        if (builder != null) {
+            builder.restoreCenterSpeedBaselineForFailedReconnect(cycleId);
+            builder.disableForReconnectSafetyStop();
+        }
+
+        if (autoScreenshotOnRestartDetection.get() && !postRejoinTerminalScreenshotTaken) {
+            postRejoinTerminalScreenshotTaken = true;
+            takeRestartScreenshot();
+        }
+
+        intentionalSafetyDisconnectArmed = true;
+        disableMonitorAfterIntentionalSafetyDisconnect = true;
+        clearRestartAutomationStateForTerminalStop("reconnect-safety-stop");
+
+        if (hasLiveServerConnection()) {
+            mc.getNetworkHandler().getConnection().disconnect(Text.of("THMHwyMonitor Safety Stop: " + reason));
+            return;
+        }
+
+        intentionalSafetyDisconnectArmed = false;
+        disableMonitorAfterIntentionalSafetyDisconnect = false;
+
+        if (mc != null) {
+            mc.setScreen(new DisconnectedScreen(
+                new TitleScreen(),
+                Text.of("THMHwyMonitor Safety Stop"),
+                Text.of(reason + " HighwayBuilder stayed off for safety.")
+            ));
+        }
+
+        if (isActive()) toggle();
     }
 
     private void applyPostRejoinYaw(HorizontalDirection direction) {
@@ -1675,6 +1940,7 @@ public class THMHwyMonitor extends Module {
     }
 
     private void restorePostJoinModuleStatesIfNeeded() {
+        if (activeReconnectCycleId > 0L) return;
         if (!postJoinModuleStateCaptured) return;
         if (!isSuccessfullyConnectedToServer()) {
             return;
@@ -1710,11 +1976,7 @@ public class THMHwyMonitor extends Module {
     }
 
     private boolean isSuccessfullyConnectedToServer() {
-        return mc != null
-            && mc.player != null
-            && mc.world != null
-            && mc.getNetworkHandler() != null
-            && !(mc.currentScreen instanceof DisconnectedScreen);
+        return hasLiveServerConnection() && !(mc.currentScreen instanceof DisconnectedScreen);
     }
 
     private static WorkLine nearestWorkLine(double playerX, double playerZ, double centerOffset, boolean trueCenterMode) {
@@ -1746,6 +2008,34 @@ public class THMHwyMonitor extends Module {
         }
 
         return line;
+    }
+
+    private static ReconnectLineResolution nearestWorkLineWithAmbiguityBlock(double playerX, double playerZ, double centerOffset, boolean trueCenterMode, double ambiguityThreshold) {
+        double dCardinalNs = Math.abs(playerX - centerOffset);
+        double dCardinalEw = Math.abs(playerZ - centerOffset);
+        double dDiagNwSe = distanceToLine(playerX, playerZ, 1.0, -1.0, 0.0);
+        double c = trueCenterMode ? 1.0 : 0.0;
+        double dDiagNeSw = distanceToLine(playerX, playerZ, 1.0, 1.0, c);
+
+        double best = dCardinalNs;
+        double second = HUGE_DISTANCE;
+        WorkLine line = WorkLine.CardinalNS;
+
+        double[] distances = new double[] {dCardinalEw, dDiagNwSe, dDiagNeSw};
+        WorkLine[] lines = new WorkLine[] {WorkLine.CardinalEW, WorkLine.DiagonalNWSE, WorkLine.DiagonalNESW};
+        for (int i = 0; i < distances.length; i++) {
+            double distance = distances[i];
+            if (distance < best) {
+                second = best;
+                best = distance;
+                line = lines[i];
+            } else if (distance < second) {
+                second = distance;
+            }
+        }
+
+        if (Math.abs(second - best) <= ambiguityThreshold) return null;
+        return new ReconnectLineResolution(line, best);
     }
 
     private static String inferDirectionForLine(WorkLine line, float yaw) {
@@ -1797,6 +2087,20 @@ public class THMHwyMonitor extends Module {
         };
     }
 
+    private static String directionCode(HorizontalDirection direction) {
+        if (direction == null) return "";
+        return switch (direction) {
+            case North -> "N";
+            case NorthEast -> "NE";
+            case East -> "E";
+            case SouthEast -> "SE";
+            case South -> "S";
+            case SouthWest -> "SW";
+            case West -> "W";
+            case NorthWest -> "NW";
+        };
+    }
+
     private static int workingDirectionOffsetX(String direction) {
         return switch (normalizeDirection(direction)) {
             case "E", "NE", "SE" -> 1;
@@ -1825,15 +2129,12 @@ public class THMHwyMonitor extends Module {
     }
 
     private void applyWorkingYaw() {
-        if (pendingCorrectionTarget == null || mc.player == null) return;
+        if (pendingCorrectionTarget == null || mc.player == null || recoveryBuilder == null) return;
 
-        float referenceYaw = Float.isNaN(recoveryYawBeforeMove) ? mc.player.getYaw() : recoveryYawBeforeMove;
-        float yaw = closestParallelYawForSegment(
-            referenceYaw,
-            pendingCorrectionTarget.highway(),
-            pendingCorrectionTarget.direction(),
-            pendingCorrectionTarget.line()
-        );
+        HorizontalDirection direction = recoveryBuilder.getWorkingDirection();
+        if (direction == null) return;
+
+        float yaw = direction.yaw;
         mc.player.setYaw(yaw);
         mc.player.setPitch(20.0f);
 
