@@ -14,6 +14,7 @@ public class THMSystem extends System<THMSystem> {
 
     private final SettingGroup sgPrefix = settings.createGroup("Hash");
     private final SettingGroup sgProfiles = settings.createGroup("Highway Profiles");
+    private final SettingGroup sgPvp = settings.createGroup("PVP");
 
     // Hash Settings
     private final Setting<String> hash = sgPrefix.add(new StringSetting.Builder()
@@ -42,6 +43,25 @@ public class THMSystem extends System<THMSystem> {
         .name("toggle-modules")
         .description("Turn on Highwaybuilder when toggled.")
         .defaultValue(true)
+        .build()
+    );
+
+    public final Setting<Boolean> ignoreThmMembers = sgPvp.add(new BoolSetting.Builder()
+        .name("ignore-thm-members")
+        .description("Ignore THM members in PvP modules.")
+        .defaultValue(false)
+        .build()
+    );
+
+    public static final String BRANCH_ALL = "All";
+    public static final String BRANCH_MAIN = "Main";
+    public static final String BRANCH_PVP = "PvP";
+
+    public final Setting<String> showBranch = sgPvp.add(new ProvidedStringSetting.Builder()
+        .name("show-branch")
+        .description("Which branch members to show in THM member lists.")
+        .defaultValue(BRANCH_ALL)
+        .supplier(() -> new String[] { BRANCH_ALL, BRANCH_MAIN, BRANCH_PVP })
         .build()
     );
 

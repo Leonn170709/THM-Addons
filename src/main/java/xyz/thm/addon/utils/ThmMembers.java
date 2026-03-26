@@ -13,6 +13,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
+import net.minecraft.entity.player.PlayerEntity;
 
 import static xyz.thm.addon.utils.password.getAPIMemberHud;
 import static xyz.thm.addon.utils.password.getPassword;
@@ -23,12 +24,14 @@ public final class ThmMembers {
         public final String[] mcNames;
         public final String rank;
         public final String rankId;
+        public final String branch;
 
-        public Member(String name, String[] mcNames, String rank, String rankId) {
+        public Member(String name, String[] mcNames, String rank, String rankId, String branch) {
             this.name = name;
             this.mcNames = mcNames;
             this.rank = rank;
             this.rankId = rankId;
+            this.branch = branch;
         }
     }
 
@@ -113,9 +116,10 @@ public final class ThmMembers {
 
                 String rank = jsonObject.get("rank").getAsString();
                 String rankId = jsonObject.has("rankId") ? jsonObject.getAsJsonPrimitive("rankId").getAsString() : "";
+                String branch = jsonObject.has("branch") ? jsonObject.getAsJsonPrimitive("branch").getAsString() : "";
 
                 String displayName = usernames.length > 0 ? usernames[0] : "Unknown";
-                members.add(new Member(displayName, usernames, rank, rankId));
+                members.add(new Member(displayName, usernames, rank, rankId, branch));
             }
 
             connection.disconnect();
@@ -150,6 +154,11 @@ public final class ThmMembers {
         refreshIfNeeded();
         if (cachedByMcName == null) return null;
         return cachedByMcName.get(mcName);
+    }
+
+    public static synchronized boolean isThmMember(PlayerEntity player) {
+        if (player == null) return false;
+        return getMemberByMcName(player.getGameProfile().name()) != null;
     }
 
     public static synchronized boolean isNovice(String mcName) {

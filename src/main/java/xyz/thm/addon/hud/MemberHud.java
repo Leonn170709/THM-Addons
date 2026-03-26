@@ -11,6 +11,7 @@ import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.system.THMSystem;
 import xyz.thm.addon.utils.ThmMembers;
 
 import java.util.*;
@@ -144,6 +145,12 @@ public class MemberHud extends HudElement {
 
         sortedPlayers.forEach(player -> {
             ThmMembers.Member member = playerMemberMap.get(player);
+
+            String branchFilter = THMSystem.get().showBranch.get();
+            if (!THMSystem.BRANCH_ALL.equalsIgnoreCase(branchFilter)) {
+                if (THMSystem.BRANCH_PVP.equalsIgnoreCase(branchFilter) && !"PvP".equalsIgnoreCase(member.branch)) return;
+                if (THMSystem.BRANCH_MAIN.equalsIgnoreCase(branchFilter) && !"Main".equalsIgnoreCase(member.branch)) return;
+            }
 
             if (!showBots.get() && member.rank.equals("Bot")) {
                 return;

@@ -5,6 +5,7 @@ import meteordevelopment.meteorclient.gui.tabs.Tab;
 import meteordevelopment.meteorclient.gui.tabs.TabScreen;
 import meteordevelopment.meteorclient.gui.tabs.WindowTabScreen;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
+import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
 import meteordevelopment.meteorclient.settings.Settings;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.misc.NbtUtils;
@@ -28,6 +29,7 @@ public class THMTab extends Tab {
 
     private static class THMScreen extends WindowTabScreen {
         private final Settings settings;
+        private WVerticalList settingsContainer;
 
         public THMScreen(GuiTheme theme, Tab tab) {
             super(theme, tab);
@@ -38,7 +40,7 @@ public class THMTab extends Tab {
         @Override
         public void tick() {
             super.tick();
-            settings.tick(window, theme);
+            settings.tick(settingsContainer, theme);
         }
 
         @Override
@@ -47,7 +49,8 @@ public class THMTab extends Tab {
         }
         @Override
         public void initWidgets() {
-            add(theme.settings(settings)).expandX();
+            settingsContainer = add(theme.verticalList()).expandX().widget();
+            settingsContainer.add(theme.settings(settings)).expandX();
 
             add(theme.horizontalSeparator()).expandX();
 

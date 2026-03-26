@@ -24,7 +24,7 @@ import static xyz.thm.addon.utils.THMUtils.Notify;
 
 public class HighwaySearcher extends Module {
     public HighwaySearcher() {
-        super(THMAddon.MAIN, "HighwaySearcher", "Automatically paths to the nearest Axis or teleports to a highway. Alerts you when the highway ends or begins.");
+        super(THMAddon.MAIN, "Highway-Tools", "Automatically paths to the nearest Axis or teleports to a highway. Alerts you when the highway ends or begins.");
     }
 
     // -------------------------------------------------------------------------
