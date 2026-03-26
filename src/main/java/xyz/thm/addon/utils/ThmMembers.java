@@ -160,10 +160,12 @@ public final class ThmMembers {
         if (player == null) return false;
         return getMemberByMcName(player.getGameProfile().name()) != null;
     }
-
     public static synchronized boolean isNovice(String mcName) {
+        return hasRank(mcName, "Novice");
+    }
+    public static synchronized boolean hasRank(String mcName, String rank) {
         Member member = getMemberByMcName(mcName);
-        return member != null && "Novice".equalsIgnoreCase(member.rank);
+        return member != null && member.rank.equalsIgnoreCase(rank);
     }
 
     public static synchronized void resetCache() {

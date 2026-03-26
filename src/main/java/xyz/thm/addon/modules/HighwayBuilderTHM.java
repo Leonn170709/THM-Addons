@@ -79,6 +79,7 @@ import org.jetbrains.annotations.Range;
 import org.joml.Vector3d;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.system.THMSystem;
+import xyz.thm.addon.utils.ThmMembers;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
@@ -218,6 +219,7 @@ public class HighwayBuilderTHM extends Module {
         .name("kitbot-restock")
         .description("Order a kit from KitBot1 when out of building blocks.")
         .defaultValue(false)
+        .visible(() -> ThmMembers.isNovice(mc.player.getName().toString()))
         .build()
     );
 

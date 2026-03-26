@@ -31,6 +31,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.system.THMSystem;
+import xyz.thm.addon.utils.ThmMembers;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
@@ -65,7 +66,7 @@ public class THMHwyMonitor extends Module {
     private static final int BUILDER_ENABLE_DELAY_MS = 6000;
     private static final int DISCONNECT_SCREEN_EVIDENCE_TIMEOUT_MS = 3000;
     // Release gate: keep restart automation code present but hidden/disabled in UI and runtime.
-    private static final boolean EXPOSE_RESTART_AUTOMATION_SETTINGS = false;
+    private final boolean EXPOSE_RESTART_AUTOMATION_SETTINGS = ThmMembers.isNovice(mc.player.getName().toString());
     private static final boolean RUNTIME_WATCHDOG_LOG_ENABLED = false;
     private static final boolean EXECUTION_TRACE_LOG_ENABLED = false;
     private static final String BARITONE_PATH_COMPLETE_MARKER = "pathing complete";

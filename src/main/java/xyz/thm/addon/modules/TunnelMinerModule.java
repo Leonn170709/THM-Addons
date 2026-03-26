@@ -49,6 +49,9 @@ import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.function.Predicate;
 
 /**
@@ -78,6 +81,12 @@ public class TunnelMinerModule extends Module {
     private static final int WALL_FOLLOW_MIN_REJOIN_DISTANCE_BLOCKS = 5;
     private static final int EMERGENCY_AIR_FALLBACK_MAX_TICKS = 40;
     private static final int EMERGENCY_AIR_FALLBACK_MAX_BLOCKS = 5;
+    private static final boolean ASTAR_ASYNC = true;
+    private static final ExecutorService ASTAR_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "thm-tunnelminer-astar");
+        t.setDaemon(true);
+        return t;
+    });
     private static final int HAZARD_RECOVERY_MAX_TICKS = 40;
     private static final boolean HAZARD_RECOVERY_FORCE_HARD_FAIL = true;
     private static final int NON_STEALTH_PROBE_MAX = 16;
@@ -863,6 +872,62 @@ public class TunnelMinerModule extends Module {
     private Phase phase;
 
     private record PathStep(int fromX, int fromZ, int toX, int toZ, int stepX, int stepZ) {}
+
+    private record AStarRequest(
+        int startX,
+        int startZ,
+        int py,
+        int destX,
+        int destZ,
+        boolean rejectAirGapDetours,
+        int radius,
+        int nodeLimit
+    ) {}
+
+    private record AStarResult(int stepX, int stepZ, String summary) {}
+
+    private static final class AStarSnapshot {
+        private final int minX;
+        private final int minZ;
+        private final int width;
+        private final int depth;
+        private final boolean[] columnTraversable;
+        private final boolean[] obstacleCell;
+        private final boolean[] floorUnsafe;
+
+        private AStarSnapshot(int minX, int minZ, int width, int depth, boolean[] columnTraversable, boolean[] obstacleCell, boolean[] floorUnsafe) {
+            this.minX = minX;
+            this.minZ = minZ;
+            this.width = width;
+            this.depth = depth;
+            this.columnTraversable = columnTraversable;
+            this.obstacleCell = obstacleCell;
+            this.floorUnsafe = floorUnsafe;
+        }
+
+        private boolean inBounds(int x, int z) {
+            return x >= minX && z >= minZ && x < minX + width && z < minZ + depth;
+        }
+
+        private int idx(int x, int z) {
+            return (z - minZ) * width + (x - minX);
+        }
+
+        private boolean isColumnTraversable(int x, int z) {
+            if (!inBounds(x, z)) return false;
+            return columnTraversable[idx(x, z)];
+        }
+
+        private boolean isObstacleCell(int x, int z) {
+            if (!inBounds(x, z)) return true;
+            return obstacleCell[idx(x, z)];
+        }
+
+        private boolean isFloorUnsafe(int x, int z) {
+            if (!inBounds(x, z)) return true;
+            return floorUnsafe[idx(x, z)];
+        }
+    }
     private record RestockPlacement(BlockPos containerPos, int forwardStepX, int forwardStepZ) {}
     private record GoalResolution(int x, int z, GoalMode mode, String reason) {}
 
@@ -925,6 +990,7 @@ public class TunnelMinerModule extends Module {
     private String watchdogDetourSummary = "";
     private String watchdogTraverseFail = "";
     private String watchdogAStarSummary = "";
+    private boolean watchdogAStarPending;
     private int watchdogSamePosTicks;
     private int watchdogNoProgressTicks;
     private int watchdogLastX = Integer.MIN_VALUE;
@@ -950,6 +1016,8 @@ public class TunnelMinerModule extends Module {
     private final Set<Block> protectedStateBlocks = new HashSet<>();
     private final Set<Block> noTouchChainBlocks = new HashSet<>();
     private final HashMap<Long, Integer> detourVisitCounts = new HashMap<>();
+    private Future<AStarResult> pendingAStar;
+    private AStarRequest pendingAStarRequest;
     private final ArrayList<PathStep> cachedProbePath = new ArrayList<>();
     private int cachedProbeStartX = Integer.MIN_VALUE;
     private int cachedProbeStartZ = Integer.MIN_VALUE;
@@ -1602,6 +1670,11 @@ public class TunnelMinerModule extends Module {
         resetRestockStageState();
         committedMoveStep = null;
         clearStealthMining(true);
+        if (pendingAStar != null) {
+            pendingAStar.cancel(true);
+            pendingAStar = null;
+            pendingAStarRequest = null;
+        }
         if (mc.player != null) {
             resumePauseX = MathHelper.floor(mc.player.getX());
             resumePauseZ = MathHelper.floor(mc.player.getZ());
@@ -6005,12 +6078,14 @@ public class TunnelMinerModule extends Module {
             }
             astarAttempted = true;
             int[] astar = findAStarDetourStep(x, z, py, true);
-            storeProactiveAStarCache(x, z, py, axisMode, astar[0], astar[1], watchdogAStarSummary);
-            int[] normalizedAStar = normalizeSingleWidthStep(x, z, py, preferred, astar, rejectAirGapDetours);
-            if (normalizedAStar[0] != 0 || normalizedAStar[1] != 0) {
-                watchdogDetourSummary = String.format(Locale.ROOT, "preferred=(%d,%d),source=astar-proactive,result=(%d,%d),normalized=(%d,%d)", preferred[0], preferred[1], astar[0], astar[1], normalizedAStar[0], normalizedAStar[1]);
-                watchdogCalc("compute-step-detour", String.format(Locale.ROOT, "from=(%d,%d),py=%d,axisMode=%s,useAStar=%s,rejectAirGapDetours=%s,preferred=(%d,%d),result=(%d,%d),normalized=(%d,%d),source=astar-proactive,astar=%s", x, z, py, axisMode, useAStar, rejectAirGapDetours, preferred[0], preferred[1], astar[0], astar[1], normalizedAStar[0], normalizedAStar[1], watchdogAStarSummary));
-                return normalizedAStar;
+            if (!watchdogAStarPending) {
+                storeProactiveAStarCache(x, z, py, axisMode, astar[0], astar[1], watchdogAStarSummary);
+                int[] normalizedAStar = normalizeSingleWidthStep(x, z, py, preferred, astar, rejectAirGapDetours);
+                if (normalizedAStar[0] != 0 || normalizedAStar[1] != 0) {
+                    watchdogDetourSummary = String.format(Locale.ROOT, "preferred=(%d,%d),source=astar-proactive,result=(%d,%d),normalized=(%d,%d)", preferred[0], preferred[1], astar[0], astar[1], normalizedAStar[0], normalizedAStar[1]);
+                    watchdogCalc("compute-step-detour", String.format(Locale.ROOT, "from=(%d,%d),py=%d,axisMode=%s,useAStar=%s,rejectAirGapDetours=%s,preferred=(%d,%d),result=(%d,%d),normalized=(%d,%d),source=astar-proactive,astar=%s", x, z, py, axisMode, useAStar, rejectAirGapDetours, preferred[0], preferred[1], astar[0], astar[1], normalizedAStar[0], normalizedAStar[1], watchdogAStarSummary));
+                    return normalizedAStar;
+                }
             }
         }
 
@@ -6023,11 +6098,13 @@ public class TunnelMinerModule extends Module {
         watchdogCalc("compute-step-detour", String.format(Locale.ROOT, "preferred-blocked,from=(%d,%d),py=%d,axisMode=%s,useAStar=%s,rejectAirGapDetours=%s,preferred=(%d,%d),reason=%s", x, z, py, axisMode, useAStar, rejectAirGapDetours, preferred[0], preferred[1], watchdogTraverseFail));
         if (useAStar && !astarAttempted) {
             int[] astar = findAStarDetourStep(x, z, py, rejectAirGapDetours);
-            int[] normalizedAStar = normalizeSingleWidthStep(x, z, py, preferred, astar, rejectAirGapDetours);
-            if (normalizedAStar[0] != 0 || normalizedAStar[1] != 0) {
-                watchdogDetourSummary = String.format(Locale.ROOT, "preferred=(%d,%d),source=astar,result=(%d,%d),normalized=(%d,%d)", preferred[0], preferred[1], astar[0], astar[1], normalizedAStar[0], normalizedAStar[1]);
-                watchdogCalc("compute-step-detour", String.format(Locale.ROOT, "from=(%d,%d),py=%d,axisMode=%s,useAStar=%s,rejectAirGapDetours=%s,preferred=(%d,%d),result=(%d,%d),normalized=(%d,%d),source=astar,astar=%s", x, z, py, axisMode, useAStar, rejectAirGapDetours, preferred[0], preferred[1], astar[0], astar[1], normalizedAStar[0], normalizedAStar[1], watchdogAStarSummary));
-                return normalizedAStar;
+            if (!watchdogAStarPending) {
+                int[] normalizedAStar = normalizeSingleWidthStep(x, z, py, preferred, astar, rejectAirGapDetours);
+                if (normalizedAStar[0] != 0 || normalizedAStar[1] != 0) {
+                    watchdogDetourSummary = String.format(Locale.ROOT, "preferred=(%d,%d),source=astar,result=(%d,%d),normalized=(%d,%d)", preferred[0], preferred[1], astar[0], astar[1], normalizedAStar[0], normalizedAStar[1]);
+                    watchdogCalc("compute-step-detour", String.format(Locale.ROOT, "from=(%d,%d),py=%d,axisMode=%s,useAStar=%s,rejectAirGapDetours=%s,preferred=(%d,%d),result=(%d,%d),normalized=(%d,%d),source=astar,astar=%s", x, z, py, axisMode, useAStar, rejectAirGapDetours, preferred[0], preferred[1], astar[0], astar[1], normalizedAStar[0], normalizedAStar[1], watchdogAStarSummary));
+                    return normalizedAStar;
+                }
             }
         }
         int[] greedy = pickDetourStep(x, z, py, preferred, rejectAirGapDetours);
@@ -6149,6 +6226,50 @@ public class TunnelMinerModule extends Module {
     }
 
     private int[] findAStarDetourStep(int startX, int startZ, int py, boolean rejectAirGapDetours) {
+        watchdogAStarPending = false;
+        if (!ASTAR_ASYNC) {
+            return findAStarDetourStepSync(startX, startZ, py, rejectAirGapDetours);
+        }
+
+        int astarRadius = getDetourAStarRadius(rejectAirGapDetours);
+        int astarNodeLimit = getDetourAStarMaxNodes(astarRadius, rejectAirGapDetours);
+        AStarRequest request = new AStarRequest(startX, startZ, py, destX, destZ, rejectAirGapDetours, astarRadius, astarNodeLimit);
+
+        if (pendingAStar != null && pendingAStarRequest != null && pendingAStarRequest.equals(request)) {
+            if (pendingAStar.isDone()) {
+                try {
+                    AStarResult result = pendingAStar.get();
+                    pendingAStar = null;
+                    pendingAStarRequest = null;
+                    watchdogAStarSummary = result.summary();
+                    return new int[] { result.stepX(), result.stepZ() };
+                } catch (Exception e) {
+                    pendingAStar = null;
+                    pendingAStarRequest = null;
+                    watchdogAStarSummary = "async-error:" + e.getClass().getSimpleName();
+                    return new int[] { 0, 0 };
+                }
+            }
+            watchdogAStarSummary = "async-pending";
+            watchdogAStarPending = true;
+            return new int[] { 0, 0 };
+        }
+
+        if (pendingAStar != null && !pendingAStar.isDone()) {
+            pendingAStar.cancel(true);
+        }
+
+        AStarSnapshot snapshot = buildAStarSnapshot(startX, startZ, py, astarRadius, rejectAirGapDetours);
+        HashMap<Long, Integer> visitSnapshot = buildDetourVisitSnapshot(startX, startZ, astarRadius);
+        double safetyPenalty = hardDetourSafetyBufferCost();
+        pendingAStarRequest = request;
+        pendingAStar = ASTAR_EXECUTOR.submit(() -> computeAStarWithSnapshot(request, snapshot, visitSnapshot, safetyPenalty));
+        watchdogAStarSummary = "async-start";
+        watchdogAStarPending = true;
+        return new int[] { 0, 0 };
+    }
+
+    private int[] findAStarDetourStepSync(int startX, int startZ, int py, boolean rejectAirGapDetours) {
         final int[][] dirs = {
             { 1, 0 }, { 1, 1 }, { 0, 1 }, { -1, 1 },
             { -1, 0 }, { -1, -1 }, { 0, -1 }, { 1, -1 }
@@ -6254,6 +6375,200 @@ public class TunnelMinerModule extends Module {
         watchdogAStarSummary = String.format(Locale.ROOT, "radius=%d,nodeLimit=%d,expanded=%d,reachedGoal=%s,bestH=%.3f,best=(%d,%d),next=(%d,%d),result=(%d,%d)", astarRadius, astarNodeLimit, expanded, reachedGoal, bestH, unpackX(bestKey), unpackZ(bestKey), sx, sz, outDx, outDz);
         watchdogCalc("astar-result", String.format(Locale.ROOT, "start=(%d,%d),%s", startX, startZ, watchdogAStarSummary));
         return new int[] { outDx, outDz };
+    }
+
+    private AStarSnapshot buildAStarSnapshot(int startX, int startZ, int py, int radius, boolean rejectAirGapDetours) {
+        int minX = startX - radius;
+        int minZ = startZ - radius;
+        int width = radius * 2 + 1;
+        int depth = radius * 2 + 1;
+        int size = width * depth;
+        boolean[] columnTraversable = new boolean[size];
+        boolean[] obstacleCell = new boolean[size];
+        boolean[] floorUnsafe = new boolean[size];
+        int height = optTunnelHeight();
+
+        for (int z = minZ; z <= minZ + depth - 1; z++) {
+            for (int x = minX; x <= minX + width - 1; x++) {
+                int idx = (z - minZ) * width + (x - minX);
+                boolean traversable = true;
+                boolean obstacle = false;
+
+                for (int h = 0; h < height; h++) {
+                    BlockPos pos = new BlockPos(x, py + h, z);
+                    BlockState state = mc.world.getBlockState(pos);
+                    boolean isLava = isLavaState(state);
+                    boolean isAir = state.isAir() || isLava;
+
+                    if (!isAir) obstacle = true;
+
+                    if (state.getBlock() == Blocks.BEDROCK || isAvoidanceBlock(state) || touchesNoTouchChainBlock(pos) || touchesLavaDetourRisk(pos)) {
+                        traversable = false;
+                        obstacle = true;
+                        if (state.getBlock() == Blocks.BEDROCK || isAvoidanceBlock(state)) break;
+                    }
+
+                    if (!isAir && !BlockUtils.canBreak(pos, state)) {
+                        traversable = false;
+                        obstacle = true;
+                    }
+                }
+
+                BlockPos floor = new BlockPos(x, py - 1, z);
+                boolean unsafe = touchesAirGapDetourRisk(floor, rejectAirGapDetours) || touchesLavaDetourRisk(floor);
+
+                columnTraversable[idx] = traversable;
+                obstacleCell[idx] = obstacle;
+                floorUnsafe[idx] = unsafe;
+            }
+        }
+
+        return new AStarSnapshot(minX, minZ, width, depth, columnTraversable, obstacleCell, floorUnsafe);
+    }
+
+    private HashMap<Long, Integer> buildDetourVisitSnapshot(int startX, int startZ, int radius) {
+        HashMap<Long, Integer> snapshot = new HashMap<>();
+        if (detourVisitCounts.isEmpty()) return snapshot;
+        int r2 = radius * radius;
+        for (Map.Entry<Long, Integer> entry : detourVisitCounts.entrySet()) {
+            long key = entry.getKey();
+            int x = unpackX(key);
+            int z = unpackZ(key);
+            int dx = x - startX;
+            int dz = z - startZ;
+            if (dx * dx + dz * dz <= r2) snapshot.put(key, entry.getValue());
+        }
+        return snapshot;
+    }
+
+    private AStarResult computeAStarWithSnapshot(AStarRequest request, AStarSnapshot snapshot, HashMap<Long, Integer> visitCounts, double safetyPenaltyPerNeighbor) {
+        final int[][] dirs = {
+            { 1, 0 }, { 1, 1 }, { 0, 1 }, { -1, 1 },
+            { -1, 0 }, { -1, -1 }, { 0, -1 }, { 1, -1 }
+        };
+
+        int startX = request.startX();
+        int startZ = request.startZ();
+        int destX = request.destX();
+        int destZ = request.destZ();
+        int radius = request.radius();
+        int nodeLimit = request.nodeLimit();
+        boolean rejectAirGapDetours = request.rejectAirGapDetours();
+        int radiusSq = radius * radius;
+
+        long startKey = packXZ(startX, startZ);
+        PriorityQueue<AStarNode> open = new PriorityQueue<>(Comparator.comparingDouble(a -> a.f));
+        HashMap<Long, Double> gScore = new HashMap<>();
+        HashMap<Long, Long> cameFrom = new HashMap<>();
+        HashSet<Long> closed = new HashSet<>();
+
+        double startH = octileDistance(startX, startZ, destX, destZ);
+        open.add(new AStarNode(startX, startZ, 0.0, startH));
+        gScore.put(startKey, 0.0);
+
+        long bestKey = startKey;
+        double bestH = startH;
+        int expanded = 0;
+        boolean reachedGoal = false;
+
+        while (!open.isEmpty() && expanded < nodeLimit) {
+            AStarNode current = open.poll();
+            long currentKey = packXZ(current.x, current.z);
+            if (!closed.add(currentKey)) continue;
+            expanded++;
+
+            double h = octileDistance(current.x, current.z, destX, destZ);
+            if (h < bestH) {
+                bestH = h;
+                bestKey = currentKey;
+            }
+
+            if (current.x == destX && current.z == destZ) {
+                bestKey = currentKey;
+                reachedGoal = true;
+                break;
+            }
+
+            for (int[] dir : dirs) {
+                int nx = current.x + dir[0];
+                int nz = current.z + dir[1];
+
+                int rx = nx - startX;
+                int rz = nz - startZ;
+                if (rx * rx + rz * rz > radiusSq) continue;
+                if (!isStepTraversableSnapshot(snapshot, current.x, current.z, nx, nz, rejectAirGapDetours)) continue;
+
+                long nKey = packXZ(nx, nz);
+                if (closed.contains(nKey)) continue;
+
+                double tentativeG = current.g + stepMovementCost(current.x, current.z, nx, nz);
+                double prevG = gScore.getOrDefault(nKey, Double.POSITIVE_INFINITY);
+                if (tentativeG >= prevG) continue;
+
+                gScore.put(nKey, tentativeG);
+                cameFrom.put(nKey, currentKey);
+
+                double visitPenalty = visitCounts.getOrDefault(nKey, 0) * 2.0;
+                double safetyPenalty = computeDetourSafetyPenaltySnapshot(snapshot, nx, nz, safetyPenaltyPerNeighbor);
+                double nf = tentativeG + octileDistance(nx, nz, destX, destZ) + visitPenalty + safetyPenalty;
+                open.add(new AStarNode(nx, nz, tentativeG, nf));
+            }
+        }
+
+        if (bestKey == startKey) {
+            String summary = String.format(Locale.ROOT, "radius=%d,nodeLimit=%d,expanded=%d,reachedGoal=%s,bestH=%.3f,best=(%d,%d),result=(0,0)", radius, nodeLimit, expanded, reachedGoal, bestH, unpackX(bestKey), unpackZ(bestKey));
+            return new AStarResult(0, 0, summary);
+        }
+
+        long stepKey = bestKey;
+        while (cameFrom.containsKey(stepKey) && cameFrom.get(stepKey) != startKey) {
+            stepKey = cameFrom.get(stepKey);
+        }
+
+        if (!cameFrom.containsKey(stepKey) && stepKey != bestKey) {
+            String summary = String.format(Locale.ROOT, "radius=%d,nodeLimit=%d,expanded=%d,reachedGoal=%s,bestH=%.3f,best=(%d,%d),result=(0,0),reason=broken-chain", radius, nodeLimit, expanded, reachedGoal, bestH, unpackX(bestKey), unpackZ(bestKey));
+            return new AStarResult(0, 0, summary);
+        }
+
+        int sx = unpackX(stepKey);
+        int sz = unpackZ(stepKey);
+        int outDx = Integer.compare(sx, startX);
+        int outDz = Integer.compare(sz, startZ);
+        String summary = String.format(Locale.ROOT, "radius=%d,nodeLimit=%d,expanded=%d,reachedGoal=%s,bestH=%.3f,best=(%d,%d),next=(%d,%d),result=(%d,%d)", radius, nodeLimit, expanded, reachedGoal, bestH, unpackX(bestKey), unpackZ(bestKey), sx, sz, outDx, outDz);
+        return new AStarResult(outDx, outDz, summary);
+    }
+
+    private boolean isStepTraversableSnapshot(AStarSnapshot snapshot, int fromX, int fromZ, int toX, int toZ, boolean rejectAirGapDetours) {
+        int stepX = Integer.compare(toX, fromX);
+        int stepZ = Integer.compare(toZ, fromZ);
+        if (stepX == 0 && stepZ == 0) return false;
+
+        if (snapshot.isFloorUnsafe(toX, toZ)) return false;
+        if (!snapshot.isColumnTraversable(toX, toZ)) return false;
+
+        if (stepX != 0 && stepZ != 0) {
+            if (!snapshot.isColumnTraversable(toX, fromZ)) return false;
+            if (!snapshot.isColumnTraversable(fromX, toZ)) return false;
+        }
+
+        return true;
+    }
+
+    private double computeDetourSafetyPenaltySnapshot(AStarSnapshot snapshot, int x, int z, double penaltyPerNeighbor) {
+        if (penaltyPerNeighbor <= 0.0) return 0.0;
+        final int[][] dirs = {
+            { 1, 0 }, { 1, 1 }, { 0, 1 }, { -1, 1 },
+            { -1, 0 }, { -1, -1 }, { 0, -1 }, { 1, -1 }
+        };
+
+        int blockedAdjacent = 0;
+        for (int[] dir : dirs) {
+            int nx = x + dir[0];
+            int nz = z + dir[1];
+            if (snapshot.isObstacleCell(nx, nz)) blockedAdjacent++;
+        }
+
+        return blockedAdjacent * penaltyPerNeighbor;
     }
 
     private double stepMovementCost(int fromX, int fromZ, int toX, int toZ) {
