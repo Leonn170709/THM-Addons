@@ -942,6 +942,11 @@ public class THMHwyMonitor extends Module {
             return;
         }
 
+        if (builder.shouldSuppressThmHwyMonitorMisalignmentRecovery()) {
+            clearPendingAlignmentGateRequest();
+            return;
+        }
+
         int recoveryGoalY = isPavingMode(builder) ? 120 : 119;
         float recoveryDirectionYaw = resolveRecoveryDirectionYawForInference(builder);
         RecoveryTarget target = computeCurrentRecoveryTarget(recoveryDirectionYaw, recoveryGoalY);
@@ -968,6 +973,11 @@ public class THMHwyMonitor extends Module {
         if (builder == null || !builder.isActive()) {
             trackedLine = null;
             trackedDirection = "";
+            clearPendingAlignmentGateRequest();
+            return;
+        }
+
+        if (builder.shouldSuppressThmHwyMonitorMisalignmentRecovery()) {
             clearPendingAlignmentGateRequest();
             return;
         }
