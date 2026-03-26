@@ -515,7 +515,7 @@ public class HighwayBuilderTHM extends Module {
 
     private final Setting<List<Item>> foodTypes = sgInventory.add(new ItemListSetting.Builder()
         .name("food-types")
-        .description("Which food items count as restock food. Maximum 2 food types.")
+        .description("Which food item counts as restock food. Maximum 1 food type.")
         .defaultValue()
         .visible(foodRestock::get)
         .onChanged(this::handleFoodTypesChanged)
@@ -3737,16 +3737,16 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private void handleFoodTypesChanged(List<Item> selected) {
-        if (clampingFoodTypes || selected == null || selected.size() <= 2) return;
+        if (clampingFoodTypes || selected == null || selected.size() <= 1) return;
 
         clampingFoodTypes = true;
         try {
-            foodTypes.set(new ArrayList<>(selected.subList(0, 2)));
+            foodTypes.set(new ArrayList<>(selected.subList(0, 1)));
         } finally {
             clampingFoodTypes = false;
         }
 
-        warning("Maximum 2 food types.");
+        warning("Maximum 1 food type.");
     }
 
     private boolean hasConfiguredFoodTypes() {
@@ -4382,26 +4382,6 @@ public class HighwayBuilderTHM extends Module {
             @Override
             protected void start(HighwayBuilderTHM b) {
                 keepSlots.clear();
-                List<Integer> trashBlockSlots = new ArrayList<>();
-
-                for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
-                    ItemStack itemStack = b.mc.player.getInventory().getStack(i);
-
-                    if (itemStack.getItem() instanceof BlockItem
-                        && !Utils.isShulker(itemStack.getItem())
-                        && b.trashItems.get().contains(itemStack.getItem())) {
-                        trashBlockSlots.add(i);
-                    }
-                }
-
-                trashBlockSlots.sort((a, c) -> Integer.compare(
-                    b.mc.player.getInventory().getStack(c).getCount(),
-                    b.mc.player.getInventory().getStack(a).getCount()
-                ));
-
-                int keepCount = Math.min(b.keepTrashBlockStacks.get(), trashBlockSlots.size());
-                for (int i = 0; i < keepCount; i++) keepSlots.add(trashBlockSlots.get(i));
-
                 timerEnabled = false;
                 firstTick = true;
                 threwItems = false;
@@ -4424,15 +4404,16 @@ public class HighwayBuilderTHM extends Module {
                     return;
                 }
 
+                refreshProtectedTrashSlots(b);
+
                 if (!b.mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
                     handleCursorStack(b);
                     return;
                 }
 
                 for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
-                    if (keepSlots.contains(i)) continue;
-
                     ItemStack itemStack = b.mc.player.getInventory().getStack(i);
+                    if (keepSlots.contains(i) && isEligibleTrashReserveStack(b, itemStack)) continue;
                     if (itemStack.getItem() == Items.OBSIDIAN && !b.trashItems.get().contains(Items.OBSIDIAN)) continue;
 
                     if (Utils.isShulker(itemStack.getItem()) && b.ejectUselessShulkers.get()) {
@@ -4459,21 +4440,13 @@ public class HighwayBuilderTHM extends Module {
                 ItemStack cursorStack = b.mc.player.currentScreenHandler.getCursorStack();
                 if (b.clearCursorStackToEmptySlot("ThrowOutTrash")) return;
 
-                if (trySwapCursorObsidianForTrash(b)) {
-                    threwItems = b.dropCursorStackIfSafe("ThrowOutTrash-obsidian-swap");
-                    return;
-                }
-
-                if (b.protectUsefulCursorStackFromDrop("ThrowOutTrash-cursor")) return;
+                if (resolveUsefulCursorStack(b)) return;
+                if (resolveTrashCursorStack(b, cursorStack)) return;
 
                 if (Utils.isShulker(cursorStack.getItem()) && b.ejectUselessShulkers.get()) {
                     if (!isUsefulShulker(b, cursorStack)) {
                         threwItems = b.dropCursorStackIfSafe("ThrowOutTrash-useless-shulker");
                         return;
-                    }
-
-                    if (trySwapProtectedCursorForDroppableSlot(b)) {
-                        threwItems = b.dropCursorStackIfSafe("ThrowOutTrash-protected-shulker-swap");
                     }
                     return;
                 }
@@ -4481,11 +4454,50 @@ public class HighwayBuilderTHM extends Module {
                 threwItems = b.dropCursorStackIfSafe("ThrowOutTrash-default");
             }
 
-            private boolean trySwapCursorObsidianForTrash(HighwayBuilderTHM b) {
+            private boolean resolveUsefulCursorStack(HighwayBuilderTHM b) {
                 ItemStack cursorStack = b.mc.player.currentScreenHandler.getCursorStack();
-                if (!cursorStack.isOf(Items.OBSIDIAN)) return false;
+                if (cursorStack.isEmpty() || !b.isUsefulCursorStack(cursorStack)) return false;
 
-                int trashSlot = findTrashSwapSlot(b);
+                int trashSlot = findTrashSwapSlot(b, false);
+                boolean usedProtectedTrash = false;
+                if (trashSlot == -1) {
+                    trashSlot = findTrashSwapSlot(b, true);
+                    usedProtectedTrash = trashSlot != -1;
+                }
+                if (trashSlot == -1) {
+                    if (b.restockDebugLog.get()) {
+                        b.restockDebug("Preserved useful cursor stack %s because no trash block swap slot was available (ThrowOutTrash-cursor).", cursorStack.getItem());
+                    }
+                    return true;
+                }
+
+                b.mc.interactionManager.clickSlot(
+                    b.mc.player.currentScreenHandler.syncId,
+                    SlotUtils.indexToId(trashSlot),
+                    0,
+                    SlotActionType.PICKUP,
+                    b.mc.player
+                );
+
+                ItemStack swappedCursor = b.mc.player.currentScreenHandler.getCursorStack();
+                if (b.isUsefulCursorStack(swappedCursor)) {
+                    if (b.restockDebugLog.get()) {
+                        b.restockDebug("Preserved useful cursor stack %s because trash swap did not dislodge it (ThrowOutTrash-cursor).", swappedCursor.getItem());
+                    }
+                    return true;
+                }
+
+                if (b.restockDebugLog.get() && usedProtectedTrash) {
+                    b.restockDebug("ThrowOutTrash spent a protected trash block as a last resort to clear a useful cursor stack.");
+                }
+                threwItems = b.dropCursorStackIfSafe(usedProtectedTrash ? "ThrowOutTrash-protected-trash-cursor-swap" : "ThrowOutTrash-trash-cursor-swap");
+                return true;
+            }
+
+            private boolean resolveTrashCursorStack(HighwayBuilderTHM b, ItemStack cursorStack) {
+                if (cursorStack == null || cursorStack.isEmpty() || !isEligibleTrashReserveStack(b, cursorStack)) return false;
+
+                int trashSlot = findTrashSwapSlot(b, false);
                 if (trashSlot == -1) return false;
 
                 b.mc.interactionManager.clickSlot(
@@ -4496,53 +4508,48 @@ public class HighwayBuilderTHM extends Module {
                     b.mc.player
                 );
 
-                return !b.mc.player.currentScreenHandler.getCursorStack().isOf(Items.OBSIDIAN);
+                threwItems = b.dropCursorStackIfSafe("ThrowOutTrash-reserved-trash-cursor-swap");
+                return true;
             }
 
-            private int findTrashSwapSlot(HighwayBuilderTHM b) {
+            private int findTrashSwapSlot(HighwayBuilderTHM b, boolean allowProtectedTrash) {
+                refreshProtectedTrashSlots(b);
                 for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
-                    if (keepSlots.contains(i)) continue;
-
                     ItemStack itemStack = b.mc.player.getInventory().getStack(i);
-                    if (!(itemStack.getItem() instanceof BlockItem)) continue;
-                    if (Utils.isShulker(itemStack.getItem())) continue;
-                    if (!b.trashItems.get().contains(itemStack.getItem())) continue;
-
+                    if (!isEligibleTrashReserveStack(b, itemStack)) continue;
+                    if (!allowProtectedTrash && keepSlots.contains(i)) continue;
                     return i;
                 }
 
                 return -1;
             }
 
-            private boolean trySwapProtectedCursorForDroppableSlot(HighwayBuilderTHM b) {
-                int droppableSlot = findDroppableSwapSlot(b);
-                if (droppableSlot == -1) return false;
+            private void refreshProtectedTrashSlots(HighwayBuilderTHM b) {
+                keepSlots.clear();
 
-                b.mc.interactionManager.clickSlot(
-                    b.mc.player.currentScreenHandler.syncId,
-                    SlotUtils.indexToId(droppableSlot),
-                    0,
-                    SlotActionType.PICKUP,
-                    b.mc.player
-                );
-
-                ItemStack cursorStack = b.mc.player.currentScreenHandler.getCursorStack();
-                return !Utils.isShulker(cursorStack.getItem()) || !isUsefulShulker(b, cursorStack);
-            }
-
-            private int findDroppableSwapSlot(HighwayBuilderTHM b) {
+                List<Integer> trashBlockSlots = new ArrayList<>();
                 for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
-                    if (keepSlots.contains(i)) continue;
-
                     ItemStack itemStack = b.mc.player.getInventory().getStack(i);
-                    if (Utils.isShulker(itemStack.getItem()) && b.ejectUselessShulkers.get()) {
-                        if (!isUsefulShulker(b, itemStack)) return i;
-                        continue;
-                    }
-                    if (b.trashItems.get().contains(itemStack.getItem())) return i;
+                    if (isEligibleTrashReserveStack(b, itemStack)) trashBlockSlots.add(i);
                 }
 
-                return -1;
+                trashBlockSlots.sort((a, c) -> {
+                    int countCompare = Integer.compare(
+                        b.mc.player.getInventory().getStack(c).getCount(),
+                        b.mc.player.getInventory().getStack(a).getCount()
+                    );
+                    if (countCompare != 0) return countCompare;
+                    return Integer.compare(a, c);
+                });
+
+                int keepCount = Math.min(b.keepTrashBlockStacks.get(), trashBlockSlots.size());
+                for (int i = 0; i < keepCount; i++) keepSlots.add(trashBlockSlots.get(i));
+            }
+
+            private boolean isEligibleTrashReserveStack(HighwayBuilderTHM b, ItemStack itemStack) {
+                return itemStack.getItem() instanceof BlockItem
+                    && !Utils.isShulker(itemStack.getItem())
+                    && b.trashItems.get().contains(itemStack.getItem());
             }
 
             private boolean isUsefulShulker(HighwayBuilderTHM b, ItemStack itemStack) {
@@ -6313,7 +6320,14 @@ public class HighwayBuilderTHM extends Module {
             private void prepareFoodShulkerReturn(HighwayBuilderTHM b, Inventory inv) {
                 if (!extractedFoodShulkerFromEnderChest || foodShulkerReturnPending) return;
 
-                foodShulkerReturnInventorySlot = slot;
+                int trackedSlot = resolveFoodReturnInventorySlot(b);
+                if (trackedSlot == -1) {
+                    b.warning("Lost track of the extracted food shulker before return; keeping it in inventory.");
+                    clearFoodReturnTracking();
+                    return;
+                }
+
+                foodShulkerReturnInventorySlot = trackedSlot;
                 if (b.isContainerInventoryEmpty(inv)) {
                     b.restockDebug("Extracted food shulker became empty after pull; keeping it in inventory for later cleanup.");
                     clearFoodReturnTracking();
@@ -7121,13 +7135,19 @@ public class HighwayBuilderTHM extends Module {
                         countItem(b, stack -> stack.getItem().equals(Items.ENDER_CHEST))
                     );
                 }
-                if (
-                    (b.searchEnderChest.get() || b.searchShulkers.get())
-                    || (b.mineEnderChests.get() && b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && countItem(b, stack -> stack.getItem().equals(Items.ENDER_CHEST)) > b.saveEchests.get())
-                ) {
-                    b.restockTask.setMaterials();
-                } else if (b.kitbotRestock.get()) {
-                    b.restockTask.setMaterials();
+                boolean isObsidianShortage = b.blocksToPlace.get().contains(Blocks.OBSIDIAN);
+                if (isObsidianShortage) {
+                    if (
+                        (b.searchEnderChest.get() || b.searchShulkers.get())
+                        || (b.mineEnderChests.get() && countItem(b, stack -> stack.getItem().equals(Items.ENDER_CHEST)) > b.saveEchests.get())
+                    ) {
+                        b.restockTask.setMaterials();
+                    } else if (b.kitbotRestock.get()) {
+                        b.restockTask.setMaterials();
+                    } else {
+                        b.notifyDesktop(b.notifyOutOfBlocks, "THM Highway Builder", "Out of blocks to place.");
+                        b.error("Out of blocks to place.");
+                    }
                 } else {
                     b.notifyDesktop(b.notifyOutOfBlocks, "THM Highway Builder", "Out of blocks to place.");
                     b.error("Out of blocks to place.");

@@ -43,7 +43,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class THMHwyMonitor extends Module {
-    private static final double ALIGN_TOLERANCE = 0.4;
+    private static final double WORKING_LINE_TOLERANCE = 0.1;
+    private static final double Y_ALIGNMENT_TOLERANCE = 0.4;
+    private static final double DIRECTION_RESOLUTION_TOLERANCE = 0.4;
     private static final double HUGE_DISTANCE = 1.0e30;
     private static final int RECOVERY_DELAY_TICKS = 40;
     private static final int YAW_SET_DELAY_TICKS = 10;
@@ -129,13 +131,6 @@ public class THMHwyMonitor extends Module {
         .defaultValue(10)
         .range(1, 100)
         .sliderRange(1, 40)
-        .build()
-    );
-
-    private final Setting<Boolean> autoScreenshotOnRestartDetection = sgGeneral.add(new BoolSetting.Builder()
-        .name("auto-screenshot-on-restart-detection")
-        .description("Takes a screenshot automatically when the restart-detected disconnect screen appears.")
-        .defaultValue(false)
         .build()
     );
 
@@ -702,6 +697,10 @@ public class THMHwyMonitor extends Module {
 
     private void maybeTakeDeferredRestartScreenshotAfterReconnect(String source) {
         if (!deferredRestartScreenshotAfterReconnectPending) return;
+        if (!restartScreenshotsEnabled()) {
+            deferredRestartScreenshotAfterReconnectPending = false;
+            return;
+        }
 
         ensureHighwayBuilderDisabledForRestart("deferred reconnect screenshot", false);
         HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
@@ -715,6 +714,7 @@ public class THMHwyMonitor extends Module {
     }
 
     private void scheduleRestartScreenshot(int delayMs, String source) {
+        if (!restartScreenshotsEnabled()) return;
         if (restartScreenshotScheduled) return;
         restartScreenshotScheduled = true;
         int effectiveDelayMs = Math.max(0, delayMs);
@@ -803,6 +803,11 @@ public class THMHwyMonitor extends Module {
 
     private boolean autoRestartHandlingEnabled() {
         return reconnectAutomationEnabled();
+    }
+
+    private boolean restartScreenshotsEnabled() {
+        // HighwayBuilder owns the user-facing proof screenshot flow now.
+        return false;
     }
 
     private boolean reconnectAutomationEnabled() {
@@ -956,8 +961,8 @@ public class THMHwyMonitor extends Module {
         }
 
         double yDelta = recoveryYDelta(mc.player.getY(), recoveryGoalY);
-        boolean yAligned = Math.abs(yDelta) <= ALIGN_TOLERANCE;
-        if (target.distance() <= ALIGN_TOLERANCE && yAligned) {
+        boolean yAligned = Math.abs(yDelta) <= Y_ALIGNMENT_TOLERANCE;
+        if (target.distance() <= WORKING_LINE_TOLERANCE && yAligned) {
             clearPendingAlignmentGateRequest();
             return;
         }
@@ -991,8 +996,8 @@ public class THMHwyMonitor extends Module {
         }
 
         yDelta = recoveryYDelta(mc.player.getY(), recoveryGoalY);
-        yAligned = Math.abs(yDelta) <= ALIGN_TOLERANCE;
-        if (target.distance() <= ALIGN_TOLERANCE && yAligned) {
+        yAligned = Math.abs(yDelta) <= Y_ALIGNMENT_TOLERANCE;
+        if (target.distance() <= WORKING_LINE_TOLERANCE && yAligned) {
             clearPendingAlignmentGateRequest();
             return;
         }
@@ -1046,7 +1051,7 @@ public class THMHwyMonitor extends Module {
         );
         if (target == null) return null;
 
-        if (trackedLine == null && target.distance() <= ALIGN_TOLERANCE) {
+        if (trackedLine == null && target.distance() <= WORKING_LINE_TOLERANCE) {
             trackedLine = target.line();
         }
 
@@ -1609,7 +1614,7 @@ public class THMHwyMonitor extends Module {
             }
         }
 
-        if (bestDistance <= ALIGN_TOLERANCE) {
+        if (bestDistance <= WORKING_LINE_TOLERANCE) {
             if ("Ring".equals(bestHighway) || "Diamond".equals(bestHighway)) {
                 String facing = yawToDirection(playerYaw);
                 bestDirection = bestDirection + "->" + facing;
@@ -1740,7 +1745,7 @@ public class THMHwyMonitor extends Module {
         postRejoinDirectionBlockSummary = result.summary();
         postRejoinDirectionNextAttemptAtMs = System.currentTimeMillis() + POST_REJOIN_DIRECTION_RETRY_DELAY_MS;
 
-        if (autoScreenshotOnRestartDetection.get() && postRejoinDirectionRetryCount >= 3 && !postRejoinBlockedScreenshotTaken) {
+        if (restartScreenshotsEnabled() && postRejoinDirectionRetryCount >= 3 && !postRejoinBlockedScreenshotTaken) {
             postRejoinBlockedScreenshotTaken = true;
             takeRestartScreenshot();
         }
@@ -1910,7 +1915,7 @@ public class THMHwyMonitor extends Module {
             builder.disableForReconnectSafetyStop();
         }
 
-        if (autoScreenshotOnRestartDetection.get() && !postRejoinTerminalScreenshotTaken) {
+        if (restartScreenshotsEnabled() && !postRejoinTerminalScreenshotTaken) {
             postRejoinTerminalScreenshotTaken = true;
             takeRestartScreenshot();
         }
@@ -2193,8 +2198,8 @@ public class THMHwyMonitor extends Module {
     }
 
     private static String resolveWorkingDirection(double playerX, double playerZ, double centerOffset) {
-        boolean xAxis = Math.abs(playerZ - centerOffset) <= ALIGN_TOLERANCE;
-        boolean zAxis = Math.abs(playerX - centerOffset) <= ALIGN_TOLERANCE;
+        boolean xAxis = Math.abs(playerZ - centerOffset) <= DIRECTION_RESOLUTION_TOLERANCE;
+        boolean zAxis = Math.abs(playerX - centerOffset) <= DIRECTION_RESOLUTION_TOLERANCE;
 
         String northSouth = northSouthDirection(playerZ, centerOffset);
         String eastWest = eastWestDirection(playerX, centerOffset);
@@ -2210,14 +2215,14 @@ public class THMHwyMonitor extends Module {
     }
 
     private static String northSouthDirection(double playerZ, double centerOffset) {
-        if (playerZ >= centerOffset + ALIGN_TOLERANCE) return "South";
-        if (playerZ <= centerOffset - ALIGN_TOLERANCE) return "North";
+        if (playerZ >= centerOffset + DIRECTION_RESOLUTION_TOLERANCE) return "South";
+        if (playerZ <= centerOffset - DIRECTION_RESOLUTION_TOLERANCE) return "North";
         return "";
     }
 
     private static String eastWestDirection(double playerX, double centerOffset) {
-        if (playerX >= centerOffset + ALIGN_TOLERANCE) return "East";
-        if (playerX <= centerOffset - ALIGN_TOLERANCE) return "West";
+        if (playerX >= centerOffset + DIRECTION_RESOLUTION_TOLERANCE) return "East";
+        if (playerX <= centerOffset - DIRECTION_RESOLUTION_TOLERANCE) return "West";
         return "";
     }
 
