@@ -5269,6 +5269,7 @@ public class HighwayBuilderTHM extends Module {
             private static final ItemStack[] ITEMS = new ItemStack[27];
             private static final int INVALID_RESTOCK_RECOVERY_MAX_RETRIES = 1;
             private static final int SOURCE_READY_MAX_RETRIES = 3;
+            private static final int ENDER_CHEST_LIVE_RECHECK_COOLDOWN_TICKS = 40;
             private static final int SOURCE_SELECTION_MOVE_FAILED = -2;
             private static final String ECHEST_RESERVE_NONE = "none";
             private static final String ECHEST_RESERVE_MATCHING = "matching";
@@ -5376,12 +5377,12 @@ public class HighwayBuilderTHM extends Module {
                     return;
                 }
 
-                refreshStaleSourceExhaustionFlags(b);
-
                 HorizontalDirection dir = b.dir.diagonal ? b.dir.rotateLeft().rotateLeftSkipOne() : b.dir.opposite();
                 pos.set(b.mc.player).offset(dir);
                 BlockPos restockBlockPos = pos.getBlockPos();
                 boolean hasPlacedRestockEnderChest = b.mc.world.getBlockState(restockBlockPos).getBlock() == Blocks.ENDER_CHEST;
+
+                refreshStaleSourceExhaustionFlags(b, hasPlacedRestockEnderChest);
 
                 if (slot == -1 && shouldMineEnderChestsForMaterials(b) && (b.restockTask.getSession() == null || !b.restockTask.getSession().isMineEnderChestsExhausted())) {
                     b.restockDebug("Restock.start found %d usable loose ender chests in inventory; prioritizing MineEnderChests before shulker search.",
@@ -5447,6 +5448,8 @@ public class HighwayBuilderTHM extends Module {
                     b.restockTask.notePhase(RestockTask.SourcePhase.EnderChest);
 
                     boolean stop = EChestMemory.isKnown();
+                    int cachedRawMatches = EChestMemory.isKnown() ? countRestockRawMatchesInContainer(EChestMemory.ITEMS, b) : 0;
+                    int cachedMatchingShulkers = EChestMemory.isKnown() ? countMatchingRestockShulkersInContainerStacks(EChestMemory.ITEMS, b) : 0;
                     if (EChestMemory.isKnown()) {
                         for (ItemStack stack : EChestMemory.ITEMS) {
                             if (b.restockTask.materials && stack.getItem() instanceof BlockItem bi) {
@@ -5481,54 +5484,43 @@ public class HighwayBuilderTHM extends Module {
                             stop,
                             hasPlacedRestockEnderChest,
                             countItem(b, stack -> stack.getItem().equals(Items.ENDER_CHEST)),
-                            countRestockRawMatchesInContainer(EChestMemory.ITEMS, b),
-                            countMatchingRestockShulkersInContainerStacks(EChestMemory.ITEMS, b)
+                            cachedRawMatches,
+                            cachedMatchingShulkers
                         );
                     }
 
-                    // Cached ender chest memory can lag behind reality after outside mutation.
-                    // If shulker-backed restock is allowed, verify the real chest before falling through.
-                    if (stop
-                        && b.searchShulkers.get()
-                        && (b.restockTask.materials || b.restockTask.pickaxes || b.restockTask.food || b.restockTask.enderChests)) {
+                    if (stop) {
                         if (b.restockDebugLog.get()) {
-                            b.restockDebug("Restock.start overriding cached ender chest veto for shulker-backed restock and forcing a live chest check.");
+                            b.restockDebug("Restock.start cached ender chest precheck found no immediate matches, but ender chest access is available so a live chest check will still be attempted.");
                         }
-                        stop = false;
                     }
 
-                    if (!stop) {
-                        if (hasPlacedRestockEnderChest) {
-                            usingPlacedEnderChestSource = true;
-                            sourceLabel = "ender_chest_placed";
-                        } else {
-                            sourceItemPredicate = itemStack -> itemStack.getItem() == Items.ENDER_CHEST;
-                            sourceLabel = "ender_chest";
-                            slot = findAndMoveToHotbar(b, sourceItemPredicate, false);
-                            if (slot == -1) {
-                                if (b.restockDebugLog.get()) {
-                                    b.restockDebug("Restock.start could not move an ender chest item to hotbar for restock source selection.");
-                                }
-                                b.restockTask.markCurrentSourceExhausted(RestockTask.SourcePhase.EnderChest);
-                                sourceItemPredicate = null;
-                                sourceLabel = "unknown";
-                            }
-                        }
+                    if (hasPlacedRestockEnderChest) {
+                        usingPlacedEnderChestSource = true;
+                        sourceLabel = "ender_chest_placed";
                     } else {
-                        if (b.restockDebugLog.get()) {
-                            b.restockDebug("Restock.start marked ender chest source exhausted from precheck before opening the chest.");
+                        sourceItemPredicate = itemStack -> itemStack.getItem() == Items.ENDER_CHEST;
+                        sourceLabel = "ender_chest";
+                        slot = findAndMoveToHotbar(b, sourceItemPredicate, false);
+                        if (slot == -1) {
+                            if (b.restockDebugLog.get()) {
+                                b.restockDebug("Restock.start could not move an ender chest item to hotbar for restock source selection.");
+                            }
+                            sourceItemPredicate = null;
+                            sourceLabel = "unknown";
                         }
-                        b.restockTask.markCurrentSourceExhausted(RestockTask.SourcePhase.EnderChest);
                     }
                 }
 
-                if (slot == -1 && shouldMineEnderChestsForMaterials(b) && (b.restockTask.getSession() == null || !b.restockTask.getSession().isMineEnderChestsExhausted())) {
+                if (!hasSelectedRestockSource() && shouldMineEnderChestsForMaterials(b) && (b.restockTask.getSession() == null || !b.restockTask.getSession().isMineEnderChestsExhausted())) {
+                    logNoSelectedSourceDecision(b, "Restock.start found no direct source; continuing into MineEnderChests.");
                     b.restockDebug("Restock.start found no direct source; continuing into MineEnderChests.");
                     b.setState(MineEnderChests);
                     return;
                 }
 
-                if (slot == -1 && shouldHardFailObsidianRawInventorySupply(b)) {
+                if (!hasSelectedRestockSource() && shouldHardFailObsidianRawInventorySupply(b)) {
+                    logNoSelectedSourceDecision(b, "Restock.start hitting obsidian raw-supply hard fail because no selected restock source remains.");
                     String reason = "Unable to perform obsidian restock: only raw ender chest supply remains, but Mine Ender Chests is disabled.";
                     if (b.restockTask.getSession() != null) b.restockTask.getSession().fail();
                     b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", reason);
@@ -5536,18 +5528,20 @@ public class HighwayBuilderTHM extends Module {
                     return;
                 }
 
-                if (slot == -1 && canFallbackToKitbotForObsidian(b)) {
+                if (!hasSelectedRestockSource() && canFallbackToKitbotForObsidian(b)) {
+                    logNoSelectedSourceDecision(b, "Restock.start falling back to KitbotOrder after the full obsidian inventory check found no usable inventory or mining source.");
                     b.restockTask.notePhase(RestockTask.SourcePhase.Kitbot);
                     b.restockDebug("Restock.start falling back to KitbotOrder after the full obsidian inventory check found no usable inventory or mining source.");
                     b.setState(KitbotOrder);
                     return;
                 }
 
-                if (slot == -1 && b.kitbotRestock.get()
+                if (!hasSelectedRestockSource() && b.kitbotRestock.get()
                     && (b.restockTask.materials || b.restockTask.pickaxes)
                     && !isObsidianRestockTask(b)
                     && !hasShulkerInInventory(b)
                     && b.restockTask.shouldAttemptKitbot()) {
+                    logNoSelectedSourceDecision(b, "Restock.start falling back to KitbotOrder.");
                     b.restockTask.notePhase(RestockTask.SourcePhase.Kitbot);
                     b.restockDebug("Restock.start falling back to KitbotOrder.");
                     b.setState(KitbotOrder);
@@ -5555,7 +5549,8 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 // by this point we have searched shulkers and your ender chest, and no more items could be found to pull from
-                if (slot == -1 && !usingPlacedEnderChestSource) {
+                if (!hasSelectedRestockSource()) {
+                    logNoSelectedSourceDecision(b, "Restock.start reached final no-source resolution.");
                     b.restockTask.refreshSessionProgress();
                     if (b.restockTask.isTargetSatisfied()) {
                         b.completeRestockTaskAndContinue();
@@ -5607,7 +5602,7 @@ public class HighwayBuilderTHM extends Module {
                 delayTimer = b.inventoryDelay.get();
             }
 
-            private void refreshStaleSourceExhaustionFlags(HighwayBuilderTHM b) {
+            private void refreshStaleSourceExhaustionFlags(HighwayBuilderTHM b, boolean hasPlacedRestockEnderChest) {
                 RestockTask.RestockSession session = b.restockTask.getSession();
                 if (session == null) return;
 
@@ -5630,6 +5625,36 @@ public class HighwayBuilderTHM extends Module {
                         if (b.restockDebugLog.get()) {
                             b.restockDebug("Restock.start reopened MineEnderChests because usable loose ender chest supply changed (usableLooseEchests=%d).",
                                 usableLooseEchests
+                            );
+                        }
+                    }
+                }
+
+                if (session.isEnderChestExhausted()) {
+                    boolean memoryKnown = EChestMemory.isKnown();
+                    int rawMatches = memoryKnown ? countRestockRawMatchesInContainer(EChestMemory.ITEMS, b) : 0;
+                    int matchingShulkers = memoryKnown ? countMatchingRestockShulkersInContainerStacks(EChestMemory.ITEMS, b) : 0;
+                    boolean accessAvailable = isEnderChestAccessAvailable(b, hasPlacedRestockEnderChest);
+
+                    if (session.shouldReopenEnderChestAfterMeaningfulChange(memoryKnown, rawMatches, matchingShulkers, accessAvailable)) {
+                        session.reopenEnderChestAfterMeaningfulChange();
+                        if (b.restockDebugLog.get()) {
+                            b.restockDebug("Restock.start reopened EnderChest because the observed chest state changed (known=%s, rawMatches=%d, matchingShulkers=%d, accessAvailable=%s).",
+                                memoryKnown,
+                                rawMatches,
+                                matchingShulkers,
+                                accessAvailable
+                            );
+                        }
+                    }
+                    else if (session.shouldForceDelayedEnderChestLiveRecheck(accessAvailable, ENDER_CHEST_LIVE_RECHECK_COOLDOWN_TICKS)) {
+                        session.prepareForcedEnderChestLiveRecheck();
+                        if (b.restockDebugLog.get()) {
+                            b.restockDebug("Restock.start reopening EnderChest for one delayed live recheck after stale-cache cooldown (known=%s, rawMatches=%d, matchingShulkers=%d, accessAvailable=%s).",
+                                memoryKnown,
+                                rawMatches,
+                                matchingShulkers,
+                                accessAvailable
                             );
                         }
                     }
@@ -5778,7 +5803,12 @@ public class HighwayBuilderTHM extends Module {
 
                         // if it reaches here, we have taken everything we can from your ender chest, and may have also grabbed a shulker
                         // we should be finished in your ender chest, so we can break it and either continue on our way or start checking shulkers
-                        b.restockTask.markCurrentSourceExhausted(RestockTask.SourcePhase.EnderChest);
+                        b.restockTask.markEnderChestSourceExhaustedAfterLiveCheck(
+                            EChestMemory.isKnown(),
+                            countRestockRawMatchesInContainer(inv, b),
+                            countMatchingRestockShulkersInInventory(inv),
+                            isEnderChestAccessAvailable(b, true)
+                        );
                         b.closeHandledScreen();
                             breakContainer = true;
                         }
@@ -5863,6 +5893,27 @@ public class HighwayBuilderTHM extends Module {
                     && !canMineEnderChestsForObsidian(b)
                     && !hasInventoryRestockShulkerOfKind(b, ECHEST_RESERVE_OBSIDIAN)
                     && hasAnyRawEnderChestCapableInventorySupply(b);
+            }
+
+            private boolean hasSelectedRestockSource() {
+                return slot != -1 || usingPlacedEnderChestSource;
+            }
+
+            private boolean isEnderChestAccessAvailable(HighwayBuilderTHM b, boolean hasPlacedRestockEnderChest) {
+                return b.searchEnderChest.get()
+                    && (hasPlacedRestockEnderChest || countItem(b, stack -> stack.getItem().equals(Items.ENDER_CHEST)) > 0);
+            }
+
+            private void logNoSelectedSourceDecision(HighwayBuilderTHM b, String message) {
+                if (!b.restockDebugLog.get()) return;
+                boolean enderChestExhausted = b.restockTask.getSession() != null && b.restockTask.getSession().isEnderChestExhausted();
+                b.restockDebug("%s (slot=%d, usingPlacedEnderChestSource=%s, sourceLabel=%s, enderChestExhausted=%s).",
+                    message,
+                    slot,
+                    usingPlacedEnderChestSource,
+                    sourceLabel,
+                    enderChestExhausted
+                );
             }
 
             private boolean canFallbackToKitbotForObsidian(HighwayBuilderTHM b) {
@@ -8788,9 +8839,16 @@ public class HighwayBuilderTHM extends Module {
             private boolean inventoryShulkersExhausted;
             private boolean enderChestExhausted;
             private boolean mineEnderChestsExhausted;
+            private boolean enderChestExhaustedSnapshotValid;
+            private boolean enderChestExhaustedMemoryKnown;
+            private boolean enderChestExhaustedAccessAvailable;
+            private boolean enderChestForcedLiveRecheckUsed;
             private int targetFinal;
             private int remainingTarget;
             private int workingStageCapacity;
+            private int enderChestExhaustedRawMatches;
+            private int enderChestExhaustedMatchingShulkers;
+            private int enderChestExhaustedAtAge;
             private int pickaxesStartCount;
             private int materialStartStacks;
             private int foodStartItems;
@@ -8961,6 +9019,25 @@ public class HighwayBuilderTHM extends Module {
                 }
             }
 
+            private void markEnderChestExhaustedAfterLiveCheck(boolean memoryKnown, int rawMatches, int matchingShulkers, boolean accessAvailable) {
+                boolean sameSnapshot = enderChestExhaustedSnapshotValid
+                    && enderChestExhaustedMemoryKnown == memoryKnown
+                    && enderChestExhaustedRawMatches == rawMatches
+                    && enderChestExhaustedMatchingShulkers == matchingShulkers
+                    && enderChestExhaustedAccessAvailable == accessAvailable;
+                boolean preserveForcedRecheckUsed = sameSnapshot && enderChestForcedLiveRecheckUsed;
+
+                enderChestExhausted = true;
+                enderChestExhaustedSnapshotValid = true;
+                enderChestExhaustedMemoryKnown = memoryKnown;
+                enderChestExhaustedRawMatches = rawMatches;
+                enderChestExhaustedMatchingShulkers = matchingShulkers;
+                enderChestExhaustedAccessAvailable = accessAvailable;
+                enderChestExhaustedAtAge = b.mc.player != null ? b.mc.player.age : 0;
+                enderChestForcedLiveRecheckUsed = preserveForcedRecheckUsed;
+                lastResult = SourceAttemptResult.SOURCE_EXHAUSTED;
+            }
+
             private void reopenSourcePhase(SourcePhase phase) {
                 switch (phase) {
                     case InventoryShulkers -> inventoryShulkersExhausted = false;
@@ -8969,6 +9046,47 @@ public class HighwayBuilderTHM extends Module {
                     default -> { }
                 }
 
+                if (lastResult == SourceAttemptResult.SOURCE_EXHAUSTED) {
+                    lastResult = SourceAttemptResult.PARTIAL_PROGRESS;
+                }
+            }
+
+            private boolean shouldReopenEnderChestAfterMeaningfulChange(boolean memoryKnown, int rawMatches, int matchingShulkers, boolean accessAvailable) {
+                if (!enderChestExhausted) return false;
+                if (!enderChestExhaustedSnapshotValid) return false;
+                if (enderChestExhaustedMemoryKnown && !memoryKnown) return true;
+                if (rawMatches > enderChestExhaustedRawMatches) return true;
+                if (matchingShulkers > enderChestExhaustedMatchingShulkers) return true;
+                return accessAvailable && !enderChestExhaustedAccessAvailable;
+            }
+
+            private void reopenEnderChestAfterMeaningfulChange() {
+                enderChestExhausted = false;
+                enderChestExhaustedSnapshotValid = false;
+                enderChestExhaustedMemoryKnown = false;
+                enderChestExhaustedAccessAvailable = false;
+                enderChestForcedLiveRecheckUsed = false;
+                enderChestExhaustedRawMatches = 0;
+                enderChestExhaustedMatchingShulkers = 0;
+                enderChestExhaustedAtAge = 0;
+                if (lastResult == SourceAttemptResult.SOURCE_EXHAUSTED) {
+                    lastResult = SourceAttemptResult.PARTIAL_PROGRESS;
+                }
+            }
+
+            private boolean shouldForceDelayedEnderChestLiveRecheck(boolean accessAvailable, int cooldownTicks) {
+                if (!enderChestExhausted) return false;
+                if (!enderChestExhaustedSnapshotValid) return false;
+                if (enderChestForcedLiveRecheckUsed) return false;
+                if (!accessAvailable) return false;
+                if (isTargetSatisfied()) return false;
+                int currentAge = b.mc.player != null ? b.mc.player.age : 0;
+                return currentAge - enderChestExhaustedAtAge >= cooldownTicks;
+            }
+
+            private void prepareForcedEnderChestLiveRecheck() {
+                enderChestExhausted = false;
+                enderChestForcedLiveRecheckUsed = true;
                 if (lastResult == SourceAttemptResult.SOURCE_EXHAUSTED) {
                     lastResult = SourceAttemptResult.PARTIAL_PROGRESS;
                 }
@@ -9331,6 +9449,10 @@ public class HighwayBuilderTHM extends Module {
 
         public void markCurrentSourceExhausted(SourcePhase phase) {
             if (session != null) session.markSourceExhausted(phase);
+        }
+
+        public void markEnderChestSourceExhaustedAfterLiveCheck(boolean memoryKnown, int rawMatches, int matchingShulkers, boolean accessAvailable) {
+            if (session != null) session.markEnderChestExhaustedAfterLiveCheck(memoryKnown, rawMatches, matchingShulkers, accessAvailable);
         }
 
         public void reopenSourcePhase(SourcePhase phase) {
