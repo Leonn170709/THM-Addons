@@ -359,10 +359,14 @@ public class TunnelMinerModule extends Module {
         ShapeMode shapeMode,
         boolean renderMining,
         boolean renderPlacing,
+        boolean renderPath,
+        int renderPathSteps,
         SettingColor breakSideColor,
         SettingColor breakLineColor,
         SettingColor placeSideColor,
-        SettingColor placeLineColor
+        SettingColor placeLineColor,
+        SettingColor pathSideColor,
+        SettingColor pathLineColor
     ) {}
 
     private record ApiModePreset(
@@ -395,7 +399,10 @@ public class TunnelMinerModule extends Module {
         SettingColor breakSideColor,
         SettingColor breakLineColor,
         SettingColor placeSideColor,
-        SettingColor placeLineColor
+        SettingColor placeLineColor,
+        int renderPathSteps,
+        SettingColor pathSideColor,
+        SettingColor pathLineColor
     ) {}
 
     private record SpeedSnapshot(
@@ -442,10 +449,14 @@ public class TunnelMinerModule extends Module {
         "shapeMode",
         "renderMining",
         "renderPlacing",
+        "renderPath",
+        "renderPathSteps",
         "breakSideColor",
         "breakLineColor",
         "placeSideColor",
-        "placeLineColor"
+        "placeLineColor",
+        "pathSideColor",
+        "pathLineColor"
     );
 
     private static final Set<String> NON_EFFECTIVE_OPTION_SETTING_FIELDS = Set.of(
@@ -488,7 +499,10 @@ public class TunnelMinerModule extends Module {
         new SettingColor(255, 0, 0, 35),
         new SettingColor(255, 0, 0, 255),
         new SettingColor(0, 0, 255, 35),
-        new SettingColor(0, 0, 255, 255)
+        new SettingColor(0, 0, 255, 255),
+        32,
+        new SettingColor(255, 255, 0, 35),
+        new SettingColor(255, 255, 0, 255)
     );
 
     private static final ApiModePreset API_PRESET_STEALTH_OFF = new ApiModePreset(
@@ -521,7 +535,10 @@ public class TunnelMinerModule extends Module {
         new SettingColor(255, 0, 0, 35),
         new SettingColor(255, 0, 0, 255),
         new SettingColor(0, 0, 255, 35),
-        new SettingColor(0, 0, 255, 255)
+        new SettingColor(0, 0, 255, 255),
+        32,
+        new SettingColor(255, 255, 0, 35),
+        new SettingColor(255, 255, 0, 255)
     );
 
     // ── Settings ──────────────────────────────────────────────────────────────
@@ -740,13 +757,25 @@ public class TunnelMinerModule extends Module {
     private final Setting<Boolean> renderMining = sgRender.add(new BoolSetting.Builder()
         .name("render-mining")
         .description("Render blocks currently queued/active for mining.")
-        .defaultValue(false)
+        .defaultValue(true)
         .build());
 
     private final Setting<Boolean> renderPlacing = sgRender.add(new BoolSetting.Builder()
         .name("render-placing")
         .description("Render blocks queued for restoration/placing.")
+        .defaultValue(true)
+        .build());
+
+    private final Setting<Boolean> renderPath = sgRender.add(new BoolSetting.Builder()
+        .name("render-path")
+        .description("Render the planned tunnel path.")
         .defaultValue(false)
+        .build());
+
+    private final Setting<Integer> renderPathSteps = sgRender.add(new IntSetting.Builder()
+        .name("render-path-steps")
+        .description("Maximum number of path steps to render ahead.")
+        .defaultValue(32).min(4).max(256).sliderMax(128)
         .build());
 
     private final Setting<SettingColor> breakSideColor = sgRender.add(new ColorSetting.Builder()
@@ -774,6 +803,20 @@ public class TunnelMinerModule extends Module {
         .name("place-line-color")
         .description("The line color of blocks being placed.")
         .defaultValue(new SettingColor(0, 0, 255, 255))
+        .build()
+    );
+
+    private final Setting<SettingColor> pathSideColor = sgRender.add(new ColorSetting.Builder()
+        .name("path-side-color")
+        .description("The side color of path preview blocks.")
+        .defaultValue(new SettingColor(255, 255, 0, 35))
+        .build()
+    );
+
+    private final Setting<SettingColor> pathLineColor = sgRender.add(new ColorSetting.Builder()
+        .name("path-line-color")
+        .description("The line color of path preview blocks.")
+        .defaultValue(new SettingColor(255, 255, 0, 255))
         .build()
     );
 
@@ -896,6 +939,8 @@ public class TunnelMinerModule extends Module {
     private int watchdogWriteBufferLines;
 
     private final List<BlockPos> renderBreakPositions = new ArrayList<>();
+    private final List<BlockPos> renderPlacePositions = new ArrayList<>();
+    private final ArrayList<PathStep> renderPathPreviewSteps = new ArrayList<>();
     private final Set<BlockPos> activeProbePositions = new HashSet<>();
     private final List<BlockPos> activeMineTargets = new ArrayList<>();
     private StealthDoubleMineBlock normalMining;
@@ -1058,10 +1103,14 @@ public class TunnelMinerModule extends Module {
             shapeMode.get(),
             renderMining.get(),
             renderPlacing.get(),
+            renderPath.get(),
+            renderPathSteps.get(),
             copyColor(breakSideColor.get()),
             copyColor(breakLineColor.get()),
             copyColor(placeSideColor.get()),
-            copyColor(placeLineColor.get())
+            copyColor(placeLineColor.get()),
+            copyColor(pathSideColor.get()),
+            copyColor(pathLineColor.get())
         );
     }
 
@@ -1108,10 +1157,14 @@ public class TunnelMinerModule extends Module {
             preset.shapeMode(),
             renderingEnabled,
             renderingEnabled,
+            renderingEnabled,
+            preset.renderPathSteps(),
             copyColor(preset.breakSideColor()),
             copyColor(preset.breakLineColor()),
             copyColor(preset.placeSideColor()),
-            copyColor(preset.placeLineColor())
+            copyColor(preset.placeLineColor()),
+            copyColor(preset.pathSideColor()),
+            copyColor(preset.pathLineColor())
         );
     }
 
@@ -1150,10 +1203,14 @@ public class TunnelMinerModule extends Module {
     private ShapeMode optShapeMode() { return getEffectiveOptions().shapeMode(); }
     private boolean optRenderMining() { return getEffectiveOptions().renderMining(); }
     private boolean optRenderPlacing() { return getEffectiveOptions().renderPlacing(); }
+    private boolean optRenderPath() { return getEffectiveOptions().renderPath(); }
+    private int optRenderPathSteps() { return getEffectiveOptions().renderPathSteps(); }
     private SettingColor optBreakSideColor() { return getEffectiveOptions().breakSideColor(); }
     private SettingColor optBreakLineColor() { return getEffectiveOptions().breakLineColor(); }
     private SettingColor optPlaceSideColor() { return getEffectiveOptions().placeSideColor(); }
     private SettingColor optPlaceLineColor() { return getEffectiveOptions().placeLineColor(); }
+    private SettingColor optPathSideColor() { return getEffectiveOptions().pathSideColor(); }
+    private SettingColor optPathLineColor() { return getEffectiveOptions().pathLineColor(); }
 
     private boolean isStealthEnabledForSpeedOwnership() {
         if (settingsSource == SettingsSource.API || apiModeActive) return optStealthMode();
@@ -1529,6 +1586,8 @@ public class TunnelMinerModule extends Module {
     public void onDeactivate() {
         if (mc.options != null) mc.options.forwardKey.setPressed(false);
         renderBreakPositions.clear();
+        renderPlacePositions.clear();
+        renderPathPreviewSteps.clear();
         activeProbePositions.clear();
         activeMineTargets.clear();
         noProbePauseTicks = 0;
@@ -1820,6 +1879,7 @@ public class TunnelMinerModule extends Module {
             return;
         }
 
+        renderPlacePositions.clear();
         markDetourVisit(MathHelper.floor(mc.player.getX()), MathHelper.floor(mc.player.getZ()));
 
         Phase executedPhase = phase;
@@ -1852,6 +1912,11 @@ public class TunnelMinerModule extends Module {
                 break;
         }
 
+        int px = MathHelper.floor(mc.player.getX());
+        int py = MathHelper.floor(mc.player.getY());
+        int pz = MathHelper.floor(mc.player.getZ());
+        refreshRenderOverlays(px, py, pz);
+
         maybeStopForStealthStall();
         watchdogTick("onTick-phase-" + (executedPhase == null ? "null" : executedPhase.name()), tickStartNs);
     }
@@ -1866,20 +1931,154 @@ public class TunnelMinerModule extends Module {
         }
 
         // Render blocks to place
-        if (optRenderPlacing() && (optFillBehind() || optStealthMode())) {
+        if (optRenderPlacing()) {
             int px = MathHelper.floor(mc.player.getX());
             int pz = MathHelper.floor(mc.player.getZ());
-            Collection<BlockPos> restorePositions = optStealthMode() ? stealthCache.keySet() : fillLog.keySet();
 
-            for (BlockPos pos : restorePositions) {
-                // Only render if it's a valid placement target (not too close)
-                if (Math.abs(pos.getX() - px) <= 1 && Math.abs(pos.getZ() - pz) <= 1) {
+            for (BlockPos pos : renderPlacePositions) {
+                // Only render if it's a valid placement target (not in player's current column)
+                if (pos.getX() == px && pos.getZ() == pz) {
                     continue;
                 }
                 event.renderer.box(pos, optPlaceSideColor(), optPlaceLineColor(), optShapeMode(), 0);
             }
         }
+
+        // Render planned path
+        if (optRenderPath()) {
+            double y = tunnelY + 0.5;
+            for (PathStep step : renderPathPreviewSteps) {
+                if (step == null) continue;
+                double x1 = step.fromX() + 0.5;
+                double z1 = step.fromZ() + 0.5;
+                double x2 = step.toX() + 0.5;
+                double z2 = step.toZ() + 0.5;
+                event.renderer.line(x1, y, z1, x2, y, z2, optPathLineColor());
+            }
+        }
     }
+
+    private void refreshRenderOverlays(int px, int py, int pz) {
+        refreshRenderPathSteps(px, pz);
+    }
+
+    private void refreshRenderPlacePositions(int px, int py, int pz) {
+        renderPlacePositions.clear();
+        if (!optRenderPlacing()) return;
+
+        int[] step = nextStep(px, pz);
+        int stepX = step[0];
+        int stepZ = step[1];
+
+        LinkedHashSet<BlockPos> positions = new LinkedHashSet<>();
+        if (optStealthMode()) {
+            for (BlockPos pos : stealthCache.keySet()) {
+                if (isAheadOfStep(px, pz, stepX, stepZ, pos)) continue;
+                positions.add(pos);
+            }
+        }
+        if (optFillBehind()) {
+            for (BlockPos pos : fillLog.keySet()) {
+                if (optStealthMode() && isAheadOfStep(px, pz, stepX, stepZ, pos)) continue;
+                positions.add(pos);
+            }
+        }
+
+        if (optLavaAvoidance()) addLavaPlacePreview(positions, px, py, pz);
+        if (optAirPlace()) addAirPlacePreview(positions, px, py, pz);
+        if (phase == Phase.WALK) addFloorPlacePreview(positions);
+
+        renderPlacePositions.addAll(positions);
+    }
+
+    private boolean isAheadOfStep(int px, int pz, int stepX, int stepZ, BlockPos pos) {
+        if (stepX == 0 && stepZ == 0) return false;
+        int dx = pos.getX() - px;
+        int dz = pos.getZ() - pz;
+        return dx * stepX + dz * stepZ > 0;
+    }
+
+    private void addFloorPlacePreview(LinkedHashSet<BlockPos> positions) {
+        BlockPos myFloor = mc.player.getBlockPos().down();
+        if (shouldPreviewFloor(myFloor)) positions.add(myFloor.toImmutable());
+
+        BlockPos targetFloor = new BlockPos(MathHelper.floor(walkTargetX), tunnelY - 1, MathHelper.floor(walkTargetZ));
+        if (shouldPreviewFloor(targetFloor)) positions.add(targetFloor.toImmutable());
+    }
+
+    private boolean shouldPreviewFloor(BlockPos pos) {
+        BlockState state = mc.world.getBlockState(pos);
+        return state.isAir() || !state.getFluidState().isEmpty();
+    }
+
+    private void addAirPlacePreview(LinkedHashSet<BlockPos> positions, int px, int py, int pz) {
+        int[] step = nextStep(px, pz);
+        int stepX = step[0];
+        int stepZ = step[1];
+        if (stepX == 0 && stepZ == 0) return;
+
+        for (int d = 1; d <= optAirPlaceDistance(); d++) {
+            BlockPos placePos = new BlockPos(px + stepX * d, py - 1, pz + stepZ * d);
+            if (mc.world.getBlockState(placePos).isAir()) {
+                positions.add(placePos.toImmutable());
+            }
+        }
+    }
+
+    private void addLavaPlacePreview(LinkedHashSet<BlockPos> positions, int px, int py, int pz) {
+        int[] step = nextStep(px, pz);
+        int stepX = step[0];
+        int stepZ = step[1];
+        if (stepX == 0 && stepZ == 0) return;
+
+        for (int d = 1; d <= 5; d++) {
+            int x = px + stepX * d;
+            int z = pz + stepZ * d;
+            positions.addAll(collectLavaSealTargetsAtColumn(py, x, z));
+
+            if (stepX != 0 && stepZ != 0) {
+                int cornerA = pz + stepZ * (d - 1);
+                int cornerB = px + stepX * (d - 1);
+                positions.addAll(collectLavaSealTargetsAtColumn(py, x, cornerA));
+                positions.addAll(collectLavaSealTargetsAtColumn(py, cornerB, z));
+            }
+        }
+    }
+
+    private void refreshRenderPathSteps(int px, int pz) {
+        renderPathPreviewSteps.clear();
+        if (!optRenderPath()) return;
+
+        int maxSteps = Math.min(optRenderPathSteps(), blocksLeftFrom(px, pz));
+        if (maxSteps <= 0) return;
+
+        if (optStealthMode() && !cachedProbePath.isEmpty()) {
+            int count = Math.min(maxSteps, cachedProbePath.size());
+            renderPathPreviewSteps.addAll(cachedProbePath.subList(0, count));
+            return;
+        }
+
+        int cx = px;
+        int cz = pz;
+        boolean axisMode = onXAxis;
+        for (int i = 0; i < maxSteps; i++) {
+            int[] step = computeStep(cx, cz, axisMode);
+            int stepX = step[0];
+            int stepZ = step[1];
+            if (stepX == 0 && stepZ == 0) break;
+
+            int nx = cx + stepX;
+            int nz = cz + stepZ;
+            renderPathPreviewSteps.add(new PathStep(cx, cz, nx, nz, stepX, stepZ));
+
+            if (hardPathMode() == PathMode.AxisFirst && axisMode && nx == destX) {
+                axisMode = false;
+            }
+            cx = nx;
+            cz = nz;
+        }
+    }
+
     private void maybeStopForStealthStall() {
         int timeout = hardStallStopTicks();
         if (timeout <= 0) return;
@@ -3816,6 +4015,7 @@ public class TunnelMinerModule extends Module {
     }
 
     private boolean tryAirPlaceAt(BlockPos pos, int hotbarSlot, boolean allowEntityIntersection) {
+        markRenderPlace(pos);
         // Primary attempt.
         if (BlockUtils.place(pos, Hand.MAIN_HAND, hotbarSlot, false, 0, true, !allowEntityIntersection, true)) {
             watchdogCalc("air-place", String.format(Locale.ROOT, "result=true,attempt=1,pos=%s,hotbar=%d,allowEntityIntersection=%s", formatPos(pos), hotbarSlot, allowEntityIntersection));
@@ -3833,6 +4033,7 @@ public class TunnelMinerModule extends Module {
     }
 
     private boolean tryDirectPlaceAt(BlockPos pos, int hotbarSlot, boolean allowEntityIntersection) {
+        markRenderPlace(pos);
         boolean result = BlockUtils.place(pos, Hand.MAIN_HAND, hotbarSlot, false, 0, true, !allowEntityIntersection, true);
         watchdogCalc(
             "direct-place",
@@ -3846,6 +4047,11 @@ public class TunnelMinerModule extends Module {
             )
         );
         return result;
+    }
+
+    private void markRenderPlace(BlockPos pos) {
+        if (!optRenderPlacing() || pos == null) return;
+        renderPlacePositions.add(pos.toImmutable());
     }
 
     private void minePhase() {
