@@ -4,6 +4,8 @@ import xyz.thm.addon.utils.InventoryManager;
 import xyz.thm.addon.utils.RenderUtils.RenderMode;
 import xyz.thm.addon.utils.RotationUtils;
 import xyz.thm.addon.utils.InventoryManager.SwapMode;
+import xyz.thm.addon.utils.ThmMembers;
+import xyz.thm.addon.system.THMSystem;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -23,6 +25,7 @@ import meteordevelopment.orbit.EventPriority;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.AttributeModifiersComponent;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.item.*;
@@ -257,6 +260,15 @@ public abstract class KillAuraMixin extends Module {
         if (!bephax$grimRotate.get()) return;
         ci.cancel();
         bephax$handleAttackDelay(target);
+    }
+
+    @Inject(method = "entityCheck", at = @At("HEAD"), cancellable = true)
+    private void thm$ignoreThmMembers(Entity entity, CallbackInfoReturnable<Boolean> cir) {
+        if (!(entity instanceof PlayerEntity player)) return;
+        THMSystem system = THMSystem.get();
+        if (system != null && system.ignoreThmMembers.get() && ThmMembers.isThmMember(player)) {
+            cir.setReturnValue(false);
+        }
     }
     @Unique
     @EventHandler(priority = EventPriority.LOWEST)
