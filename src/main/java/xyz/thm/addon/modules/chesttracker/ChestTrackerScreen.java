@@ -1,6 +1,6 @@
 package xyz.thm.addon.modules.chesttracker;
+
 import meteordevelopment.meteorclient.systems.modules.Modules;
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
@@ -14,7 +14,10 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import xyz.thm.addon.modules.ItemSearchBar;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 public class ChestTrackerScreen extends Screen {
     private final ChestTrackerModule module;

@@ -1,5 +1,5 @@
 package xyz.thm.addon.utils;
-import xyz.thm.addon.accessor.InputAccessor;
+
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -12,8 +12,11 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
+import xyz.thm.addon.accessor.InputAccessor;
+
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 public class RotationUtils {
     private static RotationUtils INSTANCE;

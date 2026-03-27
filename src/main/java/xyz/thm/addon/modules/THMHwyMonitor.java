@@ -4,18 +4,14 @@ import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.utils.Rotation;
-import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
+import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.events.meteor.ActiveModulesChangedEvent;
 import meteordevelopment.meteorclient.events.render.Render2DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.pathing.BaritoneUtils;
-import meteordevelopment.meteorclient.settings.BoolSetting;
-import meteordevelopment.meteorclient.settings.DoubleSetting;
-import meteordevelopment.meteorclient.settings.IntSetting;
-import meteordevelopment.meteorclient.settings.Setting;
-import meteordevelopment.meteorclient.settings.SettingGroup;
+import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.movement.speed.Speed;
@@ -34,6 +30,7 @@ import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.ServerReconnectService;
 import xyz.thm.addon.utils.ServerStatusHandler;
 import xyz.thm.addon.utils.ServerStatusHandler.ServerState;
+import xyz.thm.addon.utils.ThmMembers;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -41,6 +38,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import static xyz.thm.addon.utils.THMUtils.getSaveName;
 
 public class THMHwyMonitor extends Module {
     private static final double WORKING_LINE_TOLERANCE = 0.1;
@@ -64,7 +63,12 @@ public class THMHwyMonitor extends Module {
     private static final int DISCONNECT_SCREEN_EVIDENCE_TIMEOUT_MS = 3000;
     private static final String RECONNECT_RESUME_LISTENER_KEY = "thm-hwymonitor-resume";
     private static final String RECONNECT_FAILURE_LISTENER_KEY = "thm-hwymonitor-failure";
-    // IMPORTANT: Any caller that arms reconnect must store cycleId and ignore stale resume/failure callbacks.
+    private final boolean EXPOSE_RESTART_AUTOMATION_SETTINGS = ThmMembers.isNovice(getSaveName());
+    private static final boolean RUNTIME_WATCHDOG_LOG_ENABLED = false;
+    private static final boolean EXECUTION_TRACE_LOG_ENABLED = false;
+    private static final String BARITONE_PATH_COMPLETE_MARKER = "pathing complete";
+    private static final String CRACKED_LOGIN_SUCCESS_MARKER = "you are now logged in!";
+    private static final String LOGIN_PROMPT_MARKER = "please login with the command: /login";
     private static final String RESTART_DETECTED_MARKER = "server restart detected";
     private static final String RESTOCK_FAILURE_MARKER = "unable to perform restock";
     private static final String THM_HIGHWAYBUILDER_TAG_A = "thm highwaybuilder";

@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import meteordevelopment.meteorclient.utils.render.color.Color;
+import net.minecraft.entity.player.PlayerEntity;
 import xyz.thm.addon.THMAddon;
 
 import javax.crypto.Cipher;
@@ -13,7 +14,6 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
-import net.minecraft.entity.player.PlayerEntity;
 
 import static xyz.thm.addon.utils.password.getAPIMemberHud;
 import static xyz.thm.addon.utils.password.getPassword;
@@ -160,10 +160,12 @@ public final class ThmMembers {
         if (player == null) return false;
         return getMemberByMcName(player.getGameProfile().name()) != null;
     }
-
     public static synchronized boolean isNovice(String mcName) {
+        return hasRank(mcName, "Novice");
+    }
+    public static synchronized boolean hasRank(String mcName, String rank) {
         Member member = getMemberByMcName(mcName);
-        return member != null && "Novice".equalsIgnoreCase(member.rank);
+        return member != null && member.rank.equalsIgnoreCase(rank);
     }
 
     public static synchronized void resetCache() {
