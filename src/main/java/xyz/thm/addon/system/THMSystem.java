@@ -15,6 +15,7 @@ public class THMSystem extends System<THMSystem> {
     private final SettingGroup sgPrefix = settings.createGroup("Hash");
     private final SettingGroup sgProfiles = settings.createGroup("Highway Profiles");
     private final SettingGroup sgPvp = settings.createGroup("PVP");
+    private final SettingGroup sgRender = settings.createGroup("THM Rendering");
 
     // Hash Settings
     private final Setting<String> hash = sgPrefix.add(new StringSetting.Builder()
@@ -62,6 +63,42 @@ public class THMSystem extends System<THMSystem> {
         .description("Which branch members to show in THM member lists.")
         .defaultValue(BRANCH_ALL)
         .supplier(() -> new String[] { BRANCH_ALL, BRANCH_MAIN, BRANCH_PVP })
+        .build()
+    );
+
+    public final Setting<Boolean> highlightInTab = sgRender.add(new BoolSetting.Builder()
+        .name("highlight-in-tab")
+        .description("Highlights THM members in the player tab list.")
+        .defaultValue(false)
+        .build()
+    );
+
+    public final Setting<Boolean> highlightNametags = sgRender.add(new BoolSetting.Builder()
+        .name("highlight-nametags")
+        .description("Highlights THM members in nametags.")
+        .defaultValue(false)
+        .build()
+    );
+
+    public final Setting<Boolean> useRankColor = sgRender.add(new BoolSetting.Builder()
+        .name("use-rank-color")
+        .description("Use the member's rank color instead of a single highlight color.")
+        .defaultValue(true)
+        .build()
+    );
+
+    public final Setting<meteordevelopment.meteorclient.utils.render.color.SettingColor> highlightColor = sgRender.add(new ColorSetting.Builder()
+        .name("highlight-color")
+        .description("Highlight color for THM members.")
+        .defaultValue(new meteordevelopment.meteorclient.utils.render.color.SettingColor(255, 217, 94, 255))
+        .visible(() -> !useRankColor.get())
+        .build()
+    );
+
+    public final Setting<Boolean> showNametagIcon = sgRender.add(new BoolSetting.Builder()
+        .name("show-nametag-icon")
+        .description("Shows the THM icon before member names in nametags.")
+        .defaultValue(true)
         .build()
     );
 

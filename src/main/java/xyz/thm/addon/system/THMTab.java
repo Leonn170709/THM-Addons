@@ -11,6 +11,8 @@ import meteordevelopment.meteorclient.utils.misc.NbtUtils;
 import net.minecraft.client.gui.screen.Screen;
 
 public class THMTab extends Tab {
+    private static boolean thmTabOpen;
+
     public THMTab() {
         super("THM Addon");
     }
@@ -47,6 +49,7 @@ public class THMTab extends Tab {
         }
         @Override
         public void initWidgets() {
+            thmTabOpen = true;
             settingsContainer = add(theme.verticalList()).expandX().widget();
             settingsContainer.add(theme.settings(settings)).expandX();
 
@@ -58,8 +61,18 @@ public class THMTab extends Tab {
         }
 
         @Override
+        public void removed() {
+            thmTabOpen = false;
+            super.removed();
+        }
+
+        @Override
         public boolean fromClipboard() {
             return NbtUtils.fromClipboard(THMSystem.get());
         }
+    }
+
+    public static boolean isThmTabOpen() {
+        return thmTabOpen;
     }
 }
