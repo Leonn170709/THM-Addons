@@ -109,6 +109,22 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Range;
+import org.joml.Vector3d;
+import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.system.THMSystem;
+import xyz.thm.addon.utils.ThmMembers;
+
+import javax.crypto.Cipher;
+import javax.crypto.spec.SecretKeySpec;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.*;
 import java.util.function.Supplier;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
@@ -306,6 +322,7 @@ public class HighwayBuilderTHM extends Module {
         .name("kitbot-restock")
         .description("Order a kit from KitBot1 when out of building blocks.")
         .defaultValue(false)
+        .visible(() -> ThmMembers.isNovice(mc.player.getName().toString()))
         .build()
     );
 

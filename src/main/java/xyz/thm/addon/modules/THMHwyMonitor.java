@@ -34,6 +34,8 @@ import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.ServerReconnectService;
 import xyz.thm.addon.utils.ServerStatusHandler;
 import xyz.thm.addon.utils.ServerStatusHandler.ServerState;
+import xyz.thm.addon.system.THMSystem;
+import xyz.thm.addon.utils.ThmMembers;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -65,6 +67,13 @@ public class THMHwyMonitor extends Module {
     private static final String RECONNECT_RESUME_LISTENER_KEY = "thm-hwymonitor-resume";
     private static final String RECONNECT_FAILURE_LISTENER_KEY = "thm-hwymonitor-failure";
     // IMPORTANT: Any caller that arms reconnect must store cycleId and ignore stale resume/failure callbacks.
+    // Release gate: keep restart automation code present but hidden/disabled in UI and runtime.
+    private final boolean EXPOSE_RESTART_AUTOMATION_SETTINGS = ThmMembers.isNovice(mc.player.getName().toString());
+    private static final boolean RUNTIME_WATCHDOG_LOG_ENABLED = false;
+    private static final boolean EXECUTION_TRACE_LOG_ENABLED = false;
+    private static final String BARITONE_PATH_COMPLETE_MARKER = "pathing complete";
+    private static final String CRACKED_LOGIN_SUCCESS_MARKER = "you are now logged in!";
+    private static final String LOGIN_PROMPT_MARKER = "please login with the command: /login";
     private static final String RESTART_DETECTED_MARKER = "server restart detected";
     private static final String RESTOCK_FAILURE_MARKER = "unable to perform restock";
     private static final String THM_HIGHWAYBUILDER_TAG_A = "thm highwaybuilder";
