@@ -8,11 +8,16 @@ import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.meteorclient.renderer.text.TextRenderer;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.player.NameProtect;
+import meteordevelopment.meteorclient.systems.friends.Friends;
 import meteordevelopment.meteorclient.events.render.Render2DEvent;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.Identifier;
 import net.minecraft.client.gl.RenderPipelines;
+import net.minecraft.client.texture.NativeImage;
+import net.minecraft.resource.Resource;
+import java.io.InputStream;
+import java.util.Optional;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
@@ -28,9 +33,11 @@ public abstract class NametagsMixin extends Module {
         super(category, name, description, aliases);
     }
 
-    @Unique private static final Identifier THM_ICON = Identifier.of("icon", "icon.png");
-    @Unique private static final int THM_ICON_SIZE = 64;
+    @Unique private static final Identifier THM_ICON = Identifier.of("icon", "obby.png");
     @Unique private static final int THM_ICON_PAD = 2;
+    @Unique private static int thm$iconWidth = 64;
+    @Unique private static int thm$iconHeight = 64;
+    @Unique private static boolean thm$iconSizeResolved;
 
     @Unique private DrawContext thm$drawContext;
     @Unique private PlayerEntity thm$player;
@@ -50,6 +57,8 @@ public abstract class NametagsMixin extends Module {
     private Color thmAddon$overrideNameColor(PlayerEntity player, Color originalColor) {
         Color baseColor = PlayerUtils.getPlayerColor(player, originalColor);
 
+        if (Friends.get().isFriend(player)) return baseColor;
+
         THMSystem system = THMSystem.get();
         if (system == null || !system.highlightNametags.get()) return baseColor;
         ThmMembers.Member member = thm$getEligibleMember(player, system);
@@ -66,8 +75,9 @@ public abstract class NametagsMixin extends Module {
 
         if (!thm$shouldRenderIcon(string)) return width;
 
-        double iconSize = text.getHeight(shadow);
-        return width + iconSize + THM_ICON_PAD;
+        double iconHeight = text.getHeight(shadow);
+        double iconWidth = thm$getIconWidth(iconHeight);
+        return width + iconWidth + THM_ICON_PAD;
     }
 
     @Redirect(method = "renderNametagPlayer", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/renderer/text/TextRenderer;render(Ljava/lang/String;DDLmeteordevelopment/meteorclient/utils/render/color/Color;Z)D"))
@@ -76,7 +86,8 @@ public abstract class NametagsMixin extends Module {
             return text.render(string, x, y, color, shadow);
         }
 
-        double iconSize = text.getHeight(shadow);
+        double iconHeight = text.getHeight(shadow);
+        double iconWidth = thm$getIconWidth(iconHeight);
         if (thm$drawContext != null) {
             int ix = (int) Math.round(x);
             int iy = (int) Math.round(y);
@@ -87,16 +98,16 @@ public abstract class NametagsMixin extends Module {
                 iy,
                 0f,
                 0f,
-                (int) Math.round(iconSize),
-                (int) Math.round(iconSize),
-                THM_ICON_SIZE,
-                THM_ICON_SIZE,
-                THM_ICON_SIZE,
-                THM_ICON_SIZE
+                (int) Math.round(iconWidth),
+                (int) Math.round(iconHeight),
+                thm$iconWidth,
+                thm$iconHeight,
+                thm$iconWidth,
+                thm$iconHeight
             );
         }
 
-        return text.render(string, x + iconSize + THM_ICON_PAD, y, color, shadow);
+        return text.render(string, x + iconWidth + THM_ICON_PAD, y, color, shadow);
     }
 
     @Unique
@@ -110,8 +121,34 @@ public abstract class NametagsMixin extends Module {
     @Unique
     private String thm$getDisplayName(PlayerEntity player) {
         if (player == null) return "";
-        if (player == mc.player) return Modules.get().get(NameProtect.class).getName(player.getName().getString());
+        if (player == meteordevelopment.meteorclient.MeteorClient.mc.player) return Modules.get().get(NameProtect.class).getName(player.getName().getString());
         return player.getName().getString();
+    }
+
+    @Unique
+    private static void thm$ensureIconSize() {
+        if (thm$iconSizeResolved) return;
+        thm$iconSizeResolved = true;
+        if (meteordevelopment.meteorclient.MeteorClient.mc == null || meteordevelopment.meteorclient.MeteorClient.mc.getResourceManager() == null) return;
+
+        try {
+            Optional<Resource> resource = meteordevelopment.meteorclient.MeteorClient.mc.getResourceManager().getResource(THM_ICON);
+            if (resource.isEmpty()) return;
+            try (InputStream input = resource.get().getInputStream()) {
+                NativeImage image = NativeImage.read(input);
+                thm$iconWidth = Math.max(1, image.getWidth());
+                thm$iconHeight = Math.max(1, image.getHeight());
+                image.close();
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    @Unique
+    private static double thm$getIconWidth(double iconHeight) {
+        thm$ensureIconSize();
+        if (thm$iconHeight <= 0) return iconHeight;
+        return iconHeight * ((double) thm$iconWidth / (double) thm$iconHeight);
     }
 
     @Unique
