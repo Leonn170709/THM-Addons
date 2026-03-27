@@ -50,9 +50,10 @@ import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
 import net.minecraft.client.gui.screen.ingame.ShulkerBoxScreen;
 import net.minecraft.client.input.Input;
 import net.minecraft.client.network.ClientPlayerInteractionManager;
-import net.minecraft.client.option.GameOptions;
 import net.minecraft.client.option.Perspective;
+import net.minecraft.client.option.GameOptions;
 import net.minecraft.client.util.ScreenshotRecorder;
+import net.minecraft.component.DataComponentTypes;
 import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
@@ -68,19 +69,21 @@ import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.Hand;
-import net.minecraft.util.PlayerInput;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.*;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.EmptyBlockView;
 import net.minecraft.world.RaycastContext;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Range;
 import org.joml.Vector3d;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.system.THMSystem;
 import xyz.thm.addon.utils.ServerStatusHandler;
 import xyz.thm.addon.utils.ServerStatusHandler.ServerState;
-import xyz.thm.addon.utils.ThmMembers;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
@@ -92,9 +95,13 @@ import java.lang.reflect.Field;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
+import java.nio.channels.FileChannel;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -102,8 +109,24 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.function.Predicate;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Range;
+import org.joml.Vector3d;
+import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.system.THMSystem;
+import xyz.thm.addon.utils.ThmMembers;
+
+import javax.crypto.Cipher;
+import javax.crypto.spec.SecretKeySpec;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.*;
 import java.util.function.Supplier;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 import static xyz.thm.addon.utils.THMUtils.*;
@@ -474,13 +497,6 @@ public class HighwayBuilderTHM extends Module {
         .name("check-behind")
         .description("Checks and repairs missing highway floor and railings behind the player.")
         .defaultValue(true)
-        .build()
-    );
-
-    private final Setting<Boolean> debugLog = sgStatistics.add(new BoolSetting.Builder()
-        .name("debug")
-        .description("Logs state transitions and movement input for debugging.")
-        .defaultValue(false)
         .build()
     );
 
@@ -891,8 +907,6 @@ public class HighwayBuilderTHM extends Module {
     public DoubleMineBlock normalMining, packetMining;
     private final MBlockPos posRender2 = new MBlockPos();
     private final MBlockPos posRender3 = new MBlockPos();
-
-    private int debugStateLastAge = -1;
     private List<Pattern> signBreakPatterns = Collections.emptyList();
     private static final String KITBOT_NAME = "KitBot1";
     private static final double CENTER_SPEED_OVERRIDE = 0.6;
@@ -1201,8 +1215,7 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private boolean isExecutionAllowedOnCurrentServer(ServerState committedState) {
-        // Allow UNKNOWN to avoid hard-pausing when detection hasn't stabilized yet.
-        return committedState == ServerState.MAIN_SERVER || committedState == ServerState.UNKNOWN;
+        return committedState == ServerState.MAIN_SERVER;
     }
 
     private void trackServerExecutionState(ServerState committedState) {
@@ -1336,7 +1349,6 @@ public class HighwayBuilderTHM extends Module {
     }
     @Override
     public void onDeactivate() {
-        if (input != null) input.stop();
         boolean isMonitorPauseDeactivate = monitorPauseDeactivateArmed;
         boolean isReconnectFailureDeactivate = reconnectFailureDeactivateArmed;
         monitorPauseDeactivateArmed = false;
@@ -1414,13 +1426,10 @@ public class HighwayBuilderTHM extends Module {
     private void syncThmHwyMonitorOnActivate() {
         if (!manageThmHwyMonitor.get()) return;
 
-        try {
-            THMHwyMonitor monitor = Modules.get().get(THMHwyMonitor.class);
-            if (monitor == null || monitor.isActive()) return;
-            monitor.toggle();
-        } catch (NoClassDefFoundError | ExceptionInInitializerError ignored) {
-            // Baritone-dependent monitor not available.
-        }
+        THMHwyMonitor monitor = Modules.get().get(THMHwyMonitor.class);
+        if (monitor == null || monitor.isActive()) return;
+
+        monitor.toggle();
     }
 
     private void syncThmHwyMonitorOnDeactivate() {
@@ -1430,13 +1439,10 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private void disableThmHwyMonitorIfActive() {
-        try {
-            THMHwyMonitor monitor = Modules.get().get(THMHwyMonitor.class);
-            if (monitor == null || !monitor.isActive()) return;
-            monitor.toggle();
-        } catch (NoClassDefFoundError | ExceptionInInitializerError ignored) {
-            // Baritone-dependent monitor not available.
-        }
+        THMHwyMonitor monitor = Modules.get().get(THMHwyMonitor.class);
+        if (monitor == null || !monitor.isActive()) return;
+
+        monitor.toggle();
     }
 
     public void disableForMonitorRealignPause() {
@@ -1549,11 +1555,7 @@ public class HighwayBuilderTHM extends Module {
     @Override
     public void error(String message, Object... args) {
         super.error(message, args);
-        try {
-            THMHwyMonitor.signalNonRestartHardFailFromHighwayBuilder();
-        } catch (NoClassDefFoundError | ExceptionInInitializerError ignored) {
-            // Baritone-dependent monitor not available.
-        }
+        THMHwyMonitor.signalNonRestartHardFailFromHighwayBuilder();
         toggle();
 
         if (disconnectOnToggle.get()) {
@@ -1563,11 +1565,7 @@ public class HighwayBuilderTHM extends Module {
 
     private void errorEarly(String message, Object... args) {
         super.error(message, args);
-        try {
-            THMHwyMonitor.signalNonRestartHardFailFromHighwayBuilder();
-        } catch (NoClassDefFoundError | ExceptionInInitializerError ignored) {
-            // Baritone-dependent monitor not available.
-        }
+        THMHwyMonitor.signalNonRestartHardFailFromHighwayBuilder();
 
         displayInfo = false;
         toggle();
@@ -1575,11 +1573,7 @@ public class HighwayBuilderTHM extends Module {
 
     private void errorRestart(String message, Object... args) {
         super.error(message, args);
-        try {
-            THMHwyMonitor.signalRestartHardFailFromHighwayBuilder();
-        } catch (NoClassDefFoundError | ExceptionInInitializerError ignored) {
-            // Baritone-dependent monitor not available.
-        }
+        THMHwyMonitor.signalRestartHardFailFromHighwayBuilder();
         displayInfo = false;
         toggle();
     }
@@ -1590,19 +1584,14 @@ public class HighwayBuilderTHM extends Module {
 
         maybeCheckpointStatsSession();
 
-        if (!isNot6B6T()) {
-            ServerState committedState = getCommittedServerState();
-            trackServerExecutionState(committedState);
-            if (!isExecutionAllowedOnCurrentServer(committedState)) {
-                if (debugLog.get()) info("HB paused by server-state=%s", committedState);
-                pauseExecutionForServerState(committedState);
-                return;
-            }
-
-            executionPausedByServerState = false;
-        } else {
-            executionPausedByServerState = false;
+        ServerState committedState = getCommittedServerState();
+        trackServerExecutionState(committedState);
+        if (!isExecutionAllowedOnCurrentServer(committedState)) {
+            pauseExecutionForServerState(committedState);
+            return;
         }
+
+        executionPausedByServerState = false;
         tickDeferredCenterSpeedRestore();
 
         if (statuslog.get()) {
@@ -1663,7 +1652,6 @@ public class HighwayBuilderTHM extends Module {
         maybeQueueEnderChestReserveRestock();
         maybeQueueFoodRestock();
         state.tick(this);
-        maybeLogMovement();
 
         if (breakTimer > 0) breakTimer--;
         if (placeTimer > 0) placeTimer--;
@@ -2239,80 +2227,12 @@ public class HighwayBuilderTHM extends Module {
     private boolean canMine(MBlockPos pos, boolean mineBlocksToPlace) {
         BlockState state = pos.getState();
         if (shouldSkipSignBreak(pos.getBlockPos(), state)) return false;
-        return safeCanBreak(pos.getBlockPos(), state) && (mineBlocksToPlace || !blocksToPlace.get().contains(state.getBlock()));
+        return BlockUtils.canBreak(pos.getBlockPos(), state) && (mineBlocksToPlace || !blocksToPlace.get().contains(state.getBlock()));
     }
 
     private boolean canPlace(MBlockPos pos, boolean liquids) {
         if (pos.getBlockPos().getSquaredDistance(mc.player.getEyePos()) > placeRange.get() * placeRange.get()) return false;
         return liquids ? !pos.getState().getFluidState().isEmpty() : BlockUtils.canPlace(pos.getBlockPos());
-    }
-
-    private void debugStateTransition(State nextState, String reason) {
-        if (!debugLog.get() || mc.player == null) return;
-        int age = mc.player.age;
-        if (age == debugStateLastAge) return;
-        debugStateLastAge = age;
-        info("HB state -> %s (reason=%s)", stateName(nextState), reason);
-    }
-
-    private void maybeLogMovement() {
-        if (!debugLog.get() || mc.player == null || input == null) return;
-        if (mc.player.age % 20 != 0) return;
-        info(
-            "HB move state=%s pos=%s f=%s b=%s l=%s r=%s jump=%s sneak=%s",
-            stateName(state),
-            formatBlockPos(mc.player.getBlockPos()),
-            input.isForward(),
-            input.isBackward(),
-            input.isLeft(),
-            input.isRight(),
-            input.isJump(),
-            input.isSneak()
-        );
-    }
-
-    private boolean safeCanBreak(BlockPos pos, BlockState state) {
-        try {
-            return BlockUtils.canBreak(pos, state);
-        } catch (StackOverflowError ignored) {
-            if (mc.player == null || mc.world == null) return false;
-            if (state.isAir()) return false;
-            return state.getHardness(mc.world, pos) >= 0.0f;
-        }
-    }
-
-    private boolean safeCanInstaBreak(BlockPos pos) {
-        try {
-            return BlockUtils.canInstaBreak(pos);
-        } catch (StackOverflowError ignored) {
-            return false;
-        }
-    }
-
-    private MBPIterator floorWithBehind(boolean includeBehind) {
-        try {
-            if (!includeBehind) return blockPosProvider.getFloor();
-            MBPIterator first = blockPosProvider.getFloor();
-            MBPIterator second = blockPosProvider.getBehindFloor();
-            if (second == null || second == first) return first;
-            return new MBPIteratorConcatSafe(first, second);
-        } catch (StackOverflowError ignored) {
-            if (debugLog.get()) warning("HB floor iterator crashed (StackOverflow). Skipping tick.");
-            return EMPTY_ITERATOR;
-        }
-    }
-
-    private MBPIterator railingsWithBehind(int state, boolean includeBehind) {
-        try {
-            if (!includeBehind) return blockPosProvider.getRailings(state);
-            MBPIterator first = blockPosProvider.getRailings(state);
-            MBPIterator second = blockPosProvider.getBehindRailings(state);
-            if (second == null || second == first) return first;
-            return new MBPIteratorConcatSafe(first, second);
-        } catch (StackOverflowError ignored) {
-            if (debugLog.get()) warning("HB railing iterator crashed (StackOverflow). Skipping tick.");
-            return EMPTY_ITERATOR;
-        }
     }
 
     private void restockDebug(String message, Object... args) {
@@ -4192,8 +4112,8 @@ public class HighwayBuilderTHM extends Module {
                         b.input.backward(z > 0);
 
                         if (b.mc.player.getZ() < 0) {
-                            boolean forward = b.input.isForward();
-                            b.input.forward(b.input.isBackward());
+                            boolean forward = b.input.playerInput.forward();
+                            b.input.forward(b.input.playerInput.backward());
                             b.input.backward(forward);
                         }
                     }
@@ -4203,8 +4123,8 @@ public class HighwayBuilderTHM extends Module {
                         b.input.left(x < 0);
 
                         if (b.mc.player.getX() < 0) {
-                            boolean right = b.input.isRight();
-                            b.input.right(b.input.isLeft());
+                            boolean right = b.input.playerInput.right();
+                            b.input.right(b.input.playerInput.left());
                             b.input.left(right);
                         }
                     }
@@ -4246,59 +4166,18 @@ public class HighwayBuilderTHM extends Module {
             }
 
             private void checkTasks(HighwayBuilderTHM b) {
-                if (b.destroyCrystalTraps.get() && isCrystalTrap(b)) {
-                    b.debugStateTransition(DefuseCrystalTraps, "crystal-trap");
-                    b.setState(DefuseCrystalTraps);
-                }
-                else if (needsToPlace(b, b.blockPosProvider.getLiquids(), true)) {
-                    b.debugStateTransition(FillLiquids, "fill-liquids");
-                    b.setState(FillLiquids);
-                }
-                else if (needsToMine(b, b.blockPosProvider.getFront(), true)) {
-                    b.debugStateTransition(MineFront, "mine-front");
-                    b.setState(MineFront);
-                }
-                else if (b.checkBehind.get() && needsToMine(b, b.blockPosProvider.getBehindFront(), true)) {
-                    b.debugStateTransition(MineBehind, "mine-behind");
-                    b.setState(MineBehind);
-                }
-                else if (b.floor.get() == Floor.Replace && needsToMine(b, b.blockPosProvider.getFloor(), false)) {
-                    b.debugStateTransition(MineFloor, "mine-floor");
-                    b.setState(MineFloor);
-                }
-                else if (b.checkBehind.get() && b.floor.get() == Floor.Replace && needsToMine(b, b.blockPosProvider.getBehindFloor(), false)) {
-                    b.debugStateTransition(MineBehindFloor, "mine-behind-floor");
-                    b.setState(MineBehindFloor);
-                }
-                else if (b.railings.get() && needsToMine(b, b.blockPosProvider.getRailings(0), false)) {
-                    b.debugStateTransition(MineRailings, "mine-railings");
-                    b.setState(MineRailings);
-                }
-                else if (b.checkBehind.get() && b.railings.get() && needsToMine(b, b.blockPosProvider.getBehindRailings(0), false)) {
-                    b.debugStateTransition(MineBehindRailings, "mine-behind-railings");
-                    b.setState(MineBehindRailings);
-                }
-                else if (b.mineAboveRailings.get() && needsToMine(b, b.blockPosProvider.getRailings(1), true)) {
-                    b.debugStateTransition(MineAboveRailings, "mine-above-railings");
-                    b.setState(MineAboveRailings);
-                }
-                else if (b.checkBehind.get() && b.mineAboveRailings.get() && needsToMine(b, b.blockPosProvider.getBehindRailings(1), true)) {
-                    b.debugStateTransition(MineBehindAboveRailings, "mine-behind-above-railings");
-                    b.setState(MineBehindAboveRailings);
-                }
+                if (b.destroyCrystalTraps.get() && isCrystalTrap(b)) b.setState(DefuseCrystalTraps); // Destroy crystal traps
+                else if (needsToPlace(b, b.blockPosProvider.getLiquids(), true)) b.setState(FillLiquids); // Fill Liquids
+                else if (needsToMine(b, b.blockPosProvider.getFront(), true)) b.setState(MineFront); // Mine Front
+                else if (b.checkBehind.get() && needsToMine(b, b.blockPosProvider.getBehindFront(), true)) b.setState(MineBehind); // Mine Behind
+                else if (b.floor.get() == Floor.Replace && needsToMine(b, b.blockPosProvider.getFloor(), false)) b.setState(MineFloor); // Mine Floor
+                else if (b.railings.get() && needsToMine(b, b.blockPosProvider.getRailings(0), false)) b.setState(MineRailings); // Mine Railings
+                else if (b.mineAboveRailings.get() && needsToMine(b, b.blockPosProvider.getRailings(1), true)) b.setState(MineAboveRailings); // Mine above railings
                 else if (b.railings.get() && needsToPlace(b, b.blockPosProvider.getRailings(0, b.checkBehind.get()), false)) {
-                    if (b.cornerBlock.get() && needsToPlace(b, b.blockPosProvider.getRailings(-1, b.checkBehind.get()), false)) {
-                        b.debugStateTransition(PlaceCornerBlock, "place-corner");
-                        b.setState(PlaceCornerBlock);
-                    } else {
-                        b.debugStateTransition(PlaceRailings, "place-railings");
-                        b.setState(PlaceRailings);
-                    }
+                    if (b.cornerBlock.get() && needsToPlace(b, b.blockPosProvider.getRailings(-1, b.checkBehind.get()), false)) b.setState(PlaceCornerBlock); // Place corner support block
+                    else b.setState(PlaceRailings); // Place Railings
                 }
-                else if (needsToPlace(b, b.blockPosProvider.getFloor(b.checkBehind.get()), false)) {
-                    b.debugStateTransition(PlaceFloor, "place-floor");
-                    b.setState(PlaceFloor);
-                }
+                else if (needsToPlace(b, b.blockPosProvider.getFloor(b.checkBehind.get()), false)) b.setState(PlaceFloor); // Place Floor
             }
 
             private boolean needsToMine(HighwayBuilderTHM b, MBPIterator it, boolean mineBlocksToPlace) {
@@ -4478,18 +4357,6 @@ public class HighwayBuilderTHM extends Module {
             }
         },
 
-        MineBehindFloor {
-            @Override
-            protected void start(HighwayBuilderTHM b) {
-                mine(b, b.blockPosProvider.getBehindFloor(), false, Forward, this);
-            }
-
-            @Override
-            protected void tick(HighwayBuilderTHM b) {
-                mine(b, b.blockPosProvider.getBehindFloor(), false, Forward, this);
-            }
-        },
-
         MineRailings {
             @Override
             protected void start(HighwayBuilderTHM b) {
@@ -4502,18 +4369,6 @@ public class HighwayBuilderTHM extends Module {
             }
         },
 
-        MineBehindRailings {
-            @Override
-            protected void start(HighwayBuilderTHM b) {
-                mine(b, b.blockPosProvider.getBehindRailings(0), false, Forward, this);
-            }
-
-            @Override
-            protected void tick(HighwayBuilderTHM b) {
-                mine(b, b.blockPosProvider.getBehindRailings(0), false, Forward, this);
-            }
-        },
-
         MineAboveRailings {
             @Override
             protected void start(HighwayBuilderTHM b) {
@@ -4523,18 +4378,6 @@ public class HighwayBuilderTHM extends Module {
             @Override
             protected void tick(HighwayBuilderTHM b) {
                 mine(b, b.blockPosProvider.getRailings(1), true, Forward, this);
-            }
-        },
-
-        MineBehindAboveRailings {
-            @Override
-            protected void start(HighwayBuilderTHM b) {
-                mine(b, b.blockPosProvider.getBehindRailings(1), true, Forward, this);
-            }
-
-            @Override
-            protected void tick(HighwayBuilderTHM b) {
-                mine(b, b.blockPosProvider.getBehindRailings(1), true, Forward, this);
             }
         },
 
@@ -5356,7 +5199,7 @@ public class HighwayBuilderTHM extends Module {
             private boolean breakBlockingBlock(HighwayBuilderTHM b, BlockPos pos, BlockState state, String label) {
                 if (b.isKitbotRequiredAirClear(state)) return false;
                 if (b.breakTimer > 0) return true;
-                if (!b.safeCanBreak(pos, state)) {
+                if (!BlockUtils.canBreak(pos, state)) {
                     failKitbotOrder(b, "Unable to clear blocking " + state.getBlock().getName().getString() + " at " + b.formatBlockPos(pos) + " while reconciling the " + label + ".");
                     return true;
                 }
@@ -7319,9 +7162,9 @@ public class HighwayBuilderTHM extends Module {
                     if (b.shouldSkipSignBreak(pos.getBlockPos(), pos.getState())) return;
                     // only want to double mine blocks that we can mine, that are not instamined, and we are not already mining
                     if (
-                        b.safeCanBreak(pos.getBlockPos(), pos.getState())
+                        BlockUtils.canBreak(pos.getBlockPos(), pos.getState())
                             && (mineBlocksToPlace || !b.blocksToPlace.get().contains(pos.getState().getBlock()))
-                            && !b.safeCanInstaBreak(pos.getBlockPos()) && (!Modules.get().get(SpeedMine.class).instamine() || pos.getState().calcBlockBreakingDelta(b.mc.player, b.mc.world, pos.getBlockPos()) <= 0.5)
+                            && !BlockUtils.canInstaBreak(pos.getBlockPos()) && (!Modules.get().get(SpeedMine.class).instamine() || pos.getState().calcBlockBreakingDelta(b.mc.player, b.mc.world, pos.getBlockPos()) <= 0.5)
                             && (b.normalMining == null || !pos.getBlockPos().equals(b.normalMining.blockPos))
                             && (b.packetMining == null || !pos.getBlockPos().equals(b.packetMining.blockPos))
                     ) {
@@ -7366,8 +7209,8 @@ public class HighwayBuilderTHM extends Module {
                 if (slot != b.mc.player.getInventory().getSelectedSlot()) InvUtils.swap(slot, false);
 
                 BlockPos mcPos = pos.getBlockPos();
-                boolean multiBreak = b.blocksPerTick.get() > 1 && b.safeCanInstaBreak(mcPos) && !b.rotation.get().mine;
-                if (b.safeCanBreak(mcPos, state)) {
+                boolean multiBreak = b.blocksPerTick.get() > 1 && BlockUtils.canInstaBreak(mcPos) && !b.rotation.get().mine;
+                if (BlockUtils.canBreak(mcPos)) {
                     if (b.rotation.get().mine) Rotations.rotate(Rotations.getYaw(mcPos), Rotations.getPitch(mcPos), () -> BlockUtils.breakBlock(mcPos, true));
                     else BlockUtils.breakBlock(mcPos, true);
                     breaking = true;
@@ -7385,7 +7228,7 @@ public class HighwayBuilderTHM extends Module {
                     if (!multiBreak) break;
                 }
 
-                if (!it.hasNext() && b.safeCanInstaBreak(mcPos)) finishedBreaking = true;
+                if (!it.hasNext() && BlockUtils.canInstaBreak(mcPos)) finishedBreaking = true;
             }
 
             // we quickly jump to the next state, to remove micro delays in the process and allow us to break blocks
@@ -7822,120 +7665,6 @@ public class HighwayBuilderTHM extends Module {
         }
     }
 
-    private static final MBPIterator EMPTY_ITERATOR = new MBPIterator() {
-        @Override
-        public void save() {}
-
-        @Override
-        public void restore() {}
-
-        @Override
-        public boolean hasNext() {
-            return false;
-        }
-
-        @Override
-        public MBlockPos next() {
-            throw new NoSuchElementException();
-        }
-    };
-
-    private static class CustomPlayerInput extends Input {
-        private boolean forward;
-        private boolean backward;
-        private boolean left;
-        private boolean right;
-        private boolean jump;
-        private boolean sneak;
-        private boolean sprint;
-
-        public CustomPlayerInput() {
-            syncPlayerInput();
-            movementVector = Vec2f.ZERO;
-        }
-
-        public void forward(boolean value) {
-            forward = value;
-            syncPlayerInput();
-        }
-
-        public void backward(boolean value) {
-            backward = value;
-            syncPlayerInput();
-        }
-
-        public void left(boolean value) {
-            left = value;
-            syncPlayerInput();
-        }
-
-        public void right(boolean value) {
-            right = value;
-            syncPlayerInput();
-        }
-
-        public void jump(boolean value) {
-            jump = value;
-            syncPlayerInput();
-        }
-
-        public void sneak(boolean value) {
-            sneak = value;
-            syncPlayerInput();
-        }
-
-        public void sprint(boolean value) {
-            sprint = value;
-            syncPlayerInput();
-        }
-
-        public void stop() {
-            forward = backward = left = right = jump = sneak = sprint = false;
-            syncPlayerInput();
-            movementVector = Vec2f.ZERO;
-        }
-
-        public boolean isForward() {
-            return forward;
-        }
-
-        public boolean isBackward() {
-            return backward;
-        }
-
-        public boolean isLeft() {
-            return left;
-        }
-
-        public boolean isRight() {
-            return right;
-        }
-
-        public boolean isJump() {
-            return jump;
-        }
-
-        public boolean isSneak() {
-            return sneak;
-        }
-
-        @Override
-        public void tick() {
-            float forwardAmount = movementAmount(forward, backward);
-            float sidewaysAmount = movementAmount(left, right);
-            movementVector = new Vec2f(sidewaysAmount, forwardAmount).normalize();
-        }
-
-        private void syncPlayerInput() {
-            playerInput = new PlayerInput(forward, backward, left, right, jump, sneak, sprint);
-        }
-
-        private static float movementAmount(boolean positive, boolean negative) {
-            if (positive == negative) return 0.0f;
-            return positive ? 1.0f : -1.0f;
-        }
-    }
-
     private static class MBPIteratorFilter implements MBPIterator {
         private final MBPIterator it;
         private final Predicate<MBlockPos> predicate;
@@ -8033,69 +7762,6 @@ public class HighwayBuilderTHM extends Module {
         public MBlockPos next() {
             if (usingFirst && !first.hasNext()) usingFirst = false;
             return usingFirst ? first.next() : second().next();
-        }
-
-        @Override
-        public int placementsPerTick(HighwayBuilderTHM b) {
-            return first.placementsPerTick(b);
-        }
-    }
-
-    private static class MBPIteratorConcatSafe implements MBPIterator {
-        private final MBPIterator first;
-        private final MBPIterator second;
-        private boolean usingFirst = true;
-        private boolean previousUsingFirst = true;
-
-        public MBPIteratorConcatSafe(MBPIterator first, MBPIterator second) {
-            this.first = first;
-            this.second = second;
-        }
-
-        @Override
-        public void save() {
-            try {
-                first.save();
-                second.save();
-                previousUsingFirst = usingFirst;
-                usingFirst = true;
-            } catch (StackOverflowError ignored) {
-                usingFirst = false;
-            }
-        }
-
-        @Override
-        public void restore() {
-            try {
-                first.restore();
-                second.restore();
-                usingFirst = previousUsingFirst;
-            } catch (StackOverflowError ignored) {
-                usingFirst = false;
-            }
-        }
-
-        @Override
-        public boolean hasNext() {
-            try {
-                if (usingFirst) {
-                    if (first.hasNext()) return true;
-                    usingFirst = false;
-                }
-                return second.hasNext();
-            } catch (StackOverflowError ignored) {
-                return false;
-            }
-        }
-
-        @Override
-        public MBlockPos next() {
-            try {
-                if (usingFirst && !first.hasNext()) usingFirst = false;
-                return usingFirst ? first.next() : second.next();
-            } catch (StackOverflowError ignored) {
-                throw new NoSuchElementException();
-            }
         }
 
         @Override

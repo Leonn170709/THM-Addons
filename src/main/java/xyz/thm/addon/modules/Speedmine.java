@@ -10,7 +10,6 @@ import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.friends.Friends;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.misc.Keybind;
-import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
@@ -29,6 +28,7 @@ import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket;
 import net.minecraft.network.packet.s2c.play.BundleS2CPacket;
 import net.minecraft.registry.tag.FluidTags;
+import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.*;
 import net.minecraft.util.shape.VoxelShape;
@@ -39,6 +39,7 @@ import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
 import xyz.thm.addon.utils.InventoryManager;
 import xyz.thm.addon.utils.RotationUtils;
 
+import java.awt.*;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -112,7 +113,7 @@ public class Speedmine extends Module {
         .name("auto-swap")
         .description("Swaps to the best tool once the mining is complete")
         .defaultValue(Swap.SILENT)
-        .visible(() -> modeConfig.get() == SpeedmineMode.PACKET || modeConfig.get() == SpeedmineMode.DAMAGE)
+        .visible(() -> modeConfig.get() == SpeedmineMode.PACKET)
         .build()
     );
     private final Setting<Boolean> rotateConfig = sgGeneral.add(new BoolSetting.Builder()
@@ -272,6 +273,7 @@ public class Speedmine extends Module {
     );
     private final Map<MiningData, Animation> fadeList = new HashMap<>();
     private FirstOutQueue<MiningData> miningQueue;
+    private MiningData instantRebreakTarget;
     private long lastBreak;
     private boolean instantTogglePressed = false;
     private boolean autoMineTogglePressed = false;
@@ -285,9 +287,6 @@ public class Speedmine extends Module {
     private int swappedToSlot = -1;
     private int originalSlot = -1;
     private int swapBackTicks = 0;
-    private MiningData damageMining;
-    private boolean damageForcedAttack;
-    private boolean damageAttackWasPressed;
     private InventoryManager inventoryManager;
     public Speedmine() {
         super(THMAddon.PVP, "Speedmine", "Mines blocks faster");
@@ -317,19 +316,17 @@ public class Speedmine extends Module {
         } else {
             miningQueue = new FirstOutQueue<>(1);
         }
-        if (swapConfig.get() == Swap.SILENT && modeConfig.get() == SpeedmineMode.PACKET) {
+        if (swapConfig.get() == Swap.SILENT) {
             inventoryManager = InventoryManager.getInstance();
         }
         swappedToSlot = -1;
         originalSlot = -1;
         swapBackTicks = 0;
+        instantRebreakTarget = null;
         lastAutoMineBlock = null;
         lastAutoMineTime = 0;
         lastAntiCrawlBlock = null;
         lastAntiCrawlTime = 0;
-        damageMining = null;
-        damageForcedAttack = false;
-        damageAttackWasPressed = false;
     }
     @Override
     public void onDeactivate() {
@@ -339,8 +336,9 @@ public class Speedmine extends Module {
         if (miningQueue != null) {
             miningQueue.clear();
         }
+        instantRebreakTarget = null;
         fadeList.clear();
-        if (swapConfig.get() == Swap.SILENT && inventoryManager != null && modeConfig.get() == SpeedmineMode.PACKET) {
+        if (swapConfig.get() == Swap.SILENT && inventoryManager != null) {
             inventoryManager.syncToClient();
         }
         swappedToSlot = -1;
@@ -351,15 +349,13 @@ public class Speedmine extends Module {
         lastAntiCrawlBlock = null;
         lastAntiCrawlTime = 0;
         currentTarget = null;
-        damageMining = null;
-        damageForcedAttack = false;
-        damageAttackWasPressed = false;
     }
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
         if (miningQueue != null) {
             miningQueue.clear();
         }
+        instantRebreakTarget = null;
         fadeList.clear();
         swappedToSlot = -1;
         originalSlot = -1;
@@ -369,9 +365,6 @@ public class Speedmine extends Module {
         lastAntiCrawlBlock = null;
         lastAntiCrawlTime = 0;
         currentTarget = null;
-        damageMining = null;
-        damageForcedAttack = false;
-        damageAttackWasPressed = false;
     }
     @EventHandler
     public void onPlayerTick(final TickEvent.Pre event) {
@@ -381,8 +374,7 @@ public class Speedmine extends Module {
         if (swapBackTicks > 0) {
             swapBackTicks--;
             if (swapBackTicks == 0 && swappedToSlot != -1 && originalSlot != -1) {
-                if (modeConfig.get() == SpeedmineMode.DAMAGE) swapBackDamage(originalSlot);
-                else swapBackPacket(originalSlot);
+                swapBack(originalSlot);
                 swappedToSlot = -1;
                 originalSlot = -1;
             }
@@ -405,6 +397,7 @@ public class Speedmine extends Module {
                 instantConfig.set(!instantConfig.get());
                 if (!instantConfig.get()) {
                     miningQueue.clear();
+                    instantRebreakTarget = null;
                 }
                 if (mc.player != null) {
                     String status = instantConfig.get() ? "§aenabled" : "§cdisabled";
@@ -415,9 +408,9 @@ public class Speedmine extends Module {
             instantTogglePressed = false;
         }
         if (modeConfig.get() == SpeedmineMode.DAMAGE) {
-            tickDamageMode();
             return;
         }
+        processInstantRebreakTarget();
         if (autoMine.get() && modeConfig.get() == SpeedmineMode.PACKET) {
             int maxQueueSize = bigQueue.get() ? bigQueueSize.get() : (doubleBreakConfig.get() ? 2 : 1);
             long currentTime = System.currentTimeMillis();
@@ -484,7 +477,7 @@ public class Speedmine extends Module {
             // Prune invalid/out-of-range blocks from the whole queue
             for (int i = 0; i < miningQueue.size(); i++) {
                 MiningData data = miningQueue.get(i);
-                if (data.getState().isAir()) {
+                if (shouldPruneQueuedData(data)) {
                     miningQueue.remove(i--);
                     continue;
                 }
@@ -519,6 +512,10 @@ public class Speedmine extends Module {
                     }
                     stopMining(data);
                     data.setAttemptedBreak(true);
+                    if (instantConfig.get()) {
+                        promoteInstantRebreakTarget(data);
+                        toRemove.add(data);
+                    }
                 }
             }
             miningQueue.removeAll(toRemove);
@@ -547,6 +544,10 @@ public class Speedmine extends Module {
                 }
                 if (!instantConfig.get()) {
                     miningQueue.remove(miningData2);
+                } else {
+                    promoteInstantRebreakTarget(miningData2);
+                    miningQueue.remove(miningData2);
+                    if (!miningQueue.isEmpty()) startQueuedMines();
                 }
             }
             return;
@@ -606,22 +607,7 @@ public class Speedmine extends Module {
     }
     @EventHandler
     public void onAttackBlock(final StartBreakingBlockEvent event) {
-        if (mc.player.isCreative() || mc.player.isSpectator()) {
-            return;
-        }
-        if (modeConfig.get() == SpeedmineMode.DAMAGE) {
-            BlockState blockState = mc.world.getBlockState(event.blockPos);
-            if (blockState.getHardness(mc.world, event.blockPos) == -1.0f || blockState.isAir()) {
-                return;
-            }
-            if (damageMining != null && damageMining.getPos().equals(event.blockPos)) {
-                return;
-            }
-            cancelDamageMining();
-            startDamageMining(event.blockPos, event.direction);
-            return;
-        }
-        if (modeConfig.get() != SpeedmineMode.PACKET) {
+        if (mc.player.isCreative() || mc.player.isSpectator() || modeConfig.get() != SpeedmineMode.PACKET) {
             return;
         }
         event.cancel();
@@ -670,6 +656,9 @@ public class Speedmine extends Module {
             if (data.hasAttemptedBreak() && data.getPos().equals(packet.getPos())) {
                 data.setAttemptedBreak(false);
             }
+        }
+        if (instantRebreakTarget != null && instantRebreakTarget.getPos().equals(packet.getPos())) {
+            instantRebreakTarget.setAttemptedBreak(false);
         }
     }
     @EventHandler
@@ -741,129 +730,13 @@ public class Speedmine extends Module {
         for (MiningData data : active) {
             if (data == null || data.getState().isAir()) continue;
             boolean ready = isDataPacketMine(data) ? data.getBlockDamage() >= 1.0f : data.getBlockDamage() >= speedConfig.get();
-            if (ready) {
-                BlockPos mining = data.getPos();
-                VoxelShape outlineShape = data.getState().getOutlineShape(mc.world, mining);
-                outlineShape = outlineShape.isEmpty() ? VoxelShapes.fullCube() : outlineShape;
-                Box render1 = outlineShape.getBoundingBox();
-                Box render = new Box(mining.getX() + render1.minX, mining.getY() + render1.minY,
-                    mining.getZ() + render1.minZ, mining.getX() + render1.maxX,
-                    mining.getY() + render1.maxY, mining.getZ() + render1.maxZ);
-                event.renderer.box(render.minX, render.minY, render.minZ, render.maxX, render.maxY, render.maxZ,
-                    new SettingColor(0, 0, 0, 0), instantLineColor.get(), ShapeMode.Lines, 0);
-            }
+            if (ready && instantRebreakTarget == null) renderInstantOutline(event, data);
         }
+        renderInstantOutline(event, instantRebreakTarget);
         fadeList.entrySet().removeIf(e -> e.getValue().getFactor() == 0.0);
     }
     private void startManualMine(BlockPos pos, Direction direction) {
         clickMine(new MiningData(pos, direction));
-    }
-
-    private void tickDamageMode() {
-        if (damageMining == null) return;
-
-        BlockState state = damageMining.getState();
-        if (state.isAir() || state.getHardness(mc.world, damageMining.getPos()) == -1.0f) {
-            cancelDamageMining();
-            return;
-        }
-
-        double dist = mc.player.getEyePos().squaredDistanceTo(damageMining.getPos().toCenterPos());
-        if (dist > rangeConfig.get() * rangeConfig.get()) {
-            cancelDamageMining();
-            return;
-        }
-        int originalClientSlot = -1;
-        boolean tempClientSwap = false;
-        if (swapConfig.get() == Swap.SILENT) {
-            int bestSlot = damageMining.getSlot();
-            int currentSlot = ((PlayerInventoryAccessor) mc.player.getInventory()).getSelectedSlot();
-            if (bestSlot != -1 && bestSlot != currentSlot) {
-                originalClientSlot = currentSlot;
-                ((PlayerInventoryAccessor) mc.player.getInventory()).setSelectedSlot(bestSlot);
-                tempClientSwap = true;
-            }
-        }
-
-        int repeats = Math.max(1, Math.round(speedConfig.get().floatValue() * 4.0f));
-        boolean broken = false;
-        for (int i = 0; i < repeats; i++) {
-            if (mc.interactionManager.updateBlockBreakingProgress(damageMining.getPos(), damageMining.getDirection())) {
-                broken = true;
-                break;
-            }
-        }
-
-        if (tempClientSwap) {
-            ((PlayerInventoryAccessor) mc.player.getInventory()).setSelectedSlot(originalClientSlot);
-        }
-
-        if (broken || damageMining.getState().isAir()) {
-            finishDamageMining();
-        }
-    }
-
-    private void startDamageMining(BlockPos pos, Direction direction) {
-        damageMining = new MiningData(pos, direction);
-        damageMining.setStarted();
-        damageMining.setDamage(0.0f);
-
-        int bestSlot = damageMining.getSlot();
-        int currentSlot = ((PlayerInventoryAccessor) mc.player.getInventory()).getSelectedSlot();
-        boolean swapEnabled = swapConfig.get() != Swap.OFF;
-        boolean needsSwap = swapEnabled && bestSlot != -1 && bestSlot != currentSlot;
-        if (needsSwap) {
-            if (swapConfig.get() == Swap.NORMAL) {
-                if (swappedToSlot == -1) originalSlot = currentSlot;
-                InvUtils.swap(bestSlot, true);
-                swappedToSlot = bestSlot;
-                swapBackTicks = 3;
-            } else if (swapConfig.get() == Swap.SILENT) {
-                if (swappedToSlot == -1) originalSlot = currentSlot;
-                swapToDamageSilent(bestSlot);
-                swappedToSlot = bestSlot;
-            }
-        }
-
-        if (mc.options != null) {
-            damageAttackWasPressed = mc.options.attackKey.isPressed();
-            if (!damageAttackWasPressed) {
-                mc.options.attackKey.setPressed(true);
-                damageForcedAttack = true;
-            }
-        }
-    }
-
-    private void finishDamageMining() {
-        if (damageMining == null) return;
-        scheduleSwapBack();
-        restoreDamageAttack();
-        damageMining = null;
-    }
-
-    private void cancelDamageMining() {
-        if (damageMining == null) return;
-        scheduleSwapBack();
-        restoreDamageAttack();
-        damageMining = null;
-    }
-
-    private void restoreDamageAttack() {
-        if (!damageForcedAttack || mc.options == null) return;
-        mc.options.attackKey.setPressed(damageAttackWasPressed);
-        damageForcedAttack = false;
-    }
-
-    private void scheduleSwapBack() {
-        if (swapConfig.get() != Swap.OFF && modeConfig.get() == SpeedmineMode.DAMAGE
-            && swappedToSlot != -1 && originalSlot != -1) {
-            swapBackTicks = 3;
-            return;
-        }
-        if (swapConfig.get() != Swap.OFF && modeConfig.get() != SpeedmineMode.DAMAGE
-            && swappedToSlot != -1 && originalSlot != -1) {
-            swapBackTicks = 3;
-        }
     }
     public void clickMine(MiningData miningData) {
         int queueSize = miningQueue.size();
@@ -954,22 +827,21 @@ public class Speedmine extends Module {
         }
         int bestSlot = data.getSlot();
         int currentSlot = ((PlayerInventoryAccessor) mc.player.getInventory()).getSelectedSlot();
-        boolean swapEnabled = swapConfig.get() != Swap.OFF;
-        boolean needsSwap = swapEnabled && bestSlot != -1 && bestSlot != currentSlot;
+        boolean needsSwap = bestSlot != -1 && bestSlot != currentSlot;
         if (needsSwap && swappedToSlot == -1) {
             originalSlot = currentSlot;
         }
         if (needsSwap) {
-            swapToPacket(bestSlot);
+            swapTo(bestSlot);
             swappedToSlot = bestSlot;
             swapBackTicks = 3;
-        } else if (swapEnabled && swappedToSlot != -1) {
+        } else if (swappedToSlot != -1) {
             swapBackTicks = 3;
         }
         stopMiningInternal(data);
         lastBreak = System.currentTimeMillis();
     }
-    private void swapToPacket(int slot) {
+    private void swapTo(int slot) {
         switch (swapConfig.get()) {
             case NORMAL -> {
                 ((PlayerInventoryAccessor) mc.player.getInventory()).setSelectedSlot(slot);
@@ -983,7 +855,7 @@ public class Speedmine extends Module {
             }
         }
     }
-    private void swapBackPacket(int originalSlot) {
+    private void swapBack(int originalSlot) {
         switch (swapConfig.get()) {
             case NORMAL -> {
                 ((PlayerInventoryAccessor) mc.player.getInventory()).setSelectedSlot(originalSlot);
@@ -995,18 +867,6 @@ public class Speedmine extends Module {
                 }
                 inventoryManager.syncToClient();
             }
-        }
-    }
-
-    private void swapToDamageSilent(int slot) {
-        mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(slot));
-    }
-
-    private void swapBackDamage(int originalSlot) {
-        if (swapConfig.get() == Swap.NORMAL) {
-            InvUtils.swap(originalSlot, true);
-        } else {
-            mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(originalSlot));
         }
     }
     private void stopMiningInternal(MiningData data) {
@@ -1175,6 +1035,60 @@ public class Speedmine extends Module {
             if (data.isStarted()) started++;
         }
     }
+
+    private void processInstantRebreakTarget() {
+        if (!bigQueue.get() || !instantConfig.get() || instantRebreakTarget == null) return;
+
+        double distance = mc.player.getEyePos().squaredDistanceTo(instantRebreakTarget.getPos().toCenterPos());
+        if (distance > rangeConfig.get() * rangeConfig.get()) {
+            instantRebreakTarget = null;
+            return;
+        }
+
+        BlockState state = instantRebreakTarget.getState();
+        if (state.isAir()) return;
+        if (state.getHardness(mc.world, instantRebreakTarget.getPos()) == -1.0f) {
+            instantRebreakTarget = null;
+            return;
+        }
+
+        if (instantRebreakTarget.hasAttemptedBreak()) {
+            if (instantRebreakTarget.passedAttemptedBreakTime(500)) {
+                abortMining(instantRebreakTarget);
+                instantRebreakTarget = null;
+            }
+            return;
+        }
+
+        if (mc.player.isUsingItem() && !multitaskConfig.get()) return;
+
+        stopMining(instantRebreakTarget);
+        instantRebreakTarget.setAttemptedBreak(true);
+    }
+
+    private boolean shouldPruneQueuedData(MiningData data) {
+        if (!data.getState().isAir()) return false;
+        return instantRebreakTarget == null || !data.equals(instantRebreakTarget);
+    }
+
+    private void promoteInstantRebreakTarget(MiningData data) {
+        if (data == null) return;
+        instantRebreakTarget = data;
+    }
+
+    private void renderInstantOutline(Render3DEvent event, MiningData data) {
+        if (data == null) return;
+
+        BlockPos mining = data.getPos();
+        VoxelShape outlineShape = data.getState().isAir()
+            ? VoxelShapes.fullCube()
+            : data.getState().getOutlineShape(mc.world, mining);
+        outlineShape = outlineShape.isEmpty() ? VoxelShapes.fullCube() : outlineShape;
+        Box render = outlineShape.getBoundingBox().offset(mining);
+        event.renderer.box(render.minX, render.minY, render.minZ, render.maxX, render.maxY, render.maxZ,
+            new SettingColor(0, 0, 0, 0), instantLineColor.get(), ShapeMode.Lines, 0);
+    }
+
     private static float[] getRotationsTo(net.minecraft.util.math.Vec3d src, net.minecraft.util.math.Vec3d dest) {
         float yaw = (float) (Math.toDegrees(Math.atan2(dest.subtract(src).z,
             dest.subtract(src).x)) - 90);

@@ -1,14 +1,5 @@
 package xyz.thm.addon.mixin.meteor;
-
-import meteordevelopment.meteorclient.events.world.TickEvent;
-import meteordevelopment.meteorclient.settings.*;
-import meteordevelopment.meteorclient.systems.modules.Category;
-import meteordevelopment.meteorclient.systems.modules.Module;
-import meteordevelopment.meteorclient.systems.modules.world.Timer;
-import meteordevelopment.meteorclient.utils.Utils;
-import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.world.ClientChunkManager;
-import net.minecraft.util.math.ChunkPos;
 import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.chunk.ChunkStatus;
 import org.spongepowered.asm.mixin.Final;
@@ -18,6 +9,14 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import meteordevelopment.orbit.EventHandler;
+import meteordevelopment.meteorclient.events.world.TickEvent;
+import meteordevelopment.meteorclient.settings.*;
+import meteordevelopment.meteorclient.systems.modules.Category;
+import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.modules.world.Timer;
+import meteordevelopment.meteorclient.utils.Utils;
+import net.minecraft.util.math.ChunkPos;
 @Mixin(value = Timer.class, remap = false)
 public abstract class TimerMixin extends Module {
     public TimerMixin(Category category, String name, String description) {

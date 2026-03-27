@@ -1,5 +1,6 @@
 package xyz.thm.addon.modules;
 
+import xyz.thm.addon.THMAddon;
 import meteordevelopment.meteorclient.events.entity.DropItemsEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.ItemListSetting;
@@ -11,10 +12,8 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import xyz.thm.addon.THMAddon;
-
-import java.util.Arrays;
 import java.util.List;
+import java.util.Arrays;
 
 public class AntiDrop extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();

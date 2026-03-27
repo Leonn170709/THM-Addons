@@ -5,12 +5,16 @@ import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.gui.hud.MessageIndicator;
 import net.minecraft.client.network.PlayerListEntry;
+import net.minecraft.client.gui.hud.MessageIndicator;
 import net.minecraft.world.GameMode;
 import xyz.thm.addon.THMAddon;
 
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;

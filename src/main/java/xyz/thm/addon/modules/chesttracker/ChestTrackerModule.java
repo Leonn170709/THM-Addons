@@ -1,24 +1,30 @@
 package xyz.thm.addon.modules.chesttracker;
-
 import meteordevelopment.meteorclient.events.packets.InventoryEvent;
 import meteordevelopment.meteorclient.events.render.Render2DEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
+import meteordevelopment.meteorclient.utils.world.BlockIterator;
+import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.gui.widgets.containers.WTable;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
+import meteordevelopment.meteorclient.renderer.text.TextRenderer;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.misc.Keybind;
 import meteordevelopment.meteorclient.utils.render.NametagUtils;
+import meteordevelopment.meteorclient.utils.render.RenderUtils;
+import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+import org.joml.Vector3d;
 import net.minecraft.block.*;
 import net.minecraft.block.enums.ChestType;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.screen.ingame.*;
+import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.screen.ScreenHandler;
@@ -29,14 +35,12 @@ import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
-import org.joml.Vector3d;
 import org.lwjgl.glfw.GLFW;
 import xyz.thm.addon.THMAddon;
 
 import java.util.*;
-
-import static meteordevelopment.meteorclient.utils.Utils.getItemsInContainerItem;
-import static meteordevelopment.meteorclient.utils.Utils.hasItems;
+import static meteordevelopment.meteorclient.MeteorClient.mc;
+import static meteordevelopment.meteorclient.utils.Utils.*;
 public class ChestTrackerModule extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgAutoOpen = settings.createGroup("Auto-Open");

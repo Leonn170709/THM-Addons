@@ -1,8 +1,9 @@
 package xyz.thm.addon.utils;
-
+import meteordevelopment.meteorclient.utils.entity.EntityUtils;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.Rotations;
+import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.ItemStack;
@@ -14,10 +15,8 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
-
 import java.util.Arrays;
 import java.util.List;
-
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 public class PlacementUtils {
     private static final List<Block> RESISTANT_BLOCKS = Arrays.asList(
