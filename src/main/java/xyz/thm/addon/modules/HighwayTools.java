@@ -1,10 +1,17 @@
 package xyz.thm.addon.modules;
 
+import baritone.api.BaritoneAPI;
+import baritone.api.IBaritone;
+import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
+import meteordevelopment.meteorclient.settings.EnumSetting;
+import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
+import meteordevelopment.meteorclient.settings.StringSetting;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
@@ -12,16 +19,21 @@ import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.vehicle.BoatEntity;
 import net.minecraft.item.BoatItem;
 import net.minecraft.item.Item;
 import net.minecraft.registry.Registries;
+import net.minecraft.text.MutableText;
+import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.*;
 import net.minecraft.world.World;
+import net.minecraft.world.chunk.WorldChunk;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.THMUtils;
 
@@ -34,8 +46,10 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.net.HttpURLConnection;
+import java.net.URL;
 
-public class HighwayChecker extends Module {
+public class HighwayTools extends Module {
     private static final int TRUST_RADIUS_BLOCKS = 48;
     private static final int BOAT_RECOVERY_TIMEOUT_TICKS = 100;
     private static final int SAMPLE_Y_LOW = 118;
@@ -68,28 +82,164 @@ public class HighwayChecker extends Module {
     };
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
-    private final SettingGroup sgLogging = settings.createGroup("Logging");
+    private final SettingGroup sgChecker = settings.createGroup("Highway Checker");
+    private final SettingGroup sgLogging = settings.createGroup("Highway Checker Logging");
 
-    private final Setting<Boolean> notifyChat = sgGeneral.add(new BoolSetting.Builder()
-        .name("chat-notify")
-        .description("Show section and failure events in Meteor chat.")
-        .defaultValue(true)
-        .build()
-    );
-
-    private final Setting<Boolean> notifyDesktop = sgGeneral.add(new BoolSetting.Builder()
-        .name("desktop-notify")
-        .description("Send desktop notifications for section and failure events.")
+    public final Setting<Boolean> axiswalker = sgGeneral.add(new BoolSetting.Builder()
+        .name("Axis Walker")
+        .description("Uses Baritone to walk to the nearest Nether Axis. Must be in the Nether.")
         .defaultValue(false)
         .build()
     );
 
-    private final Setting<Boolean> debugLog = sgLogging.add(new BoolSetting.Builder()
+    public final Setting<Boolean> highwayTp = sgGeneral.add(new BoolSetting.Builder()
+        .name("Highway Tp")
+        .description("Sends a $goto command to KitBot1 to teleport you to the selected highway.")
+        .defaultValue(false)
+        .build()
+    );
+
+    public final Setting<Boolean> autoTp = sgGeneral.add(new BoolSetting.Builder()
+        .name("Auto Tp")
+        .description("Automatically sends /tpa KitBot1 once the bot has arrived at the highway.")
+        .defaultValue(true)
+        .visible(() -> highwayTp.get())
+        .build()
+    );
+
+    public final Setting<Highway> highway = sgGeneral.add(new EnumSetting.Builder<Highway>()
+        .name("Highway")
+        .description("The highway to teleport to.")
+        .defaultValue(Highway.West)
+        .visible(() -> highwayTp.get())
+        .build()
+    );
+
+    public final Setting<Boolean> highwayCheckerEnabled = sgChecker.add(new BoolSetting.Builder()
+        .name("Enable Highway Checker")
+        .description("Runs the full Highway Checker logic (boat highway scanning).")
+        .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Boolean> notifyChat = sgChecker.add(new BoolSetting.Builder()
+        .name("chat-notify")
+        .description("Show section and failure events in Meteor chat.")
+        .defaultValue(true)
+        .visible(highwayCheckerEnabled::get)
+        .build()
+    );
+
+    private final Setting<Boolean> notifyDesktop = sgChecker.add(new BoolSetting.Builder()
+        .name("desktop-notify")
+        .description("Send desktop notifications for section and failure events.")
+        .defaultValue(false)
+        .visible(highwayCheckerEnabled::get)
+        .build()
+    );
+
+    private final Setting<Boolean> debugLog = sgChecker.add(new BoolSetting.Builder()
         .name("debug-log")
         .description("Write bounded runtime diagnostics to a debug file.")
         .defaultValue(true)
+        .visible(highwayCheckerEnabled::get)
         .build()
     );
+
+    private final Setting<Boolean> webhookEnabled = sgChecker.add(new BoolSetting.Builder()
+        .name("webhook-enabled")
+        .description("Send section events and/or CSV rows to a webhook.")
+        .defaultValue(false)
+        .visible(highwayCheckerEnabled::get)
+        .build()
+    );
+
+    private final Setting<String> webhookUrl = sgChecker.add(new StringSetting.Builder()
+        .name("webhook-url")
+        .description("Webhook URL for Highway Checker events.")
+        .defaultValue("")
+        .visible(() -> highwayCheckerEnabled.get() && webhookEnabled.get())
+        .build()
+    );
+
+    private final Setting<Boolean> webhookSendEvents = sgLogging.add(new BoolSetting.Builder()
+        .name("webhook-send-events")
+        .description("Send section start/stop events to the webhook.")
+        .defaultValue(true)
+        .visible(() -> highwayCheckerEnabled.get() && webhookEnabled.get())
+        .build()
+    );
+
+    private final Setting<Boolean> webhookSendCsv = sgLogging.add(new BoolSetting.Builder()
+        .name("webhook-send-csv")
+        .description("Send each CSV row to the webhook while running.")
+        .defaultValue(false)
+        .visible(() -> highwayCheckerEnabled.get() && webhookEnabled.get())
+        .build()
+    );
+
+    private final Setting<Boolean> csvLogAllSamples = sgLogging.add(new BoolSetting.Builder()
+        .name("csv-log-all-samples")
+        .description("Log every trusted sample row (not just boundary events).")
+        .defaultValue(false)
+        .visible(highwayCheckerEnabled::get)
+        .build()
+    );
+
+    public final Setting<Boolean> obsidianGuardEnabled = sgChecker.add(new BoolSetting.Builder()
+        .name("Enable Finder")
+        .description("Monitors obsidian in your current chunk to detect the start or end of a highway.")
+        .defaultValue(false)
+        .build()
+    );
+    public final Setting<CheckerMode> guardMode = sgChecker.add(new EnumSetting.Builder<CheckerMode>()
+        .name("Mode")
+        .description("HighwayEnd: Triggers when obsidian drops below the threshold (highway ends). HighwayStart: Triggers when obsidian exceeds the threshold (highway begins).")
+        .defaultValue(CheckerMode.HighwayEnd)
+        .visible(() -> obsidianGuardEnabled.get())
+        .build()
+    );
+
+    public final Setting<Integer> obsidianThreshold = sgChecker.add(new IntSetting.Builder()
+        .name("Obsidian Threshold")
+        .description("The number of obsidian blocks in the chunk that marks the highway boundary.")
+        .defaultValue(12)
+        .min(1)
+        .sliderMax(64)
+        .visible(() -> obsidianGuardEnabled.get())
+        .build()
+    );
+
+    public final Setting<Boolean> sendWarning = sgChecker.add(new BoolSetting.Builder()
+        .name("Chat Warning")
+        .description("Prints a warning in the Meteor client chat when the highway boundary is detected.")
+        .defaultValue(true)
+        .visible(() -> obsidianGuardEnabled.get())
+        .build()
+    );
+
+    public final Setting<Boolean> disconnect = sgChecker.add(new BoolSetting.Builder()
+        .name("Disconnect")
+        .description("Disconnects from the server when the highway boundary is detected.")
+        .defaultValue(true)
+        .visible(() -> obsidianGuardEnabled.get())
+        .build()
+    );
+
+    public final Setting<Boolean> desktopWarning = sgChecker.add(new BoolSetting.Builder()
+        .name("Desktop Notification")
+        .description("Sends a desktop notification when the highway boundary is detected.")
+        .defaultValue(true)
+        .visible(() -> obsidianGuardEnabled.get())
+        .build()
+    );
+
+
+
+    private final IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
+    private boolean tpaSent = false;
+    private int tickTimer = 0;
+    private static final int CHECK_INTERVAL = 20;
 
     private TravelDirection direction;
     private WorkLine line;
@@ -115,13 +265,57 @@ public class HighwayChecker extends Module {
     private Path sectionsPath;
     private Path debugPath;
 
-    public HighwayChecker() {
-        super(THMAddon.MAIN, "Highway Checker", "Travels Nether highways in a boat and records trusted obsidian section boundaries.");
+    public HighwayTools() {
+        super(THMAddon.MAIN, "Highway-Tools", "Highway utilities: axis walker, highway teleporter, boundary finder, and highway checker.");
     }
 
     @Override
     public void onActivate() {
         if (mc.player == null || mc.world == null) return;
+
+        if (highwayTp.get() && axiswalker.get()) {
+            error("You cannot have both Highway Tp and Axis Walker enabled at the same time.");
+            toggle();
+            return;
+        }
+
+        if (axiswalker.get()) {
+            if (mc.world.getRegistryKey() == World.NETHER) {
+                baritone.getCommandManager().execute("axis");
+                baritone.getCommandManager().execute("path");
+            } else {
+                error("Axis Walker can only be used in the Nether.");
+            }
+            toggle();
+            return;
+        }
+
+        if (highwayTp.get()) {
+            tpaSent = false;
+            String prefix = "/msg KitBot1 $goto ";
+            switch (highway.get()) {
+                case West -> ChatUtils.sendPlayerMsg(prefix + "W");
+                case East -> ChatUtils.sendPlayerMsg(prefix + "E");
+                case North -> ChatUtils.sendPlayerMsg(prefix + "N");
+                case South -> ChatUtils.sendPlayerMsg(prefix + "S");
+                case NorthEast -> ChatUtils.sendPlayerMsg(prefix + "NE");
+                case SouthEast -> ChatUtils.sendPlayerMsg(prefix + "SE");
+                case SouthWest -> ChatUtils.sendPlayerMsg(prefix + "SW");
+                case NorthWest -> ChatUtils.sendPlayerMsg(prefix + "NW");
+
+                case DugWest -> ChatUtils.sendPlayerMsg(prefix + "dugW");
+                case DugEast -> ChatUtils.sendPlayerMsg(prefix + "dugE");
+                case DugNorth -> ChatUtils.sendPlayerMsg(prefix + "dugN");
+                case DugSouth -> ChatUtils.sendPlayerMsg(prefix + "dugS");
+                case DugNorthEast -> ChatUtils.sendPlayerMsg(prefix + "dugNE");
+                case DugSouthEast -> ChatUtils.sendPlayerMsg(prefix + "dugSE");
+                case DugSouthWest -> ChatUtils.sendPlayerMsg(prefix + "dugSW");
+                case DugNorthWest -> ChatUtils.sendPlayerMsg(prefix + "dugNW");
+            }
+            tickTimer = 0;
+        }
+
+        if (!highwayCheckerEnabled.get()) return;
 
         if (THMUtils.isNot6B6T() && !mc.isInSingleplayer()) {
             error("Highway Checker is intended for 6B6T highway runs.");
@@ -179,6 +373,7 @@ public class HighwayChecker extends Module {
 
     @Override
     public void onDeactivate() {
+        if (!highwayCheckerEnabled.get()) return;
         stopMovementKeys();
 
         if (sectionOpen) {
@@ -213,6 +408,33 @@ public class HighwayChecker extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
+        if (obsidianGuardEnabled.get()) {
+            if (mc.player != null && mc.world != null) {
+                tickTimer++;
+                if (tickTimer >= CHECK_INTERVAL) {
+                    tickTimer = 0;
+                    int count = countObsidianInChunk(mc.player);
+                    boolean triggered = false;
+                    String reason = "";
+
+                    if (guardMode.get() == CheckerMode.HighwayEnd && count < obsidianThreshold.get()) {
+                        triggered = true;
+                        reason = String.format("Highway end detected — only %d obsidian in chunk (threshold: %d).", count, obsidianThreshold.get());
+                    } else if (guardMode.get() == CheckerMode.HighwayStart && count > obsidianThreshold.get()) {
+                        triggered = true;
+                        reason = String.format("Highway start detected — %d obsidian in chunk (threshold: %d).", count, obsidianThreshold.get());
+                    }
+
+                    if (triggered) {
+                        if (sendWarning.get()) warning(reason);
+                        if (desktopWarning.get()) THMUtils.Notify(name, reason);
+                        if (disconnect.get()) disconnectPlayer();
+                    }
+                }
+            }
+        }
+
+        if (!highwayCheckerEnabled.get()) return;
         if (mc.player == null || mc.world == null || direction == null || line == null) return;
 
         if (World.NETHER != mc.world.getRegistryKey()) {
@@ -258,6 +480,24 @@ public class HighwayChecker extends Module {
         }
 
         steerToward(step.dx, step.dz);
+    }
+
+    @EventHandler
+    private void onMessageReceive(ReceiveMessageEvent event) {
+        if (mc.player == null) return;
+        if (tpaSent) return;
+
+        String msg = event.getMessage().getString();
+
+        if (autoTp.get()
+            && msg.contains("KitBot1 whispers: Bot has arrived at highway")
+            && msg.contains("you may teleport")) {
+
+            ChatUtils.sendPlayerMsg("/tpa KitBot1");
+            info("TPA request sent.");
+            tpaSent = true;
+            toggle();
+        }
     }
 
     private void handleBoatRecovery() {
@@ -339,6 +579,10 @@ public class HighwayChecker extends Module {
             return;
         }
         lastSampleTrusted = true;
+
+        if (csvLogAllSamples.get()) {
+            writeCsvRow(BoundaryType.SAMPLE, activeSectionId, snapshot, sectionOpen);
+        }
 
         if (sectionPhase == SectionPhase.LOOKING_FOR_ANY) {
             if (snapshot.startsSection()) {
@@ -767,6 +1011,9 @@ public class HighwayChecker extends Module {
         writeCsvRow(BoundaryType.START, activeSectionId, snapshot);
         debug("section", "start id=%s center=%s", activeSectionId, formatPos(center));
         notifyEvent("Section %s started at %s.", activeSectionId, formatPos(center));
+        if (webhookEnabled.get() && webhookSendEvents.get()) {
+            sendWebhookAsync("Highway Checker START " + activeSectionId + " at " + formatPos(center), "section-start");
+        }
     }
 
     private void closeSection(BlockPos center, SampleSnapshot snapshot, String reason) {
@@ -778,6 +1025,9 @@ public class HighwayChecker extends Module {
         writeCsvRow(BoundaryType.STOP, sectionIdForRow, snapshot);
         debug("section", "stop id=%s center=%s reason=%s", sectionIdForRow, formatPos(center), reason);
         notifyEvent("Section %s stopped at %s.", sectionIdForRow.isEmpty() ? "<none>" : sectionIdForRow, formatPos(center));
+        if (webhookEnabled.get() && webhookSendEvents.get()) {
+            sendWebhookAsync("Highway Checker STOP " + sectionIdForRow + " at " + formatPos(center) + " reason=" + reason, "section-stop");
+        }
         activeSectionId = null;
         sectionOpen = false;
     }
@@ -797,6 +1047,10 @@ public class HighwayChecker extends Module {
     }
 
     private void writeCsvRow(BoundaryType boundaryType, String sectionId, SampleSnapshot snapshot) {
+        writeCsvRow(boundaryType, sectionId, snapshot, boundaryType == BoundaryType.START);
+    }
+
+    private void writeCsvRow(BoundaryType boundaryType, String sectionId, SampleSnapshot snapshot, boolean sectionOpenValue) {
         if (csvPath == null) return;
 
         StringBuilder lineOut = new StringBuilder(256);
@@ -808,14 +1062,23 @@ public class HighwayChecker extends Module {
             .append(snapshot.center().getX()).append(',')
             .append(snapshot.center().getY()).append(',')
             .append(snapshot.center().getZ()).append(',')
+            .append(new ChunkPos(snapshot.center()).x).append(',')
+            .append(new ChunkPos(snapshot.center()).z).append(',')
             .append(String.format(Locale.ROOT, "%.3f", snapshot.playerPos().x)).append(',')
             .append(String.format(Locale.ROOT, "%.3f", snapshot.playerPos().y)).append(',')
             .append(String.format(Locale.ROOT, "%.3f", snapshot.playerPos().z)).append(',')
-            .append(boundaryType == BoundaryType.START);
+            .append(snapshot.trusted()).append(',')
+            .append(snapshot.startsSection()).append(',')
+            .append(snapshot.stopsSection()).append(',')
+            .append(sectionOpenValue);
 
         for (String block : snapshot.y118Blocks()) lineOut.append(',').append(block);
         for (String block : snapshot.y119Blocks()) lineOut.append(',').append(block);
-        appendCoreLine(csvPath, lineOut.toString(), "csv-sample");
+        String csvLine = lineOut.toString();
+        appendCoreLine(csvPath, csvLine, "csv-sample");
+        if (webhookEnabled.get() && webhookSendCsv.get()) {
+            sendWebhookAsync(csvLine, "csv");
+        }
     }
 
     private void initializeOutputFiles() throws IOException {
@@ -831,7 +1094,7 @@ public class HighwayChecker extends Module {
         if (!Files.exists(csvPath)) {
             Files.writeString(
                 csvPath,
-                "timestamp,session_id,boundary_type,section_id,direction,center_x,center_y,center_z,player_x,player_y,player_z,section_open,"
+                "timestamp,session_id,boundary_type,section_id,direction,center_x,center_y,center_z,chunk_x,chunk_z,player_x,player_y,player_z,trusted,starts_section,stops_section,section_open,"
                     + "y118_m2,y118_m1,y118_0,y118_p1,y118_p2,"
                     + "y119_m2,y119_m1,y119_0,y119_p1,y119_p2"
                     + System.lineSeparator(),
@@ -936,6 +1199,80 @@ public class HighwayChecker extends Module {
         if (notifyDesktop.get()) THMUtils.Notify("Highway Checker", message);
     }
 
+    private int countObsidianInChunk(ClientPlayerEntity player) {
+        ChunkPos chunkPos = new ChunkPos(player.getBlockPos());
+        WorldChunk chunk = mc.world.getChunk(chunkPos.x, chunkPos.z);
+
+        int minX = chunkPos.getStartX();
+        int minZ = chunkPos.getStartZ();
+        int maxX = chunkPos.getEndX();
+        int maxZ = chunkPos.getEndZ();
+        int minY = mc.world.getBottomY();
+        int maxY = mc.world.getBottomY() + mc.world.getHeight();
+        int count = 0;
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                for (int y = minY; y < maxY; y++) {
+                    if (chunk.getBlockState(new BlockPos(x, y, z)).getBlock() == Blocks.OBSIDIAN) {
+                        count++;
+                        if (guardMode.get() == CheckerMode.HighwayStart && count > obsidianThreshold.get()) {
+                            return count;
+                        }
+                    }
+                }
+            }
+        }
+        return count;
+    }
+
+    private void disconnectPlayer() {
+        if (mc.getNetworkHandler() != null) {
+            toggle();
+
+            MutableText text = Text.literal("[")
+                .styled(style -> style.withColor(Formatting.WHITE))
+                .append(Text.literal("HighwayFinder").styled(style -> style.withColor(Formatting.BLUE)))
+                .append(Text.literal("] ").styled(style -> style.withColor(Formatting.WHITE)))
+                .append(Text.literal("Highway boundary reached.").styled(style -> style.withColor(Formatting.RED)));
+
+            mc.getNetworkHandler().getConnection().disconnect(text);
+        }
+    }
+
+    private void sendWebhookAsync(String message, String kind) {
+        if (!webhookEnabled.get()) return;
+        String url = webhookUrl.get().trim();
+        if (url.isEmpty()) return;
+        String payload = "{\"content\":\"" + escapeJson(message) + "\"}";
+
+        new Thread(() -> {
+            try {
+                @SuppressWarnings("deprecation")
+                HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+                connection.setRequestMethod("POST");
+                connection.setRequestProperty("Content-Type", "application/json");
+                connection.setDoOutput(true);
+                byte[] data = payload.getBytes(StandardCharsets.UTF_8);
+                connection.setFixedLengthStreamingMode(data.length);
+                connection.getOutputStream().write(data);
+                connection.getOutputStream().flush();
+                connection.getOutputStream().close();
+                connection.getInputStream().close();
+            } catch (Exception e) {
+                debug("webhook", "send-failed kind=%s msg=%s", kind, e.getMessage());
+            }
+        }, "HighwayCheckerWebhook").start();
+    }
+
+    private static String escapeJson(String input) {
+        return input
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r");
+    }
+
     private void fail(String format, Object... args) {
         String message = String.format(Locale.ROOT, format, args);
         pendingStopReason = "hard-fail";
@@ -1029,6 +1366,30 @@ public class HighwayChecker extends Module {
         mc.options.jumpKey.setPressed(false);
         mc.options.sprintKey.setPressed(false);
         mc.options.sneakKey.setPressed(false);
+    }
+
+    public enum CheckerMode {
+        HighwayEnd,
+        HighwayStart
+    }
+
+    public enum Highway {
+        West,
+        East,
+        North,
+        South,
+        NorthEast,
+        SouthEast,
+        SouthWest,
+        NorthWest,
+        DugWest,
+        DugEast,
+        DugNorth,
+        DugSouth,
+        DugNorthEast,
+        DugSouthEast,
+        DugSouthWest,
+        DugNorthWest
     }
 
     private enum WorkLine {
@@ -1144,6 +1505,7 @@ public class HighwayChecker extends Module {
     ) {}
 
     private enum BoundaryType {
+        SAMPLE,
         START,
         STOP
     }
