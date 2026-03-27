@@ -1,6 +1,5 @@
 package xyz.thm.addon.mixin.meteor;
-import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
-import xyz.thm.addon.utils.InventoryManager;
+
 import meteordevelopment.meteorclient.pathing.PathManagers;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.systems.modules.player.AutoEat;
@@ -8,7 +7,6 @@ import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.item.ItemStack;
-import net.minecraft.util.Hand;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -16,6 +14,9 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
+import xyz.thm.addon.utils.InventoryManager;
+
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 @Mixin(value = AutoEat.class, remap = false)
 public abstract class AutoEatMixin {
