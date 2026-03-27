@@ -1,23 +1,33 @@
 package xyz.thm.addon.modules;
-import meteordevelopment.meteorclient.utils.player.FindItemResult;
-import xyz.thm.addon.THMAddon;
-import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
-import meteordevelopment.meteorclient.settings.*;
+
+import meteordevelopment.meteorclient.settings.BoolSetting;
+import meteordevelopment.meteorclient.settings.IntSetting;
+import meteordevelopment.meteorclient.settings.Setting;
+import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.ScaffoldingBlock;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.decoration.ItemFrameEntity;
 import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.*;
+import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.*;
-import xyz.thm.addon.utils.RotationUtils;
-import xyz.thm.addon.utils.PlacementUtils;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
+import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
 import xyz.thm.addon.utils.InventoryManager;
+import xyz.thm.addon.utils.PlacementUtils;
+import xyz.thm.addon.utils.RotationUtils;
 import xyz.thm.addon.utils.THMUtils;
 
 public class Phase extends Module {

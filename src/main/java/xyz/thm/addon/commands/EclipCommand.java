@@ -18,9 +18,6 @@ import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.util.math.BlockPos;
 import xyz.thm.addon.utils.THMUtils;
 
-import static com.mojang.brigadier.Command.SINGLE_SUCCESS;
-import static meteordevelopment.meteorclient.MeteorClient.mc;
-
 public class EclipCommand extends Command {
     public EclipCommand() {
         super("eclip", "Elyta clip need elytra bypass most anticheats");

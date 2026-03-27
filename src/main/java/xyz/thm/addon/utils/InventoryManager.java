@@ -1,23 +1,26 @@
 package xyz.thm.addon.utils;
-import xyz.thm.addon.accessor.InputAccessor;
-import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
-import xyz.thm.addon.mixin.accessor.UpdateSelectedSlotS2CPacketAccessor;
+
 import meteordevelopment.meteorclient.MeteorClient;
+import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
-import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
 import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.*;
 import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
-import net.minecraft.network.packet.s2c.play.UpdateSelectedSlotS2CPacket;
 import net.minecraft.network.packet.s2c.common.CommonPingS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
-import java.util.concurrent.CopyOnWriteArrayList;
+import net.minecraft.network.packet.s2c.play.UpdateSelectedSlotS2CPacket;
+import xyz.thm.addon.accessor.InputAccessor;
+import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
+import xyz.thm.addon.mixin.accessor.UpdateSelectedSlotS2CPacketAccessor;
+
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 import static meteordevelopment.meteorclient.utils.player.ChatUtils.info;
 

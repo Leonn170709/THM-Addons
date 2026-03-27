@@ -1,17 +1,17 @@
 package xyz.thm.addon.mixin.meteor;
 
-import xyz.thm.addon.THMAddon;
-import xyz.thm.addon.gui.RecolorGuiTheme;
+import meteordevelopment.meteorclient.gui.themes.meteor.MeteorGuiTheme;
+import meteordevelopment.meteorclient.settings.BoolSetting;
+import meteordevelopment.meteorclient.settings.Setting;
+import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Slice;
-import meteordevelopment.meteorclient.settings.Setting;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.ModifyArgs;
-import meteordevelopment.meteorclient.settings.BoolSetting;
+import org.spongepowered.asm.mixin.injection.Slice;
 import org.spongepowered.asm.mixin.injection.invoke.arg.Args;
-import meteordevelopment.meteorclient.utils.render.color.SettingColor;
-import meteordevelopment.meteorclient.gui.themes.meteor.MeteorGuiTheme;
+import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.gui.RecolorGuiTheme;
 
 /**
  * Credit to crosby for this mixin from <a href="https://github.com/RacoonDog/Tokyo-Client">Tokyo-Client</a>

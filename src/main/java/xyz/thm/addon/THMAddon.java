@@ -15,13 +15,12 @@ import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.loader.api.FabricLoader;
-import net.fabricmc.loader.api.metadata.ModMetadata;
-import net.fabricmc.loader.impl.util.log.Log;
-import net.minecraft.item.Items;
-import org.slf4j.Logger;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.fabricmc.loader.api.FabricLoader;
+import net.fabricmc.loader.api.metadata.ModMetadata;
+import net.minecraft.item.Items;
+import org.slf4j.Logger;
 import xyz.thm.addon.commands.Center;
 import xyz.thm.addon.commands.EclipCommand;
 import xyz.thm.addon.gui.themes.*;
@@ -33,7 +32,6 @@ import xyz.thm.addon.utils.JoinPayload;
 import xyz.thm.addon.utils.ServerReconnectService;
 import xyz.thm.addon.utils.ServerStatusHandler;
 import xyz.thm.addon.utils.THMUtils;
-
 
 import java.io.File;
 

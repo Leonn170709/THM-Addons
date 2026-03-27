@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import meteordevelopment.meteorclient.utils.render.color.Color;
+import net.minecraft.entity.player.PlayerEntity;
 import xyz.thm.addon.THMAddon;
 
 import javax.crypto.Cipher;
@@ -13,7 +14,6 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
-import net.minecraft.entity.player.PlayerEntity;
 
 import static xyz.thm.addon.utils.password.getAPIMemberHud;
 import static xyz.thm.addon.utils.password.getPassword;
