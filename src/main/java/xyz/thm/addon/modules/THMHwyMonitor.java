@@ -8,6 +8,7 @@ import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.events.meteor.ActiveModulesChangedEvent;
+import meteordevelopment.meteorclient.events.render.Render2DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.pathing.BaritoneUtils;
 import meteordevelopment.meteorclient.settings.BoolSetting;
@@ -18,53 +19,54 @@ import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.movement.speed.Speed;
-import meteordevelopment.meteorclient.systems.modules.misc.AutoReconnect;
 import meteordevelopment.meteorclient.systems.modules.world.Timer;
 import meteordevelopment.meteorclient.utils.misc.HorizontalDirection;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Blocks;
+import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.DisconnectedScreen;
+import net.minecraft.client.gui.screen.TitleScreen;
 import net.minecraft.client.util.ScreenshotRecorder;
-import net.minecraft.registry.RegistryKey;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.world.chunk.ChunkStatus;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.utils.ServerReconnectService;
+import xyz.thm.addon.utils.ServerStatusHandler;
+import xyz.thm.addon.utils.ServerStatusHandler.ServerState;
 import xyz.thm.addon.system.THMSystem;
 import xyz.thm.addon.utils.ThmMembers;
 
-import java.io.IOException;
 import java.lang.reflect.Field;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class THMHwyMonitor extends Module {
-    private static final double ALIGN_TOLERANCE = 0.4;
+    private static final double WORKING_LINE_TOLERANCE = 0.1;
+    private static final double Y_ALIGNMENT_TOLERANCE = 0.4;
+    private static final double DIRECTION_RESOLUTION_TOLERANCE = 0.4;
     private static final double HUGE_DISTANCE = 1.0e30;
     private static final int RECOVERY_DELAY_TICKS = 40;
     private static final int YAW_SET_DELAY_TICKS = 10;
     private static final int BARITONE_PATH_STARTUP_TICKS = 10;
     private static final int BARITONE_PATH_TIMEOUT_TICKS = 20 * 20;
-    private static final int POST_REJOIN_ACTION_DELAY_MS = 2000;
-    private static final int POST_REJOIN_RETRY_DELAY_MS = 10_000;
-    private static final int POST_REJOIN_MAX_RETRIES = 20;
-    private static final int POST_REJOIN_PRE_STEP_DELAY_TICKS = 40;
-    private static final double POST_REJOIN_COORD_SUCCESS_DISTANCE = 100.0;
-    private static final int POST_REJOIN_PATH_STARTUP_TICKS = 20;
-    private static final int POST_REJOIN_PATH_TIMEOUT_TICKS = 20 * 180;
-    private static final int POST_REJOIN_AXIS_PROBE_DISTANCE = 5;
-    private static final int PENDING_BUILDER_DIRECTION_FAIL_REARM_THRESHOLD = 4;
-    private static final String POST_REJOIN_PORTAL_COMMAND = "goto nether_portal";
+    private static final long ALIGNMENT_GATE_TIMEOUT_MS = 10_000L;
+    private static final int POST_REJOIN_AXIS_PROBE_DISTANCE = 20;
+    private static final int POST_REJOIN_AXIS_NEAR_PROBE_DISTANCE = 8;
+    private static final double RECONNECT_LINE_AMBIGUITY_THRESHOLD = 0.05;
+    private static final double RECONNECT_LINE_MAX_DISTANCE = 6.0;
+    private static final long POST_REJOIN_DIRECTION_RETRY_DELAY_MS = 1_000L;
+    private static final int POST_REJOIN_DIRECTION_RETRY_LIMIT = 30;
     private static final int RESTART_SCREENSHOT_DELAY_MS = 2000;
-    private static final int BUILDER_ENABLE_DELAY_MS = 6000;
+    private static final int RESTART_BUILDER_DISABLE_GRACE_MS = 3000;
+    private static final long MAIN_SERVER_RESUME_DELAY_MS = 6_000L;
     private static final int DISCONNECT_SCREEN_EVIDENCE_TIMEOUT_MS = 3000;
+    private static final String RECONNECT_RESUME_LISTENER_KEY = "thm-hwymonitor-resume";
+    private static final String RECONNECT_FAILURE_LISTENER_KEY = "thm-hwymonitor-failure";
+    // IMPORTANT: Any caller that arms reconnect must store cycleId and ignore stale resume/failure callbacks.
     // Release gate: keep restart automation code present but hidden/disabled in UI and runtime.
     private final boolean EXPOSE_RESTART_AUTOMATION_SETTINGS = ThmMembers.isNovice(mc.player.getName().toString());
     private static final boolean RUNTIME_WATCHDOG_LOG_ENABLED = false;
@@ -76,10 +78,10 @@ public class THMHwyMonitor extends Module {
     private static final String RESTOCK_FAILURE_MARKER = "unable to perform restock";
     private static final String THM_HIGHWAYBUILDER_TAG_A = "thm highwaybuilder";
     private static final String THM_HIGHWAYBUILDER_TAG_B = "thm-highwaybuilder";
+    private static final String AUTO_LOG_TAG = "[autolog]";
     private static final long RESTART_EVIDENCE_TTL_MS = 20_000L;
     private static final AtomicBoolean NON_RESTART_HARD_FAIL_SIGNAL = new AtomicBoolean(false);
     private static final AtomicBoolean RESTART_HARD_FAIL_SIGNAL = new AtomicBoolean(false);
-    private static final DateTimeFormatter RUNTIME_FLAG_TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
 
     private static final int[] RING_ROADS = new int[] {
         200, 500, 750, 1000, 1500, 2000, 2500, 5000, 7500, 10000, 15000, 20000, 25000,
@@ -141,19 +143,10 @@ public class THMHwyMonitor extends Module {
         .build()
     );
 
-    private final Setting<Boolean> autoScreenshotOnRestartDetection = sgGeneral.add(new BoolSetting.Builder()
-        .name("auto-screenshot-on-restart-detection")
-        .description("Takes a screenshot automatically when the restart-detected disconnect screen appears.")
+    private final Setting<Boolean> autoReconnect = sgGeneral.add(new BoolSetting.Builder()
+        .name("auto-reconnect")
+        .description("Handles Automatically Reconnecting on Disconnects, and Restarting HighwayBuilderTHM")
         .defaultValue(false)
-        .visible(() -> EXPOSE_RESTART_AUTOMATION_SETTINGS)
-        .build()
-    );
-
-    private final Setting<Boolean> autoRejoinOnRestartDetection = sgGeneral.add(new BoolSetting.Builder()
-        .name("automatic-restart-handling")
-        .description("Handles restart recovery loop: reconnects, runs login flow, and executes post-join pathing.")
-        .defaultValue(false)
-        .visible(() -> EXPOSE_RESTART_AUTOMATION_SETTINGS)
         .build()
     );
 
@@ -163,23 +156,6 @@ public class THMHwyMonitor extends Module {
         .defaultValue(15)
         .range(1, 240)
         .sliderRange(1, 60)
-        .visible(() -> EXPOSE_RESTART_AUTOMATION_SETTINGS && autoRejoinOnRestartDetection.get())
-        .build()
-    );
-
-    private final Setting<Boolean> crackedAccountMode = sgGeneral.add(new BoolSetting.Builder()
-        .name("cracked-account-mode")
-        .description("Use THM Tab cracked-password to run /login during cracked-account reconnect flow.")
-        .defaultValue(false)
-        .visible(() -> EXPOSE_RESTART_AUTOMATION_SETTINGS && autoRejoinOnRestartDetection.get())
-        .build()
-    );
-
-    private final Setting<Boolean> enableHighwayBuilderOnRestart = sgGeneral.add(new BoolSetting.Builder()
-        .name("enable-highway-builder-on-restart")
-        .description("Enable THM HighwayBuilder after successful restart rejoin flow.")
-        .defaultValue(true)
-        .visible(() -> EXPOSE_RESTART_AUTOMATION_SETTINGS && autoRejoinOnRestartDetection.get())
         .build()
     );
 
@@ -199,47 +175,17 @@ public class THMHwyMonitor extends Module {
     // Restart automation subsystem. This code stays in the file but must remain fully dormant
     // unless reconnectAutomationEnabled() returns true.
     private volatile boolean restartScreenshotScheduled;
-    private boolean pendingPostRejoinActions;
-    private long postRejoinActionsAtMs;
-    private boolean awaitingCrackedLoginSuccess;
-    private boolean postRejoinRoutineRetryScheduled;
-    private long postRejoinRoutineRetryAtMs;
-    private int postRejoinRoutineRetryCount;
     private boolean postJoinModuleStateCaptured;
     private boolean timerWasActiveBeforePostJoin;
     private boolean speedWasActiveBeforePostJoin;
-    private String[] postRejoinPathCommands = new String[0];
-    private int nextPostRejoinPathCommandIndex;
-    private int activePostRejoinPathCommandIndex = -1;
-    private boolean waitingForPostRejoinCommandDelay;
-    private int postRejoinCommandDelayTicks;
-    private boolean waitingForPostRejoinPathStart;
-    private boolean waitingForPostRejoinCompletionMessage;
-    private boolean postRejoinStepStartCaptured;
-    private double postRejoinStepStartX;
-    private double postRejoinStepStartZ;
-    private int postRejoinPathStartupTicks;
-    private int postRejoinPathTimeoutTicks;
-    private boolean suppressAutoReconnectAfterHardFail;
-    private boolean awaitPostRejoinAfterReconnect;
     private boolean nonRestartHardFailArmed;
     private boolean unresolvedMainServerDisconnectCandidate;
     private boolean deferRestartScreenshotUntilReconnect;
     private boolean deferredRestartScreenshotAfterReconnectPending;
     private boolean pendingDisconnectScreenEvidenceCheck;
     private long pendingDisconnectScreenEvidenceUntilMs;
-    private boolean restartHandlingArmed;
-    private boolean postRejoinStartedForCurrentRestart;
     private boolean restartModuleStateSnapshotTaken;
-    private RestartRoutineStage restartRoutineStage = RestartRoutineStage.None;
-    private PostRejoinPathPurpose activePostRejoinPathPurpose = PostRejoinPathPurpose.None;
-    private boolean pendingHighwayBuilderEnableAfterRestore;
-    private HorizontalDirection pendingHighwayBuilderDirection;
-    private long pendingHighwayBuilderEnableAtMs;
-    private int pendingBuilderDirectionProbeFailures;
     private boolean wasConnectedLastTick;
-    private boolean crackedLoginPromptSeenThisCycle;
-    private boolean crackedLoginSuccessSeenThisCycle;
     private boolean restartDisconnectEvidenceArmed;
     private long restartDisconnectEvidenceAtMs;
     private String restartDisconnectEvidenceSource = "";
@@ -249,13 +195,67 @@ public class THMHwyMonitor extends Module {
     private boolean internalTimerSpeedToggleInProgress;
     private static Field disconnectedScreenReasonField;
     private static boolean disconnectedScreenReasonFieldResolved;
-    private volatile boolean runtimeWatchdogRunning;
-    private Thread runtimeWatchdogThread;
-    private String lastRuntimeWatchdogState = "";
-    private long executionTraceCounter;
+    private CompletableFuture<ServerState> pendingAlignmentGateFuture;
+    private long pendingAlignmentGateAttemptId;
+    private long nextAlignmentGateAttemptId = 1L;
+    private long activeReconnectCycleId;
+    private long restartEvidenceGateCycleId;
+    private boolean delayedMainServerResumePending;
+    private long delayedMainServerResumeCycleId;
+    private long delayedMainServerResumeAtMs;
+    private String delayedMainServerResumeContext = "";
+    private boolean restartRecoveryActive;
+    private boolean postRejoinDirectionGateActive;
+    private int postRejoinDirectionRetryCount;
+    private long postRejoinDirectionNextAttemptAtMs;
+    private String postRejoinDirectionBlockReason = "";
+    private String postRejoinDirectionBlockSummary = "";
+    private boolean postRejoinBlockedScreenshotTaken;
+    private boolean postRejoinTerminalScreenshotTaken;
+    private HorizontalDirection postRejoinLastCompleteProbeWinner;
+    private boolean intentionalSafetyDisconnectArmed;
+    private boolean disableMonitorAfterIntentionalSafetyDisconnect;
+    private volatile boolean restartBuilderDisableGraceScheduled;
+    private long restartBuilderDisableGraceId;
+    private long nextRestartBuilderDisableGraceId = 1L;
+    private boolean previousAutoReconnectToggleState;
+
+    private record AxisProbeResult(
+        boolean allSamplesLoaded,
+        boolean strongWinner,
+        HorizontalDirection selectedDirection,
+        HorizontalDirection dirA,
+        int dirAScore,
+        HorizontalDirection dirB,
+        int dirBScore
+    ) {}
+
+    private record PostRejoinDirectionResult(
+        HorizontalDirection direction,
+        String reason,
+        String summary
+    ) {
+        private static PostRejoinDirectionResult success(HorizontalDirection direction, String summary) {
+            return new PostRejoinDirectionResult(direction, "", summary);
+        }
+
+        private static PostRejoinDirectionResult blocked(String reason, String summary) {
+            return new PostRejoinDirectionResult(null, reason, summary);
+        }
+
+        private boolean conclusive() {
+            return direction != null;
+        }
+    }
+
+    private record ReconnectLineResolution(
+        WorkLine line,
+        double distance
+    ) {}
 
     public THMHwyMonitor() {
         super(THMAddon.MAIN, "THM Highway Monitor", "Monitors alignment and recovers HighwayBuilder from drift.");
+        runInMainMenu = true;
     }
 
     public static void signalNonRestartHardFailFromHighwayBuilder() {
@@ -286,12 +286,17 @@ public class THMHwyMonitor extends Module {
         return lower.contains(THM_HIGHWAYBUILDER_TAG_A) || lower.contains(THM_HIGHWAYBUILDER_TAG_B);
     }
 
+    private static boolean isAutoLogTaggedMessage(String lower) {
+        return lower != null && lower.contains(AUTO_LOG_TAG);
+    }
+
     private static boolean isRestartHardFailMessage(String lower) {
         return isHighwayBuilderTaggedMessage(lower) && lower.contains(RESTART_DETECTED_MARKER);
     }
 
     private static boolean isKnownNonRestartHardFailMessage(String lower) {
-        return isHighwayBuilderTaggedMessage(lower) && lower.contains(RESTOCK_FAILURE_MARKER);
+        return isAutoLogTaggedMessage(lower)
+            || (isHighwayBuilderTaggedMessage(lower) && lower.contains(RESTOCK_FAILURE_MARKER));
     }
 
     private void armRestartDisconnectEvidence(String source) {
@@ -309,7 +314,6 @@ public class THMHwyMonitor extends Module {
     private String consumeRestartDisconnectEvidence() {
         String screenReason = readDisconnectedScreenReasonLower();
         if (isRestartHardFailMessage(screenReason)) {
-            traceExec("consumeRestartDisconnectEvidence:disconnectScreen");
             clearRestartDisconnectEvidence();
             return "disconnect-screen";
         }
@@ -320,12 +324,10 @@ public class THMHwyMonitor extends Module {
                 String source = restartDisconnectEvidenceSource == null || restartDisconnectEvidenceSource.isEmpty()
                     ? "message"
                     : restartDisconnectEvidenceSource;
-                traceExec("consumeRestartDisconnectEvidence:" + source + ":ageMs=" + ageMs);
                 clearRestartDisconnectEvidence();
                 return source;
             }
 
-            traceExec("consumeRestartDisconnectEvidence:expired:ageMs=" + ageMs);
             clearRestartDisconnectEvidence();
         }
 
@@ -368,10 +370,6 @@ public class THMHwyMonitor extends Module {
     @Override
     public void onActivate() {
         cacheRecoveryYawOnMonitorToggle();
-        startRuntimeWatchdogIfNeeded();
-        runtimeFlag("onActivate");
-        executionTraceCounter = 0L;
-        traceExec("onActivate:begin");
         if (Float.isNaN(lastReliableRecoveryYaw) && mc != null && mc.player != null) {
             lastReliableRecoveryYaw = mc.player.getYaw();
         }
@@ -390,17 +388,20 @@ public class THMHwyMonitor extends Module {
         trackedLine = null;
         trackedDirection = "";
         recoveryYawBeforeMove = Float.NaN;
-        resetReconnectAutomationState(false);
+        clearPendingAlignmentGateRequest();
+        clearPostRejoinDirectionGateState();
+        resetReconnectAutomationState(true);
+        registerReconnectServiceListeners();
         wasConnectedLastTick = isSuccessfullyConnectedToServer();
         if (reconnectAutomationEnabled()) refreshTimerSpeedSnapshotFromCurrentState("activate");
-        runtimeFlag("activate-state-initialized");
-        traceExec("onActivate:end");
+        previousAutoReconnectToggleState = autoReconnect.get();
+        if (autoReconnect.get()) {
+            armReconnectCycle("onActivate", false);
+        }
     }
 
     @Override
     public void onDeactivate() {
-        runtimeFlag("onDeactivate");
-        traceExec("onDeactivate:begin");
         lastReliableRecoveryYaw = Float.NaN;
         preTickYawSnapshot = Float.NaN;
         preTickYawSnapshotAtMs = 0L;
@@ -414,10 +415,11 @@ public class THMHwyMonitor extends Module {
         trackedLine = null;
         trackedDirection = "";
         recoveryYawBeforeMove = Float.NaN;
-        resetReconnectAutomationState(false);
+        clearPendingAlignmentGateRequest();
+        clearPostRejoinDirectionGateState();
+        unregisterReconnectServiceListeners();
+        clearRestartAutomationState("deactivate", true, true);
         wasConnectedLastTick = false;
-        stopRuntimeWatchdog();
-        traceExec("onDeactivate:end");
     }
 
     private void cacheRecoveryYawOnMonitorToggle() {
@@ -431,7 +433,103 @@ public class THMHwyMonitor extends Module {
         lastReliableRecoveryYaw = yaw;
         preTickYawSnapshot = yaw;
         preTickYawSnapshotAtMs = System.currentTimeMillis();
-        runtimeFlag(String.format(Locale.ROOT, "cacheRecoveryYaw:onActivate:%.2f", yaw));
+    }
+
+    private ServerReconnectService reconnectService() {
+        return ServerReconnectService.getInstance();
+    }
+
+    private void registerReconnectServiceListeners() {
+        reconnectService().registerResumeListener(RECONNECT_RESUME_LISTENER_KEY, this::onReconnectMainServerReady);
+        reconnectService().registerFailureListener(RECONNECT_FAILURE_LISTENER_KEY, this::onReconnectFailure);
+    }
+
+    private void unregisterReconnectServiceListeners() {
+        reconnectService().unregisterResumeListener(RECONNECT_RESUME_LISTENER_KEY);
+        reconnectService().unregisterFailureListener(RECONNECT_FAILURE_LISTENER_KEY);
+    }
+
+    private void onReconnectMainServerReady(long cycleId, String contextTag, long armedAtMs, long detectedAtMs) {
+        if (mc != null && !mc.isOnThread()) {
+            mc.execute(() -> onReconnectMainServerReady(cycleId, contextTag, armedAtMs, detectedAtMs));
+            return;
+        }
+        if (!isActive()) return;
+        if (cycleId != activeReconnectCycleId) {
+            return;
+        }
+
+        boolean restartEvidenceMatched = restartEvidenceGateCycleId == cycleId;
+        if (!restartEvidenceMatched) {
+            return;
+        }
+
+        restartEvidenceGateCycleId = 0L;
+        delayedMainServerResumePending = true;
+        delayedMainServerResumeCycleId = cycleId;
+        delayedMainServerResumeAtMs = System.currentTimeMillis() + MAIN_SERVER_RESUME_DELAY_MS;
+        delayedMainServerResumeContext = contextTag == null ? "unknown" : contextTag;
+        info(
+            "Reconnect service reached MAIN_SERVER (%s). Waiting 6.0s before post-main-server finalization (cycle %d).",
+            delayedMainServerResumeContext,
+            cycleId
+        );
+    }
+
+    private void onReconnectFailure(
+        long cycleId,
+        ServerReconnectService.FailureReason reason,
+        String detail,
+        String contextTag,
+        long armedAtMs,
+        long failedAtMs
+    ) {
+        if (mc != null && !mc.isOnThread()) {
+            mc.execute(() -> onReconnectFailure(cycleId, reason, detail, contextTag, armedAtMs, failedAtMs));
+            return;
+        }
+        if (!isActive()) return;
+        if (cycleId != activeReconnectCycleId) {
+            return;
+        }
+
+        clearRestartRecoveryState("failure:" + reason.name(), false, true);
+        warning("Reconnect failed (%s): %s", reason.name(), detail == null ? "" : detail);
+    }
+
+    private void clearRestartRecoveryState(String reason, boolean disarmService, boolean clearCycleBinding) {
+        restartRecoveryActive = false;
+        clearPendingRestartBuilderDisableGrace();
+        restartEvidenceGateCycleId = 0L;
+        clearDelayedMainServerResumeState();
+        clearPostRejoinDirectionGateState();
+        if (clearCycleBinding) activeReconnectCycleId = 0L;
+        if (disarmService) reconnectService().disarmReconnect("THMHwyMonitor clearRestartRecoveryState: " + reason);
+    }
+
+    private void clearDelayedMainServerResumeState() {
+        delayedMainServerResumePending = false;
+        delayedMainServerResumeCycleId = 0L;
+        delayedMainServerResumeAtMs = 0L;
+        delayedMainServerResumeContext = "";
+    }
+
+    private void clearPostRejoinDirectionGateState() {
+        postRejoinDirectionGateActive = false;
+        postRejoinDirectionRetryCount = 0;
+        postRejoinDirectionNextAttemptAtMs = 0L;
+        postRejoinDirectionBlockReason = "";
+        postRejoinDirectionBlockSummary = "";
+        postRejoinBlockedScreenshotTaken = false;
+        postRejoinTerminalScreenshotTaken = false;
+        postRejoinLastCompleteProbeWinner = null;
+    }
+
+    private long armReconnectCycle(String source, boolean markRestartEvidenceGate) {
+        long cycleId = reconnectService().armReconnect(restartRejoinDelayMinutes.get(), "THMHwyMonitor:" + source);
+        activeReconnectCycleId = cycleId;
+        if (markRestartEvidenceGate) restartEvidenceGateCycleId = cycleId;
+        return cycleId;
     }
 
     // --- Restart automation subsystem entrypoints and helpers ---
@@ -445,13 +543,6 @@ public class THMHwyMonitor extends Module {
         timerWasActiveBeforePostJoin = timer != null && timer.isActive();
         speedWasActiveBeforePostJoin = speed != null && speed.isActive();
         restartModuleStateSnapshotTaken = timerWasActiveBeforePostJoin || speedWasActiveBeforePostJoin;
-        runtimeFlag(String.format(
-            Locale.ROOT,
-            "refreshTimerSpeedSnapshot:%s:timer=%s:speed=%s",
-            source,
-            timerWasActiveBeforePostJoin,
-            speedWasActiveBeforePostJoin
-        ));
     }
 
     @EventHandler
@@ -471,128 +562,63 @@ public class THMHwyMonitor extends Module {
     private void onMessageReceive(ReceiveMessageEvent event) {
         String message = event.getMessage().getString();
         if (message == null) return;
-        if (!reconnectAutomationEnabled()) return;
         String lower = message.toLowerCase(Locale.ROOT);
-        traceExec("onMessageReceive:len=" + lower.length());
 
         if (isRestartHardFailMessage(lower)) {
             armRestartDisconnectEvidence("message");
-            runtimeFlag("restartEvidence:message");
-            traceExec("message:restartEvidence");
         }
 
         if (isKnownNonRestartHardFailMessage(lower)) {
             nonRestartHardFailArmed = true;
             signalNonRestartHardFailFromHighwayBuilder();
-            runtimeFlag("nonRestartEvidence:message");
-            traceExec("message:nonRestartEvidence");
         }
-
-        if (restartHandlingArmed && crackedAccountMode.get() && restartRoutineStage == RestartRoutineStage.CrackedAuthLoginLobby) {
-            if (lower.contains(LOGIN_PROMPT_MARKER)) {
-                crackedLoginPromptSeenThisCycle = true;
-                runtimeFlag("crackedLoginPromptSeen");
-                traceExec("message:crackedLoginPromptSeen");
-            }
-
-            if (lower.contains(CRACKED_LOGIN_SUCCESS_MARKER)) {
-                crackedLoginSuccessSeenThisCycle = true;
-                if (!awaitingCrackedLoginSuccess && activePostRejoinPathPurpose == PostRejoinPathPurpose.None) {
-                    restartRoutineStage = RestartRoutineStage.CrackedLoginLobbyTransferRoutine;
-                    info("Detected cracked-account login success before /login wait state. Starting cracked login-lobby path routine.");
-                    traceExec("message:crackedLoginSuccessEarly");
-                    startPathSequenceForCurrentRestartStage();
-                    return;
-                }
-            }
-        }
-
-        if (pendingHighwayBuilderEnableAfterRestore && !restartHandlingArmed && lower.contains(LOGIN_PROMPT_MARKER)) {
-            pendingHighwayBuilderEnableAfterRestore = false;
-            pendingHighwayBuilderDirection = null;
-            pendingHighwayBuilderEnableAtMs = 0L;
-            pendingBuilderDirectionProbeFailures = 0;
-            info("Detected login prompt while deferred HighwayBuilder enable was pending. Re-arming post-rejoin flow.");
-            runtimeFlag("rearmPostRejoinFromLoginPrompt");
-            traceExec("message:rearmPostRejoinFromLoginPrompt");
-            rearmPostRejoinFlow("login prompt");
-            return;
-        }
-
-        if (awaitingCrackedLoginSuccess && lower.contains(CRACKED_LOGIN_SUCCESS_MARKER)) {
-            awaitingCrackedLoginSuccess = false;
-            crackedLoginSuccessSeenThisCycle = true;
-            restartRoutineStage = RestartRoutineStage.CrackedLoginLobbyTransferRoutine;
-            info("Detected cracked-account login success. Starting cracked login-lobby path routine.");
-            traceExec("message:crackedLoginSuccessAwaited");
-            startPathSequenceForCurrentRestartStage();
-            return;
-        }
-
-        if (activePostRejoinPathCommandIndex < 0 || !waitingForPostRejoinCompletionMessage) return;
-        if (!lower.contains(BARITONE_PATH_COMPLETE_MARKER)) return;
-
-        waitingForPostRejoinCompletionMessage = false;
-        info("Received Baritone completion message for post-rejoin step %d/%d.",
-            activePostRejoinPathCommandIndex + 1, postRejoinPathCommands.length);
     }
 
     @EventHandler
     private void onGameJoined(GameJoinedEvent event) {
-        if (!reconnectAutomationEnabled()) return;
-        runtimeFlag("onGameJoined");
-        traceExec("onGameJoined");
+        intentionalSafetyDisconnectArmed = false;
+        disableMonitorAfterIntentionalSafetyDisconnect = false;
         wasConnectedLastTick = true;
-        boolean wasAwaitingPostRejoin = awaitPostRejoinAfterReconnect;
-        boolean wasSuppressed = suppressAutoReconnectAfterHardFail;
         clearNonRestartHardFailSignal();
         clearRestartHardFailSignal();
         nonRestartHardFailArmed = false;
-        info(
-            "Server rejoin detected (GameJoinedEvent). awaitPostRejoin=%s, suppressAutoReconnect=%s, autoRestartHandling=%s",
-            wasAwaitingPostRejoin,
-            wasSuppressed,
-            autoRestartHandlingEnabled()
-        );
-
-        if (restartHandlingArmed || awaitPostRejoinAfterReconnect || pendingHighwayBuilderEnableAfterRestore) {
-            ensureHighwayBuilderDisabledForRestart("join guard", false);
-        }
-        tryStartPostRejoinAfterReconnect("join event");
-
-        if (autoRestartHandlingEnabled() && suppressAutoReconnectAfterHardFail) {
-            suppressAutoReconnectAfterHardFail = false;
-            info("Successful server reconnection detected (join event). AutoReconnect suppression cleared.");
-            traceExec("onGameJoined:clearSuppression");
-        }
+        pendingDisconnectScreenEvidenceCheck = false;
+        pendingDisconnectScreenEvidenceUntilMs = 0L;
+        unresolvedMainServerDisconnectCandidate = false;
+        clearStaleDisconnectedScreenIfLiveConnected();
     }
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
-        if (!reconnectAutomationEnabled()) return;
-        runtimeFlag("onGameLeft");
-        traceExec("onGameLeft:begin");
-        boolean startingNewDisconnectCycle = !restartHandlingArmed && !awaitPostRejoinAfterReconnect && !pendingHighwayBuilderEnableAfterRestore;
-        HighwayBuilderTHM builderBeforeDisconnect = Modules.get().get(HighwayBuilderTHM.class);
-        boolean builderWasActiveAtDisconnect = builderBeforeDisconnect != null && builderBeforeDisconnect.isActive();
-        if (startingNewDisconnectCycle && (postJoinModuleStateCaptured || restartModuleStateSnapshotTaken || timerWasActiveBeforePostJoin || speedWasActiveBeforePostJoin)) {
-            postJoinModuleStateCaptured = false;
-            timerWasActiveBeforePostJoin = false;
-            speedWasActiveBeforePostJoin = false;
-            restartModuleStateSnapshotTaken = false;
-            runtimeFlag("resetPostJoinModuleSnapshot:newDisconnectCycle");
-        }
-        unresolvedMainServerDisconnectCandidate = startingNewDisconnectCycle && builderWasActiveAtDisconnect;
         wasConnectedLastTick = false;
-        String disconnectScreenReason = readDisconnectedScreenReasonLower();
         pendingDisconnectScreenEvidenceCheck = false;
         pendingDisconnectScreenEvidenceUntilMs = 0L;
 
-        boolean nonRestartHardFail = suppressAutoReconnectAfterHardFail || nonRestartHardFailArmed || consumeNonRestartHardFailSignal();
+        if (intentionalSafetyDisconnectArmed) {
+            intentionalSafetyDisconnectArmed = false;
+            clearRestartAutomationState("intentional-safety-disconnect", true, true);
+            unresolvedMainServerDisconnectCandidate = false;
+            if (disableMonitorAfterIntentionalSafetyDisconnect) {
+                disableMonitorAfterIntentionalSafetyDisconnect = false;
+                if (isActive()) toggle();
+            }
+            return;
+        }
+
+        if (reconnectRecoveryInFlight()) {
+            unresolvedMainServerDisconnectCandidate = false;
+            info("Reconnect transfer hop observed while reconnect recovery is already in flight; suppressing fresh disconnect-evidence cycle.");
+            return;
+        }
+
+        HighwayBuilderTHM builderBeforeDisconnect = Modules.get().get(HighwayBuilderTHM.class);
+        boolean builderWasActiveAtDisconnect = builderBeforeDisconnect != null && builderBeforeDisconnect.isActive();
+        unresolvedMainServerDisconnectCandidate = builderWasActiveAtDisconnect;
+        String disconnectScreenReason = readDisconnectedScreenReasonLower();
+
+        boolean nonRestartHardFail = nonRestartHardFailArmed || consumeNonRestartHardFailSignal();
         if (!nonRestartHardFail && isKnownNonRestartHardFailMessage(disconnectScreenReason)) {
             nonRestartHardFail = true;
-            runtimeFlag("nonRestartEvidence:disconnectScreen");
-            traceExec("onGameLeft:nonRestartEvidence=disconnect-screen");
         }
         nonRestartHardFailArmed = false;
 
@@ -604,127 +630,29 @@ public class THMHwyMonitor extends Module {
 
         if (consumeRestartHardFailSignal()) {
             armRestartDisconnectEvidence("hb-signal");
-            runtimeFlag("restartEvidence:hb-signal");
-            traceExec("onGameLeft:restartEvidence=hb-signal");
         }
 
         String restartEvidence = consumeRestartDisconnectEvidence();
 
-        if (restartHandlingArmed || awaitPostRejoinAfterReconnect || pendingHighwayBuilderEnableAfterRestore) {
-            ensureHighwayBuilderDisabledForRestart("game left", false);
-        }
-
-        if (pendingHighwayBuilderEnableAfterRestore) {
-            unresolvedMainServerDisconnectCandidate = false;
-            // During server-transfer reconnects after the public routine, ignore extra disconnects.
-            // We only need to wait for reconnect so deferred HighwayBuilder enable can finish.
-            awaitPostRejoinAfterReconnect = false;
-            clearPostRejoinFlowState();
-            pendingHighwayBuilderEnableAtMs = 0L;
-            pendingBuilderDirectionProbeFailures = 0;
-            info("Disconnect detected during deferred HighwayBuilder enable. Waiting for reconnect without re-running post-rejoin pathing.");
-            runtimeFlag("pendingBuilderEnable:disconnectIgnored");
-            traceExec("onGameLeft:pendingBuilderDisconnectIgnored");
-            return;
-        }
-
-        if (restartHandlingArmed) {
-            unresolvedMainServerDisconnectCandidate = false;
-            if (crackedAccountMode.get() && restartRoutineStage == RestartRoutineStage.CrackedLoginLobbyTransferRoutine && postRejoinStartedForCurrentRestart) {
-                restartRoutineStage = RestartRoutineStage.CrackedAwaitingMainLobbyReconnect;
-                postRejoinStartedForCurrentRestart = false;
-                awaitPostRejoinAfterReconnect = true;
-                clearPostRejoinFlowState();
-                info("Cracked login-lobby transfer disconnect detected. Awaiting reconnect to main lobby.");
-                runtimeFlag("crackedTransition:loginLobbyTransfer->awaitingMainLobbyReconnect");
-                traceExec("onGameLeft:crackedTransition:loginLobbyTransfer->awaitingMainLobbyReconnect");
-                return;
-            }
-
-            if (crackedAccountMode.get() && restartRoutineStage == RestartRoutineStage.CrackedAwaitingMainLobbyReconnect) {
-                awaitPostRejoinAfterReconnect = true;
-                clearPostRejoinFlowState();
-                info("Additional disconnect while awaiting cracked-flow reconnect to main lobby.");
-                runtimeFlag("crackedAwaitingMainLobbyReconnect:disconnect");
-                traceExec("onGameLeft:crackedAwaitingMainLobbyReconnect:disconnect");
-                return;
-            }
-
-            if (restartRoutineStage == RestartRoutineStage.MainLobbyTransferRoutine && postRejoinStartedForCurrentRestart) {
-                postRejoinStartedForCurrentRestart = false;
-                awaitPostRejoinAfterReconnect = true;
-                clearPostRejoinFlowState();
-                restartRoutineStage = RestartRoutineStage.AwaitingMainServerReconnect;
-                info("Main-lobby transfer disconnect detected. Awaiting reconnect to main server.");
-                runtimeFlag("mainLobbyTransferDisconnectHandled");
-                traceExec("onGameLeft:mainLobbyTransferDisconnectHandled");
-                return;
-            }
-
-            if (restartRoutineStage == RestartRoutineStage.AwaitingMainServerReconnect) {
-                awaitPostRejoinAfterReconnect = true;
-                clearPostRejoinFlowState();
-                info("Additional disconnect while awaiting reconnect to main server.");
-                runtimeFlag("awaitingMainServerReconnect:disconnect");
-                traceExec("onGameLeft:awaitingMainServerReconnect:disconnect");
-                return;
-            }
-
-            // Reconnect loops on some servers can emit additional disconnects while reconnect is still in progress.
-            // If post-rejoin already started for this restart cycle, do not start it again on transfer reconnects.
-            if (postRejoinStartedForCurrentRestart) {
-                awaitPostRejoinAfterReconnect = false;
-                clearPostRejoinFlowState();
-                info("Additional disconnect detected after post-rejoin already started for this restart. Not re-running routine.");
-                runtimeFlag("skipRerunPostRejoinSameRestart");
-                traceExec("onGameLeft:skipRerunPostRejoinSameRestart");
-            } else {
-                // Otherwise keep waiting for first successful reconnect in this restart cycle.
-                awaitPostRejoinAfterReconnect = true;
-                clearPostRejoinFlowState();
-                info("Additional disconnect detected while restart handling is already armed. Waiting for reconnect.");
-                traceExec("onGameLeft:restartArmed:awaitReconnect");
-            }
-            return;
-        }
-
         if (restartEvidence != null) {
             unresolvedMainServerDisconnectCandidate = false;
-            if (!restartAutomationAllowed()) {
-                runtimeFlag("restartEvidenceIgnored:autoRestartHandlingDisabled");
-                traceExec("onGameLeft:restartEvidenceIgnored:autoRestartHandlingDisabled");
-                clearRestartAutomationState("restart evidence ignored on disconnect (toggle off)", true, false);
-                info("Restart evidence detected, but Automatic Restart Handling is disabled. Ignoring restart automation.");
-                return;
-            }
-
             info("Disconnect matched restart evidence (%s). Treating as restart.", restartEvidence);
-            traceExec("onGameLeft:restartEvidence=" + restartEvidence);
             handleRestartDetectionTrigger();
             return;
         }
 
         pendingDisconnectScreenEvidenceCheck = true;
         pendingDisconnectScreenEvidenceUntilMs = System.currentTimeMillis() + DISCONNECT_SCREEN_EVIDENCE_TIMEOUT_MS;
-        runtimeFlag("disconnectScreenEvidenceCheck:scheduled");
         info("Disconnect detected without immediate hard-fail evidence. Waiting up to 3.0s for disconnect-screen reason.");
-        traceExec("onGameLeft:scheduledDisconnectScreenEvidenceCheck");
     }
 
     private void handleDetectedNonRestartHardFail(String source) {
-        disableAutoReconnectForNonRestartHardFail("HighwayBuilder signaled non-restart hard fail");
+        clearRestartAutomationState("non-restart-hard-fail:" + source, true, true);
         clearRestartDisconnectEvidence();
         unresolvedMainServerDisconnectCandidate = false;
         deferRestartScreenshotUntilReconnect = false;
         deferredRestartScreenshotAfterReconnectPending = false;
-        clearPostRejoinFlowState();
-        crackedLoginPromptSeenThisCycle = false;
-        crackedLoginSuccessSeenThisCycle = false;
-        info("Non-restart hard fail detected (%s). Disabling THM Hwy Monitor to prevent restart-login automation on manual rejoin.", source);
-        runtimeFlag("nonRestartHardFail:toggleMonitorOff");
-        traceExec("nonRestartHardFail:toggleMonitorOff:" + source);
-        if (isActive()) toggle();
-        traceExec("nonRestartHardFail:handled:" + source);
+        warning("Non-restart hard fail detected (%s). Reconnect handling was disarmed, but THM Hwy Monitor remains enabled.", source);
     }
 
     private void handlePendingDisconnectScreenEvidenceCheck(boolean connectedNow) {
@@ -734,8 +662,6 @@ public class THMHwyMonitor extends Module {
             pendingDisconnectScreenEvidenceCheck = false;
             pendingDisconnectScreenEvidenceUntilMs = 0L;
             unresolvedMainServerDisconnectCandidate = false;
-            runtimeFlag("disconnectScreenEvidenceCheck:clearedOnReconnect");
-            traceExec("disconnectScreenEvidenceCheck:clearedOnReconnect");
             return;
         }
 
@@ -745,8 +671,6 @@ public class THMHwyMonitor extends Module {
             if (now < pendingDisconnectScreenEvidenceUntilMs) return;
             pendingDisconnectScreenEvidenceCheck = false;
             pendingDisconnectScreenEvidenceUntilMs = 0L;
-            runtimeFlag("disconnectScreenEvidenceCheck:expired");
-            traceExec("disconnectScreenEvidenceCheck:expired");
             handleUnclassifiedMainServerDisconnectFallback("disconnect-screen-timeout");
             return;
         }
@@ -756,31 +680,17 @@ public class THMHwyMonitor extends Module {
 
         if (isKnownNonRestartHardFailMessage(disconnectScreenReason)) {
             unresolvedMainServerDisconnectCandidate = false;
-            runtimeFlag("nonRestartEvidence:disconnectScreenDeferred");
-            traceExec("disconnectScreenEvidenceCheck:nonRestart");
             handleDetectedNonRestartHardFail("disconnect-screen");
             return;
         }
 
         if (!isRestartHardFailMessage(disconnectScreenReason)) {
-            runtimeFlag("disconnectScreenEvidenceCheck:unmatchedReason");
-            traceExec("disconnectScreenEvidenceCheck:unmatchedReason");
             handleUnclassifiedMainServerDisconnectFallback("disconnect-screen-unmatched");
             return;
         }
 
         unresolvedMainServerDisconnectCandidate = false;
-        runtimeFlag("restartEvidence:disconnectScreenDeferred");
-        traceExec("disconnectScreenEvidenceCheck:restart");
         armRestartDisconnectEvidence("disconnect-screen");
-        if (!restartAutomationAllowed()) {
-            runtimeFlag("restartEvidenceIgnored:autoRestartHandlingDisabled");
-            traceExec("disconnectScreenEvidenceCheck:restartIgnored:autoRestartHandlingDisabled");
-            clearRestartAutomationState("restart evidence ignored from disconnect screen (toggle off)", true, false);
-            info("Restart evidence detected from disconnect screen, but Automatic Restart Handling is disabled. Ignoring restart automation.");
-            return;
-        }
-
         info("Disconnect matched restart evidence (disconnect-screen). Treating as restart.");
         handleRestartDetectionTrigger();
     }
@@ -789,15 +699,6 @@ public class THMHwyMonitor extends Module {
         if (!unresolvedMainServerDisconnectCandidate) return;
         unresolvedMainServerDisconnectCandidate = false;
 
-        if (!restartAutomationAllowed()) {
-            runtimeFlag("unclassifiedDisconnectIgnored:autoRestartHandlingDisabled");
-            traceExec("unclassifiedDisconnectIgnored:autoRestartHandlingDisabled:" + source);
-            info("Unclassified disconnect detected (%s) while THM HighwayBuilder was active, but Automatic Restart Handling is disabled.", source);
-            return;
-        }
-
-        runtimeFlag("unclassifiedDisconnect:mainServerFallback");
-        traceExec("unclassifiedDisconnect:mainServerFallback:" + source);
         info("Unclassified disconnect detected (%s) while THM HighwayBuilder was active. Treating as restart recovery.", source);
         deferRestartScreenshotUntilReconnect = true;
         handleRestartDetectionTrigger();
@@ -805,31 +706,33 @@ public class THMHwyMonitor extends Module {
 
     private void maybeTakeDeferredRestartScreenshotAfterReconnect(String source) {
         if (!deferredRestartScreenshotAfterReconnectPending) return;
+        if (!restartScreenshotsEnabled()) {
+            deferredRestartScreenshotAfterReconnectPending = false;
+            return;
+        }
 
         ensureHighwayBuilderDisabledForRestart("deferred reconnect screenshot", false);
         HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
         if (builder != null && builder.isActive()) {
-            runtimeFlag("deferredRestartScreenshot:builderStillActive");
-            traceExec("deferredRestartScreenshot:builderStillActive:" + source);
             return;
         }
 
         deferredRestartScreenshotAfterReconnectPending = false;
-        runtimeFlag("deferredRestartScreenshot:takeAfterReconnect");
-        traceExec("deferredRestartScreenshot:takeAfterReconnect:" + source);
         info("Taking deferred restart screenshot after successful reconnect (%s).", source);
-        scheduleRestartScreenshot();
+        scheduleRestartScreenshot(RESTART_SCREENSHOT_DELAY_MS, "deferred-after-reconnect");
     }
 
-    private void scheduleRestartScreenshot() {
+    private void scheduleRestartScreenshot(int delayMs, String source) {
+        if (!restartScreenshotsEnabled()) return;
         if (restartScreenshotScheduled) return;
         restartScreenshotScheduled = true;
-        runtimeFlag("scheduleRestartScreenshot");
-        info("Restart detection screen found. Taking screenshot in 2.0s.");
+        int effectiveDelayMs = Math.max(0, delayMs);
+        if (effectiveDelayMs <= 0) info("Restart detection screen found. Taking screenshot now.");
+        else info("Restart detection screen found. Taking screenshot in %.1fs.", effectiveDelayMs / 1000.0);
 
         Thread thread = new Thread(() -> {
             try {
-                Thread.sleep(RESTART_SCREENSHOT_DELAY_MS);
+                if (effectiveDelayMs > 0) Thread.sleep(effectiveDelayMs);
             } catch (InterruptedException ignored) {
                 Thread.currentThread().interrupt();
             }
@@ -840,7 +743,6 @@ public class THMHwyMonitor extends Module {
             }
 
             mc.execute(() -> {
-                runtimeFlag("takeRestartScreenshot");
                 takeRestartScreenshot();
                 restartScreenshotScheduled = false;
             });
@@ -849,190 +751,138 @@ public class THMHwyMonitor extends Module {
         thread.start();
     }
 
-    private void scheduleRestartReconnect() {
-        configureMeteorAutoReconnect(true, true);
+    private void clearPendingRestartBuilderDisableGrace() {
+        restartBuilderDisableGraceScheduled = false;
+        restartBuilderDisableGraceId = 0L;
     }
 
-    private void configureMeteorAutoReconnect(boolean enableIfNeeded, boolean verboseLogging) {
-        AutoReconnect autoReconnect = Modules.get().get(AutoReconnect.class);
-        if (autoReconnect == null) {
-            if (verboseLogging) warning("Meteor AutoReconnect module not found.");
+    private void scheduleRestartBuilderDisableAndArmAfterGrace() {
+        if (restartBuilderDisableGraceScheduled) {
             return;
         }
 
-        double delaySeconds = restartRejoinDelayMinutes.get() * 60.0;
-        autoReconnect.time.set(delaySeconds);
+        final long graceId = nextRestartBuilderDisableGraceId++;
+        restartBuilderDisableGraceScheduled = true;
+        restartBuilderDisableGraceId = graceId;
+        info("Restart evidence detected. Waiting 3.0s before disabling THM HighwayBuilder.");
 
-        if (enableIfNeeded && !autoReconnect.isActive()) {
-            autoReconnect.toggle();
-            if (verboseLogging) {
-                if (autoReconnect.isActive()) info("Enabled Meteor AutoReconnect.");
-                else warning("Failed to enable Meteor AutoReconnect.");
+        Thread thread = new Thread(() -> {
+            try {
+                Thread.sleep(RESTART_BUILDER_DISABLE_GRACE_MS);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
             }
-        } else if (verboseLogging) {
-            info("Meteor AutoReconnect is already enabled.");
-        }
-    }
 
-    private void disableMeteorAutoReconnect(boolean verboseLogging) {
-        AutoReconnect autoReconnect = Modules.get().get(AutoReconnect.class);
-        if (autoReconnect == null) {
-            if (verboseLogging) warning("Meteor AutoReconnect module not found.");
-            return;
-        }
-
-        if (autoReconnect.isActive()) {
-            autoReconnect.toggle();
-            if (verboseLogging) {
-                if (!autoReconnect.isActive()) info("Disabled Meteor AutoReconnect.");
-                else warning("Failed to disable Meteor AutoReconnect.");
+            if (!isActive() || mc == null) {
+                if (restartBuilderDisableGraceId == graceId) clearPendingRestartBuilderDisableGrace();
+                return;
             }
-        }
-    }
 
-    private void disableAutoReconnectForNonRestartHardFail(String reason) {
-        suppressAutoReconnectAfterHardFail = true;
-        restartHandlingArmed = false;
-        postRejoinStartedForCurrentRestart = false;
-        restartModuleStateSnapshotTaken = postJoinModuleStateCaptured || timerWasActiveBeforePostJoin || speedWasActiveBeforePostJoin;
-        restartRoutineStage = RestartRoutineStage.None;
-        activePostRejoinPathPurpose = PostRejoinPathPurpose.None;
-        unresolvedMainServerDisconnectCandidate = false;
-        deferRestartScreenshotUntilReconnect = false;
-        deferredRestartScreenshotAfterReconnectPending = false;
-        pendingHighwayBuilderEnableAfterRestore = false;
-        pendingHighwayBuilderDirection = null;
-        pendingHighwayBuilderEnableAtMs = 0L;
-        pendingBuilderDirectionProbeFailures = 0;
-        awaitPostRejoinAfterReconnect = false;
-        disableMeteorAutoReconnect(true);
-        warning("AutoReconnect disabled due to non-restart hard fail: %s", reason);
-    }
+            mc.execute(() -> {
+                if (!isActive()) {
+                    if (restartBuilderDisableGraceId == graceId) clearPendingRestartBuilderDisableGrace();
+                    return;
+                }
+                if (!restartBuilderDisableGraceScheduled || restartBuilderDisableGraceId != graceId) return;
+                if (!autoRestartHandlingEnabled()) {
+                    clearPendingRestartBuilderDisableGrace();
+                    return;
+                }
 
-    private void beginPostRejoinFlowAfterReconnect() {
-        if (!restartAutomationAllowed()) {
-            clearRestartAutomationState("beginPostRejoinFlowAfterReconnect blocked: toggle off", true, true);
-            return;
-        }
+                clearPendingRestartBuilderDisableGrace();
+                restartRecoveryActive = true;
+                ensureHighwayBuilderDisabledForRestart("restart detection", true);
 
-        pendingPostRejoinActions = true;
-        postRejoinActionsAtMs = 0L;
-        awaitingCrackedLoginSuccess = false;
-        if (crackedAccountMode.get() && restartRoutineStage == RestartRoutineStage.CrackedAuthLoginLobby) {
-            crackedLoginPromptSeenThisCycle = false;
-            crackedLoginSuccessSeenThisCycle = false;
-        }
-        resetPostRejoinRetryState();
-        resetPostRejoinPathState();
-    }
+                long cycleId;
+                ServerReconnectService.ReconnectPreflight preflight = reconnectService().getReconnectPreflight();
+                if (preflight.serviceArmed() && preflight.cycleId() > 0L) {
+                    cycleId = preflight.cycleId();
+                    activeReconnectCycleId = cycleId;
+                    restartEvidenceGateCycleId = cycleId;
+                } else {
+                    cycleId = armReconnectCycle("restart-detection", true);
+                }
 
-    private void clearPostRejoinFlowState() {
-        pendingPostRejoinActions = false;
-        postRejoinActionsAtMs = 0L;
-        awaitingCrackedLoginSuccess = false;
-        resetPostRejoinRetryState();
-        resetPostRejoinPathState();
+                info("Restart reconnect handling armed through ServerReconnectService (cycle %d).", cycleId);
+            });
+        }, "thm-restart-disable-grace");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private boolean autoRestartHandlingEnabled() {
         return reconnectAutomationEnabled();
     }
 
-    private boolean autoRestartScreenshotEnabled() {
-        return EXPOSE_RESTART_AUTOMATION_SETTINGS && autoScreenshotOnRestartDetection.get();
-    }
-
-    private boolean restartAutomationAllowed() {
-        return reconnectAutomationEnabled();
+    private boolean restartScreenshotsEnabled() {
+        // HighwayBuilder owns the user-facing proof screenshot flow now.
+        return false;
     }
 
     private boolean reconnectAutomationEnabled() {
-        return EXPOSE_RESTART_AUTOMATION_SETTINGS && autoRejoinOnRestartDetection.get();
+        return autoReconnect.get();
     }
 
     private boolean hasRestartAutomationState() {
-        return restartHandlingArmed
-            || awaitPostRejoinAfterReconnect
-            || postRejoinStartedForCurrentRestart
-            || pendingPostRejoinActions
-            || postRejoinRoutineRetryScheduled
-            || awaitingCrackedLoginSuccess
-            || restartRoutineStage != RestartRoutineStage.None
-            || activePostRejoinPathPurpose != PostRejoinPathPurpose.None
-            || pendingHighwayBuilderEnableAfterRestore
-            || pendingHighwayBuilderDirection != null
-            || pendingHighwayBuilderEnableAtMs != 0L
-            || pendingBuilderDirectionProbeFailures != 0
-            || postRejoinPathCommands.length != 0
-            || activePostRejoinPathCommandIndex != -1
-            || nextPostRejoinPathCommandIndex != 0
-            || waitingForPostRejoinCommandDelay
-            || waitingForPostRejoinPathStart
-            || waitingForPostRejoinCompletionMessage
-            || postRejoinStepStartCaptured
-            || postRejoinPathStartupTicks != 0
-            || postRejoinPathTimeoutTicks != 0
+        return activeReconnectCycleId != 0L
+            || restartEvidenceGateCycleId != 0L
+            || delayedMainServerResumePending
+            || delayedMainServerResumeCycleId != 0L
+            || delayedMainServerResumeAtMs != 0L
+            || restartRecoveryActive
+            || restartBuilderDisableGraceScheduled
             || restartDisconnectEvidenceArmed
-            || crackedLoginPromptSeenThisCycle
-            || crackedLoginSuccessSeenThisCycle;
+            || restartScreenshotScheduled
+            || postJoinModuleStateCaptured
+            || restartModuleStateSnapshotTaken
+            || nonRestartHardFailArmed
+            || unresolvedMainServerDisconnectCandidate
+            || deferRestartScreenshotUntilReconnect
+            || deferredRestartScreenshotAfterReconnectPending
+            || pendingDisconnectScreenEvidenceCheck
+            || pendingDisconnectScreenEvidenceUntilMs != 0L;
     }
 
-    private void resetReconnectAutomationState(boolean disableAutoReconnect) {
+    private void resetReconnectAutomationState(boolean clearCycleBinding) {
         restartScreenshotScheduled = false;
-        pendingPostRejoinActions = false;
-        postRejoinActionsAtMs = 0L;
-        awaitingCrackedLoginSuccess = false;
-        postRejoinRoutineRetryScheduled = false;
-        postRejoinRoutineRetryAtMs = 0L;
-        postRejoinRoutineRetryCount = 0;
+        clearPendingRestartBuilderDisableGrace();
         postJoinModuleStateCaptured = false;
         timerWasActiveBeforePostJoin = false;
         speedWasActiveBeforePostJoin = false;
-        suppressAutoReconnectAfterHardFail = false;
-        awaitPostRejoinAfterReconnect = false;
         nonRestartHardFailArmed = false;
         unresolvedMainServerDisconnectCandidate = false;
         deferRestartScreenshotUntilReconnect = false;
         deferredRestartScreenshotAfterReconnectPending = false;
         pendingDisconnectScreenEvidenceCheck = false;
         pendingDisconnectScreenEvidenceUntilMs = 0L;
-        restartHandlingArmed = false;
-        postRejoinStartedForCurrentRestart = false;
         restartModuleStateSnapshotTaken = false;
-        restartRoutineStage = RestartRoutineStage.None;
-        activePostRejoinPathPurpose = PostRejoinPathPurpose.None;
-        pendingHighwayBuilderEnableAfterRestore = false;
-        pendingHighwayBuilderDirection = null;
-        pendingHighwayBuilderEnableAtMs = 0L;
-        pendingBuilderDirectionProbeFailures = 0;
-        crackedLoginPromptSeenThisCycle = false;
-        crackedLoginSuccessSeenThisCycle = false;
         internalTimerSpeedToggleInProgress = false;
         clearRestartDisconnectEvidence();
-        clearPostRejoinFlowState();
         clearNonRestartHardFailSignal();
         clearRestartHardFailSignal();
-
-        if (disableAutoReconnect) disableMeteorAutoReconnect(false);
+        clearRestartRecoveryState("reset-automation", false, clearCycleBinding);
     }
 
-    private void clearRestartAutomationState(String reason, boolean disableAutoReconnect, boolean includeWarning) {
+    private void clearRestartAutomationState(String reason, boolean disarmService, boolean clearCycleBinding) {
         boolean hadState = hasRestartAutomationState();
-        resetReconnectAutomationState(disableAutoReconnect);
+        resetReconnectAutomationState(clearCycleBinding);
+        if (disarmService) reconnectService().disarmReconnect("THMHwyMonitor clearRestartAutomationState: " + reason);
 
         if (!hadState) return;
-        runtimeFlag("restartAutomationStateCleared:" + reason);
-        traceExec("restartAutomationStateCleared:" + reason);
-        if (includeWarning) warning("Restart automation state cleared: %s", reason);
+        info("Restart automation state cleared: %s", reason);
     }
 
     private void ensureHighwayBuilderDisabledForRestart(String source, boolean verbose) {
         HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
         if (builder == null || !builder.isActive()) return;
 
-        builder.disable();
+        if (!builder.prepareForMonitorReconnectPause(activeReconnectCycleId)) {
+            enterReconnectSafetyStop("Unable to establish reconnect baseline before restart pause.");
+            return;
+        }
+
+        builder.disableForMonitorRealignPause();
         boolean disabled = !builder.isActive();
-        runtimeFlag("forceBuilderOff:" + source + ":" + (disabled ? "ok" : "failed"));
 
         if (disabled) {
             if (verbose) info("Disabled THM HighwayBuilder during restart handling (%s).", source);
@@ -1042,72 +892,51 @@ public class THMHwyMonitor extends Module {
     }
 
     private void handleRestartDetectionTrigger() {
-        boolean deferScreenshot = deferRestartScreenshotUntilReconnect;
         deferRestartScreenshotUntilReconnect = false;
-
-        if (!restartAutomationAllowed()) {
-            deferredRestartScreenshotAfterReconnectPending = false;
-            runtimeFlag("restartTriggerBlocked:autoRestartHandlingDisabled");
-            traceExec("restartTriggerBlocked:autoRestartHandlingDisabled");
-            clearRestartAutomationState("restart trigger blocked (toggle off)", true, false);
+        if (!autoRestartHandlingEnabled()) {
+            info("Restart evidence detected, but auto-reconnect is disabled. Skipping reconnect arming.");
             return;
         }
 
-        if (restartHandlingArmed) return;
-        traceExec("handleRestartDetectionTrigger");
+        clearRestartRecoveryState("restart-detection-prep", false, false);
+        deferredRestartScreenshotAfterReconnectPending = false;
+        scheduleRestartScreenshot(0, "restart-detected");
+        scheduleRestartBuilderDisableAndArmAfterGrace();
+    }
 
-        // Reconnect handling is delegated to Meteor AutoReconnect.
-        restartHandlingArmed = true;
-        postRejoinStartedForCurrentRestart = false;
-        restartModuleStateSnapshotTaken = postJoinModuleStateCaptured || timerWasActiveBeforePostJoin || speedWasActiveBeforePostJoin;
-        restartRoutineStage = crackedAccountMode.get() ? RestartRoutineStage.CrackedAuthLoginLobby : RestartRoutineStage.MainLobbyTransferRoutine;
-        activePostRejoinPathPurpose = PostRejoinPathPurpose.None;
-        pendingHighwayBuilderEnableAfterRestore = false;
-        pendingHighwayBuilderDirection = null;
-        pendingHighwayBuilderEnableAtMs = 0L;
-        pendingBuilderDirectionProbeFailures = 0;
-        suppressAutoReconnectAfterHardFail = false;
-        awaitPostRejoinAfterReconnect = true;
-        crackedLoginPromptSeenThisCycle = false;
-        crackedLoginSuccessSeenThisCycle = false;
-        clearPostRejoinFlowState();
-        ensureHighwayBuilderDisabledForRestart("restart detection", true);
-        info(
-            "Restart handling armed. awaitPostRejoin=%s, autoRestartHandling=%s, autoScreenshot=%s",
-            awaitPostRejoinAfterReconnect,
-            autoRestartHandlingEnabled(),
-            autoRestartScreenshotEnabled()
-        );
-        if (autoRestartHandlingEnabled()) scheduleRestartReconnect();
-        if (autoRestartScreenshotEnabled()) {
-            if (deferScreenshot) {
-                deferredRestartScreenshotAfterReconnectPending = true;
-                runtimeFlag("scheduleRestartScreenshot:deferredUntilReconnect");
-                info("Restart screenshot deferred until successful reconnect and THM HighwayBuilder-off confirmation.");
-            } else {
-                deferredRestartScreenshotAfterReconnectPending = false;
-                scheduleRestartScreenshot();
-            }
+    private void handleAutoReconnectToggleTransitions() {
+        boolean currentToggle = autoReconnect.get();
+        if (currentToggle == previousAutoReconnectToggleState) return;
+
+        if (currentToggle) {
+            long cycleId = armReconnectCycle("toggle-on", false);
+            info("Auto-reconnect enabled. Armed reconnect cycle %d.", cycleId);
         } else {
-            deferredRestartScreenshotAfterReconnectPending = false;
+            clearRestartAutomationState("toggle-off", true, true);
+            info("Auto-reconnect disabled. Reconnect cycle and policy state were cleared.");
         }
-        runtimeFlag("restartHandlingArmed");
-        traceExec("handleRestartDetectionTrigger:armed");
+
+        previousAutoReconnectToggleState = currentToggle;
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        traceExec("onTick");
         handleReconnectAutomationTickLane();
 
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.world == null) {
+            clearPendingAlignmentGateRequest();
+            return;
+        }
 
         if (recoveryPhase != RecoveryPhase.None) {
             handleRecoveryPhase();
             return;
         }
 
-        if (!autoRecover.get()) return;
+        if (!autoRecover.get()) {
+            clearPendingAlignmentGateRequest();
+            return;
+        }
 
         if (cooldownTicks > 0) {
             cooldownTicks--;
@@ -1123,11 +952,102 @@ public class THMHwyMonitor extends Module {
             if (mc.player != null) lastReliableRecoveryYaw = mc.player.getYaw();
             trackedLine = null;
             trackedDirection = "";
+            clearPendingAlignmentGateRequest();
+            return;
+        }
+
+        if (builder.shouldSuppressThmHwyMonitorMisalignmentRecovery()) {
+            clearPendingAlignmentGateRequest();
             return;
         }
 
         int recoveryGoalY = isPavingMode(builder) ? 120 : 119;
         float recoveryDirectionYaw = resolveRecoveryDirectionYawForInference(builder);
+        RecoveryTarget target = computeCurrentRecoveryTarget(recoveryDirectionYaw, recoveryGoalY);
+        if (target == null) {
+            clearPendingAlignmentGateRequest();
+            return;
+        }
+
+        double yDelta = recoveryYDelta(mc.player.getY(), recoveryGoalY);
+        boolean yAligned = Math.abs(yDelta) <= Y_ALIGNMENT_TOLERANCE;
+        if (target.distance() <= WORKING_LINE_TOLERANCE && yAligned) {
+            clearPendingAlignmentGateRequest();
+            return;
+        }
+
+        if (!tryPassMainServerAlignmentGate()) return;
+
+        if (!isActive() || mc.player == null || mc.world == null) {
+            clearPendingAlignmentGateRequest();
+            return;
+        }
+
+        builder = Modules.get().get(HighwayBuilderTHM.class);
+        if (builder == null || !builder.isActive()) {
+            trackedLine = null;
+            trackedDirection = "";
+            clearPendingAlignmentGateRequest();
+            return;
+        }
+
+        if (builder.shouldSuppressThmHwyMonitorMisalignmentRecovery()) {
+            clearPendingAlignmentGateRequest();
+            return;
+        }
+
+        recoveryGoalY = isPavingMode(builder) ? 120 : 119;
+        recoveryDirectionYaw = resolveRecoveryDirectionYawForInference(builder);
+        target = computeCurrentRecoveryTarget(recoveryDirectionYaw, recoveryGoalY);
+        if (target == null) {
+            clearPendingAlignmentGateRequest();
+            return;
+        }
+
+        yDelta = recoveryYDelta(mc.player.getY(), recoveryGoalY);
+        yAligned = Math.abs(yDelta) <= Y_ALIGNMENT_TOLERANCE;
+        if (target.distance() <= WORKING_LINE_TOLERANCE && yAligned) {
+            clearPendingAlignmentGateRequest();
+            return;
+        }
+
+        String yOffset = yAligned ? "" : String.format(Locale.ROOT, ", Y %+.2f", yDelta);
+        beginRecoveryRoutine(builder, target, yOffset, recoveryDirectionYaw);
+    }
+
+    @EventHandler
+    private void onRender2D(Render2DEvent event) {
+        if (!postRejoinDirectionGateActive) return;
+        if (mc == null || mc.textRenderer == null) return;
+
+        DrawContext context = event.drawContext;
+        List<String> lines = new ArrayList<>();
+        lines.add("THMHwyMonitor reconnect blocked");
+        lines.add(String.format(Locale.ROOT, "Retry %d/%d", postRejoinDirectionRetryCount, POST_REJOIN_DIRECTION_RETRY_LIMIT));
+        lines.add("Reason: " + postRejoinDirectionBlockReason);
+        if (!postRejoinDirectionBlockSummary.isBlank()) lines.add(postRejoinDirectionBlockSummary);
+
+        int x = 8;
+        int y = 8;
+        int width = 0;
+        for (String line : lines) width = Math.max(width, mc.textRenderer.getWidth(line));
+
+        int lineHeight = mc.textRenderer.fontHeight + 2;
+        int height = (lines.size() * lineHeight) + 6;
+        context.fill(x - 4, y - 4, x + width + 6, y + height, 0xCC000000);
+
+        int drawY = y;
+        for (String line : lines) {
+            context.drawText(mc.textRenderer, line, x, drawY, 0xFFFFAA00, false);
+            drawY += lineHeight;
+        }
+    }
+
+    private RecoveryTarget computeCurrentRecoveryTarget(float recoveryDirectionYaw, int recoveryGoalY) {
+        if (mc == null || mc.player == null) return null;
+        HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
+        String preferredDirection = normalizeDirection(directionCode(builder != null ? builder.getWorkingDirection() : null));
+        if (preferredDirection.isEmpty() || Float.isNaN(recoveryDirectionYaw)) return null;
 
         RecoveryTarget target = determineRecoveryTarget(
             mc.player.getX(),
@@ -1136,13 +1056,12 @@ public class THMHwyMonitor extends Module {
             recoveryGoalY,
             trueCenterMode.get(),
             trackedLine,
-            trackedDirection
+            preferredDirection
         );
-        if (target == null) return;
+        if (target == null) return null;
 
-        if (trackedLine == null && target.distance() <= ALIGN_TOLERANCE) {
+        if (trackedLine == null && target.distance() <= WORKING_LINE_TOLERANCE) {
             trackedLine = target.line();
-            trackedDirection = target.direction();
         }
 
         if (trackedLine != null) {
@@ -1153,18 +1072,71 @@ public class THMHwyMonitor extends Module {
                 recoveryGoalY,
                 trueCenterMode.get(),
                 trackedLine,
-                trackedDirection
+                preferredDirection
             );
-            if (target == null) return;
+            if (target == null) return null;
         }
 
-        double yDelta = recoveryYDelta(mc.player.getY(), recoveryGoalY);
-        boolean yAligned = Math.abs(yDelta) <= ALIGN_TOLERANCE;
-        String yOffset = yAligned ? "" : String.format(Locale.ROOT, ", Y %+.2f", yDelta);
+        trackedDirection = target.direction();
+        return target;
+    }
 
-        if (target.distance() <= ALIGN_TOLERANCE && yAligned) return;
+    private boolean tryPassMainServerAlignmentGate() {
+        if (pendingAlignmentGateFuture == null) {
+            startMainServerAlignmentGateRequest();
+            return false;
+        }
 
-        beginRecoveryRoutine(builder, target, yOffset, recoveryDirectionYaw);
+        CompletableFuture<ServerState> future = pendingAlignmentGateFuture;
+        long attemptId = pendingAlignmentGateAttemptId;
+        if (future == null || attemptId <= 0L) {
+            clearPendingAlignmentGateRequest();
+            return false;
+        }
+
+        if (!future.isDone()) return false;
+
+        ServerState state = consumeMainServerAlignmentGateResult(attemptId);
+        if (state != ServerState.MAIN_SERVER) {
+            cooldownTicks = 0;
+            return false;
+        }
+
+        return true;
+    }
+
+    private void startMainServerAlignmentGateRequest() {
+        if (pendingAlignmentGateFuture != null) return;
+
+        long attemptId = nextAlignmentGateAttemptId++;
+        pendingAlignmentGateAttemptId = attemptId;
+        try {
+            pendingAlignmentGateFuture = ServerStatusHandler.getInstance().returnStateAsync(ALIGNMENT_GATE_TIMEOUT_MS);
+        } catch (Throwable ignored) {
+            clearPendingAlignmentGateRequest();
+        }
+    }
+
+    private ServerState consumeMainServerAlignmentGateResult(long expectedAttemptId) {
+        if (pendingAlignmentGateFuture == null) return ServerState.UNKNOWN;
+        if (pendingAlignmentGateAttemptId != expectedAttemptId) {
+            return ServerState.UNKNOWN;
+        }
+
+        CompletableFuture<ServerState> future = pendingAlignmentGateFuture;
+        clearPendingAlignmentGateRequest();
+        try {
+            ServerState state = future.getNow(ServerState.UNKNOWN);
+            if (state == null) state = ServerState.UNKNOWN;
+            return state;
+        } catch (Throwable ignored) {
+            return ServerState.UNKNOWN;
+        }
+    }
+
+    private void clearPendingAlignmentGateRequest() {
+        pendingAlignmentGateFuture = null;
+        pendingAlignmentGateAttemptId = 0L;
     }
 
     private void beginRecoveryRoutine(HighwayBuilderTHM builder, RecoveryTarget target, String yOffset, float recoveryDirectionYaw) {
@@ -1193,69 +1165,104 @@ public class THMHwyMonitor extends Module {
     }
 
     private void handleReconnectAutomationTickLane() {
-        if (!reconnectAutomationEnabled()) {
-            if (hasRestartAutomationState()) resetReconnectAutomationState(false);
-            return;
-        }
+        handleAutoReconnectToggleTransitions();
+        refreshReconnectBaselineValidity();
+        maybeRunDelayedMainServerResumeFinalization();
+        maybeRunPostRejoinDirectionGate();
 
-        boolean connectedNow = isSuccessfullyConnectedToServer();
-        handlePendingDisconnectScreenEvidenceCheck(connectedNow);
-        boolean connectedTransitionToConnected = connectedNow && !wasConnectedLastTick;
-        if (connectedNow != wasConnectedLastTick) {
-            runtimeFlag("tickConnectedTransition:" + (wasConnectedLastTick ? "connected->disconnected" : "disconnected->connected"));
-        }
-
-        if (connectedTransitionToConnected && suppressAutoReconnectAfterHardFail) {
-            suppressAutoReconnectAfterHardFail = false;
-            nonRestartHardFailArmed = false;
-            clearNonRestartHardFailSignal();
-            info("Successful server reconnection detected (tick transition). AutoReconnect suppression cleared.");
-            runtimeFlag("clearSuppression:tickConnectedTransition");
-        }
-
-        if (connectedNow && restartHandlingArmed && awaitPostRejoinAfterReconnect) {
-            info("Server rejoin detected (tick fallback).");
-            runtimeFlag("tickFallbackDetected");
-            tryStartPostRejoinAfterReconnect("tick fallback");
-        }
-        wasConnectedLastTick = connectedNow;
+        boolean liveConnectedNow = hasLiveServerConnection();
+        clearStaleDisconnectedScreenIfLiveConnected();
+        handlePendingDisconnectScreenEvidenceCheck(liveConnectedNow);
+        wasConnectedLastTick = liveConnectedNow;
 
         if (consumeNonRestartHardFailSignal()) {
             nonRestartHardFailArmed = true;
-            disableAutoReconnectForNonRestartHardFail("HighwayBuilder signaled non-restart hard fail");
+            handleDetectedNonRestartHardFail("signal");
         }
 
-        if (restartHandlingArmed || awaitPostRejoinAfterReconnect || pendingHighwayBuilderEnableAfterRestore) {
+        if (reconnectService().isReconnectArmed() && restartRecoveryActive) {
             ensureHighwayBuilderDisabledForRestart("tick guard", false);
         }
 
-        handleRestartAutomationTick();
-        handleDeferredHighwayBuilderEnableAfterRestore();
+        if (liveConnectedNow) maybeTakeDeferredRestartScreenshotAfterReconnect("tick");
+    }
 
-        // Do not clear non-restart suppression from tick while still on the same connection.
-        // Suppression is cleared on GameJoinedEvent after an actual rejoin.
-        if (!suppressAutoReconnectAfterHardFail) configureMeteorAutoReconnect(true, false);
-        else disableMeteorAutoReconnect(false);
+    private boolean hasLiveServerConnection() {
+        return mc != null
+            && mc.player != null
+            && mc.world != null
+            && mc.getNetworkHandler() != null
+            && mc.getNetworkHandler().getConnection() != null
+            && mc.getNetworkHandler().getConnection().isOpen();
+    }
+
+    private boolean reconnectRecoveryInFlight() {
+        if (activeReconnectCycleId == 0L) return false;
+
+        return reconnectService().isReconnectArmed()
+            || restartBuilderDisableGraceScheduled
+            || restartRecoveryActive
+            || restartEvidenceGateCycleId == activeReconnectCycleId
+            || delayedMainServerResumePending
+            || delayedMainServerResumeCycleId == activeReconnectCycleId
+            || postRejoinDirectionGateActive
+            || deferredRestartScreenshotAfterReconnectPending;
+    }
+
+    private void clearStaleDisconnectedScreenIfLiveConnected() {
+        if (!hasLiveServerConnection()) return;
+        if (!(mc.currentScreen instanceof DisconnectedScreen)) return;
+        info("Clearing stale DisconnectedScreen while client is already live in-world.");
+        mc.setScreen(null);
+    }
+
+    private void clearRestartAutomationStateForTerminalStop(String reason) {
+        boolean preserveIntentionalSafetyDisconnect = intentionalSafetyDisconnectArmed;
+        boolean preserveDeferredDisable = disableMonitorAfterIntentionalSafetyDisconnect;
+        clearRestartAutomationState(reason, true, true);
+        intentionalSafetyDisconnectArmed = preserveIntentionalSafetyDisconnect;
+        disableMonitorAfterIntentionalSafetyDisconnect = preserveDeferredDisable;
+    }
+
+    private void refreshReconnectBaselineValidity() {
+        HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
+        if (builder == null) return;
+        builder.refreshReconnectBaselineValidity(activeReconnectCycleId);
+    }
+
+    private void maybeRunDelayedMainServerResumeFinalization() {
+        if (!delayedMainServerResumePending) return;
+
+        if (!isActive()) {
+            clearDelayedMainServerResumeState();
+            return;
+        }
+
+        if (delayedMainServerResumeCycleId <= 0L || delayedMainServerResumeCycleId != activeReconnectCycleId) {
+            clearDelayedMainServerResumeState();
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        if (now < delayedMainServerResumeAtMs) return;
+        if (mc == null || mc.player == null || mc.world == null) return;
+
+        long cycleId = delayedMainServerResumeCycleId;
+        String contextTag = delayedMainServerResumeContext;
+        clearDelayedMainServerResumeState();
+
+        info(
+            "Reconnect MAIN_SERVER delay complete (%s). Entering reconnect direction gate (cycle %d).",
+            contextTag,
+            cycleId
+        );
+        beginPostRejoinDirectionGate(cycleId, contextTag);
     }
 
     private float resolveRecoveryDirectionYawForInference(HighwayBuilderTHM builder) {
-        if (mc == null || mc.player == null) return Float.NaN;
-
-        float liveYaw = mc.player.getYaw();
-        float candidateYaw = liveYaw;
-        if (!Float.isNaN(preTickYawSnapshot)) {
-            long ageMs = System.currentTimeMillis() - preTickYawSnapshotAtMs;
-            if (ageMs >= 0L && ageMs <= 500L) candidateYaw = preTickYawSnapshot;
-        }
-
-        if (isLikelyCenterYawOverride(builder, candidateYaw)) {
-            if (!Float.isNaN(lastReliableRecoveryYaw)) return lastReliableRecoveryYaw;
-            if (builder != null && builder.dir != null) return builder.dir.yaw;
-            return liveYaw;
-        }
-
-        lastReliableRecoveryYaw = candidateYaw;
-        return candidateYaw;
+        if (builder == null) return Float.NaN;
+        HorizontalDirection direction = builder.getWorkingDirection();
+        return direction == null ? Float.NaN : direction.yaw;
     }
 
     private boolean isLikelyCenterYawOverride(HighwayBuilderTHM builder, float yaw) {
@@ -1396,6 +1403,7 @@ public class THMHwyMonitor extends Module {
         baritoneTimeoutTicks = 0;
         recoveryPhase = RecoveryPhase.None;
         recoveryYawBeforeMove = Float.NaN;
+        clearPendingAlignmentGateRequest();
         if (recoveryModulesPaused) resumePausedModulesAfterRecovery();
     }
 
@@ -1404,7 +1412,7 @@ public class THMHwyMonitor extends Module {
         resumePausedModulesAfterRecovery();
 
         if (builder != null && builder.isActive()) {
-            builder.disable();
+            builder.disableForMonitorRealignPause();
             if (builder.isActive()) warning("Failed to toggle THM HighwayBuilder off after excessive misalignment.");
             else info("Toggled THM HighwayBuilder off after excessive misalignment.");
         }
@@ -1448,6 +1456,7 @@ public class THMHwyMonitor extends Module {
 
         recoveryPausedModules.add(module);
         if (module instanceof HighwayBuilderTHM builder) {
+            builder.preserveCenterSpeedBaselineForMonitorRecovery("thm-monitor-pause");
             builder.disableForMonitorRealignPause();
         } else {
             module.disable();
@@ -1614,7 +1623,7 @@ public class THMHwyMonitor extends Module {
             }
         }
 
-        if (bestDistance <= ALIGN_TOLERANCE) {
+        if (bestDistance <= WORKING_LINE_TOLERANCE) {
             if ("Ring".equals(bestHighway) || "Diamond".equals(bestHighway)) {
                 String facing = yawToDirection(playerYaw);
                 bestDirection = bestDirection + "->" + facing;
@@ -1657,7 +1666,7 @@ public class THMHwyMonitor extends Module {
         }
 
         String direction = normalizeDirection(preferredDirection);
-        if (!isDirectionCompatible(line, direction)) direction = inferDirectionForLine(line, playerYaw);
+        if (!isDirectionCompatible(line, direction)) return null;
 
         double distance = Math.hypot(playerX - targetX, playerZ - targetZ);
         int goalX = floorToBlock(targetX);
@@ -1711,612 +1720,121 @@ public class THMHwyMonitor extends Module {
         ScreenshotRecorder.saveScreenshot(mc.runDirectory, mc.getFramebuffer(), message -> info(message.getString()));
     }
 
-    private void handleRestartAutomationTick() {
-        long now = System.currentTimeMillis();
+    private void beginPostRejoinDirectionGate(long cycleId, String contextTag) {
+        if (!isActive()) return;
+        if (cycleId <= 0L || cycleId != activeReconnectCycleId) return;
 
-        if (postRejoinRoutineRetryScheduled) {
-            if (isSuccessfullyConnectedToServer()) {
-                postRejoinRoutineRetryScheduled = false;
-                postRejoinRoutineRetryAtMs = 0L;
-                postRejoinRoutineRetryCount = 0;
-                completePostRejoinSuccessFlow();
-            } else if (now >= postRejoinRoutineRetryAtMs) {
-                runPostRejoinRoutineRetry();
-                return;
-            }
-        }
-
-        if (pendingPostRejoinActions && mc.player != null && mc.world != null) {
-            if (postRejoinActionsAtMs == 0L) {
-                postRejoinActionsAtMs = now + POST_REJOIN_ACTION_DELAY_MS;
-                return;
-            }
-
-            if (now < postRejoinActionsAtMs) return;
-
-            captureAndDisablePostJoinModules();
-            runPostRejoinActions();
-            return;
-        }
-
-        handlePostRejoinPathTick();
+        postRejoinDirectionGateActive = true;
+        postRejoinDirectionRetryCount = 0;
+        postRejoinDirectionNextAttemptAtMs = 0L;
+        postRejoinDirectionBlockReason = "waiting";
+        postRejoinDirectionBlockSummary = contextTag == null ? "" : contextTag;
+        postRejoinBlockedScreenshotTaken = false;
+        postRejoinTerminalScreenshotTaken = false;
+        postRejoinLastCompleteProbeWinner = null;
     }
 
-    private void runPostRejoinActions() {
-        traceExec("runPostRejoinActions:begin");
-        postRejoinActionsAtMs = 0L;
-        pendingPostRejoinActions = false;
-        resetPostRejoinPathState();
-        awaitingCrackedLoginSuccess = false;
-
-        if (crackedAccountMode.get() && restartRoutineStage == RestartRoutineStage.CrackedAuthLoginLobby) {
-            if (crackedLoginSuccessSeenThisCycle) {
-                restartRoutineStage = RestartRoutineStage.CrackedLoginLobbyTransferRoutine;
-                info("Cracked login already confirmed for this cycle. Skipping /login command and starting path routine.");
-                traceExec("runPostRejoinActions:crackedLoginAlreadyConfirmed");
-                startPathSequenceForCurrentRestartStage();
-                return;
-            }
-
-            if (!crackedLoginPromptSeenThisCycle) {
-                info("Cracked login prompt not detected yet. Delaying /login command.");
-                traceExec("runPostRejoinActions:waitingForLoginPrompt");
-                pendingPostRejoinActions = true;
-                postRejoinActionsAtMs = System.currentTimeMillis() + POST_REJOIN_ACTION_DELAY_MS;
-                return;
-            }
-
-            String crackedPassword = configuredCrackedPassword();
-            if (crackedPassword.isEmpty()) {
-                disconnectAndDisableHwyMonitor("No login password found for cracked account under THM tab, please enter password in field and try again");
-                return;
-            }
-            if (mc.getNetworkHandler() == null) {
-                warning("Network handler unavailable during cracked login command. Delaying retry.");
-                pendingPostRejoinActions = true;
-                postRejoinActionsAtMs = System.currentTimeMillis() + POST_REJOIN_ACTION_DELAY_MS;
-                return;
-            }
-            mc.getNetworkHandler().sendChatCommand("login " + crackedPassword);
-            info("Sent cracked-account /login command using THM Addon tab password.");
-
-            awaitingCrackedLoginSuccess = true;
-            info("Waiting for cracked-account login confirmation message before pathing.");
-            traceExec("runPostRejoinActions:awaitingCrackedLoginSuccess");
-            return;
-        }
-
-        traceExec("runPostRejoinActions:startPathSequence");
-        startPathSequenceForCurrentRestartStage();
-    }
-
-    private void startPostRejoinPathSequence(String... commands) {
-        if (!BaritoneUtils.IS_AVAILABLE) {
-            warning("Post-rejoin pathing skipped: Baritone not available.");
-            return;
-        }
-
-        IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
-        if (baritone == null) {
-            warning("Post-rejoin pathing skipped: primary Baritone instance unavailable.");
-            return;
-        }
-
-        int count = 0;
-        for (String command : commands) {
-            if (command != null && !command.trim().isEmpty()) count++;
-        }
-        if (count == 0) return;
-
-        postRejoinPathCommands = new String[count];
-        int i = 0;
-        for (String command : commands) {
-            if (command != null && !command.trim().isEmpty()) {
-                postRejoinPathCommands[i] = command.trim();
-                i++;
-            }
-        }
-
-        nextPostRejoinPathCommandIndex = 0;
-        activePostRejoinPathCommandIndex = -1;
-        waitingForPostRejoinCommandDelay = false;
-        postRejoinCommandDelayTicks = 0;
-        waitingForPostRejoinPathStart = false;
-        waitingForPostRejoinCompletionMessage = false;
-        postRejoinPathStartupTicks = 0;
-        postRejoinPathTimeoutTicks = 0;
-        tryBeginNextPostRejoinPathCommand(baritone);
-    }
-
-    private void handlePostRejoinPathTick() {
-        if (postRejoinPathCommands.length == 0) return;
-        if (mc.player == null || mc.world == null) return;
-
-        if (!BaritoneUtils.IS_AVAILABLE) {
-            warning("Post-rejoin pathing aborted: Baritone not available.");
-            resetPostRejoinPathState();
-            return;
-        }
-
-        IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
-        if (baritone == null) {
-            warning("Post-rejoin pathing aborted: primary Baritone instance unavailable.");
-            resetPostRejoinPathState();
-            return;
-        }
-
-        if (waitingForPostRejoinCommandDelay) {
-            if (postRejoinCommandDelayTicks > 0) {
-                postRejoinCommandDelayTicks--;
-                return;
-            }
-
-            if (activePostRejoinPathCommandIndex < 0 || activePostRejoinPathCommandIndex >= postRejoinPathCommands.length) {
-                warning("Post-rejoin pathing aborted: invalid step index.");
-                resetPostRejoinPathState();
-                return;
-            }
-
-            String command = postRejoinPathCommands[activePostRejoinPathCommandIndex];
-            baritone.getPathingBehavior().cancelEverything();
-            if (mc.player != null) {
-                postRejoinStepStartX = mc.player.getX();
-                postRejoinStepStartZ = mc.player.getZ();
-                postRejoinStepStartCaptured = true;
-            } else {
-                postRejoinStepStartCaptured = false;
-            }
-            baritone.getCommandManager().execute(command);
-            waitingForPostRejoinCommandDelay = false;
-            waitingForPostRejoinPathStart = true;
-            waitingForPostRejoinCompletionMessage = true;
-            postRejoinPathStartupTicks = POST_REJOIN_PATH_STARTUP_TICKS;
-            postRejoinPathTimeoutTicks = POST_REJOIN_PATH_TIMEOUT_TICKS;
-            info("Executed post-rejoin path step %d/%d: %s", activePostRejoinPathCommandIndex + 1, postRejoinPathCommands.length, command);
-            return;
-        }
-
-        if (postRejoinPathTimeoutTicks > 0) postRejoinPathTimeoutTicks--;
-        if (postRejoinPathTimeoutTicks == 0) {
-            baritone.getPathingBehavior().cancelEverything();
-            warning("Post-rejoin path step %d/%d timed out waiting for completion message. Aborting remaining steps.",
-                activePostRejoinPathCommandIndex + 1, postRejoinPathCommands.length);
-            resetPostRejoinPathState();
-            return;
-        }
-
-        boolean isPathing = baritone.getPathingBehavior().isPathing();
-
-        if (waitingForPostRejoinPathStart) {
-            if (isPathing) {
-                waitingForPostRejoinPathStart = false;
-                info("Post-rejoin path step %d/%d started.", activePostRejoinPathCommandIndex + 1, postRejoinPathCommands.length);
-            } else if (postRejoinPathStartupTicks > 0) {
-                postRejoinPathStartupTicks--;
-            }
-        }
-
-        if (waitingForPostRejoinCompletionMessage && hasPostRejoinCoordinateSuccess()) {
-            waitingForPostRejoinCompletionMessage = false;
-            info("Detected post-rejoin coordinate movement >= %.0f blocks for step %d/%d. Treating as completed.",
-                POST_REJOIN_COORD_SUCCESS_DISTANCE, activePostRejoinPathCommandIndex + 1, postRejoinPathCommands.length);
-            if (isPathing) {
-                baritone.getPathingBehavior().cancelEverything();
-                isPathing = false;
-            }
-        }
-
-        if (waitingForPostRejoinCompletionMessage) return;
-        if (isPathing) return;
-
-        info("Post-rejoin path step %d/%d completed.", activePostRejoinPathCommandIndex + 1, postRejoinPathCommands.length);
-        tryBeginNextPostRejoinPathCommand(baritone);
-    }
-
-    private void tryBeginNextPostRejoinPathCommand(IBaritone baritone) {
-        if (nextPostRejoinPathCommandIndex >= postRejoinPathCommands.length) {
-            info("Post-rejoin path sequence completed.");
-
-            if (activePostRejoinPathPurpose == PostRejoinPathPurpose.CrackedLoginLobbyTransferRoutine) {
-                resetPostRejoinPathState();
-                if (restartHandlingArmed) {
-                    restartRoutineStage = RestartRoutineStage.CrackedAwaitingMainLobbyReconnect;
-                    postRejoinStartedForCurrentRestart = false;
-                    awaitPostRejoinAfterReconnect = true;
-                    info("Cracked login-lobby transfer routine complete. Awaiting reconnect to main lobby.");
-                    runtimeFlag("crackedTransition:loginLobbyTransferComplete->awaitingMainLobbyReconnect");
-                }
-                return;
-            }
-
-            if (activePostRejoinPathPurpose == PostRejoinPathPurpose.MainLobbyTransferRoutine) {
-                resetPostRejoinPathState();
-                if (restartHandlingArmed) {
-                    restartRoutineStage = RestartRoutineStage.AwaitingMainServerReconnect;
-                    postRejoinStartedForCurrentRestart = false;
-                    awaitPostRejoinAfterReconnect = true;
-                    info("Main-lobby transfer routine complete. Awaiting reconnect to main server.");
-                    runtimeFlag("mainLobbyTransferComplete:awaitingMainServerReconnect");
-                }
-                return;
-            }
-
-            resetPostRejoinPathState();
-            return;
-        }
-
-        activePostRejoinPathCommandIndex = nextPostRejoinPathCommandIndex;
-        nextPostRejoinPathCommandIndex++;
-
-        waitingForPostRejoinCommandDelay = true;
-        postRejoinCommandDelayTicks = POST_REJOIN_PRE_STEP_DELAY_TICKS;
-        waitingForPostRejoinPathStart = false;
-        waitingForPostRejoinCompletionMessage = false;
-        postRejoinPathStartupTicks = 0;
-        postRejoinPathTimeoutTicks = 0;
-        info("Post-rejoin path step %d/%d scheduled in 2.0s.",
-            activePostRejoinPathCommandIndex + 1, postRejoinPathCommands.length);
-    }
-
-    private void verifyPostRejoinConnectionOrScheduleRetry() {
-        if (isSuccessfullyConnectedToServer()) {
-            traceExec("verifyPostRejoinConnectionOrScheduleRetry:connected");
-            postRejoinRoutineRetryScheduled = false;
-            postRejoinRoutineRetryAtMs = 0L;
-            postRejoinRoutineRetryCount = 0;
-            completePostRejoinSuccessFlow();
-            return;
-        }
-
-        traceExec("verifyPostRejoinConnectionOrScheduleRetry:retryScheduled");
-        postRejoinRoutineRetryScheduled = true;
-        postRejoinRoutineRetryAtMs = System.currentTimeMillis() + POST_REJOIN_RETRY_DELAY_MS;
-        warning("Post-join routine finished but server connection is not verified. Retrying in 10.0s.");
-    }
-
-    private void runPostRejoinRoutineRetry() {
-        traceExec("runPostRejoinRoutineRetry");
-        postRejoinRoutineRetryScheduled = false;
-        postRejoinRoutineRetryAtMs = 0L;
-
-        if (isSuccessfullyConnectedToServer()) {
-            postRejoinRoutineRetryCount = 0;
-            completePostRejoinSuccessFlow();
-            return;
-        }
-
-        postRejoinRoutineRetryCount++;
-        if (postRejoinRoutineRetryCount >= POST_REJOIN_MAX_RETRIES) {
-            warning("Post-join connection verification failed after %d retries. Disabling THM Hwy Monitor.",
-                POST_REJOIN_MAX_RETRIES);
-            disableAutoReconnectForNonRestartHardFail("post-join verification retry limit reached");
-            resetPostRejoinRetryState();
-            if (isActive()) toggle();
-            return;
-        }
-
-        if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null) {
-            warning("Still not connected. Retrying reconnect now (%d/%d).",
-                postRejoinRoutineRetryCount, POST_REJOIN_MAX_RETRIES);
-            scheduleRestartReconnect();
-            return;
-        }
-
-        info("Still not verified as connected. Retrying post-join path routine now (%d/%d).",
-            postRejoinRoutineRetryCount, POST_REJOIN_MAX_RETRIES);
-        startPathSequenceForCurrentRestartStage();
-    }
-
-    private String[] postRejoinRoutineCommands() {
-        return new String[] {POST_REJOIN_PORTAL_COMMAND};
-    }
-
-    private void startPathSequenceForCurrentRestartStage() {
-        if (!restartAutomationAllowed()) {
-            clearRestartAutomationState("startPathSequenceForCurrentRestartStage blocked: toggle off", true, false);
-            return;
-        }
-
-        traceExec("startPathSequenceForCurrentRestartStage:stage=" + restartRoutineStage);
-        if (crackedAccountMode.get() && restartRoutineStage == RestartRoutineStage.CrackedAuthLoginLobby) {
-            warning("Cracked login-lobby transfer routine cannot start before login success.");
-            traceExec("startPathSequenceForCurrentRestartStage:blockedCrackedAuth");
-            return;
-        }
-
-        if (crackedAccountMode.get() && restartRoutineStage == RestartRoutineStage.CrackedLoginLobbyTransferRoutine) {
-            activePostRejoinPathPurpose = PostRejoinPathPurpose.CrackedLoginLobbyTransferRoutine;
-        } else {
-            if (restartRoutineStage == RestartRoutineStage.AwaitingMainServerReconnect) {
-                warning("Main-lobby transfer routine already completed; waiting for main-server reconnect.");
-                traceExec("startPathSequenceForCurrentRestartStage:blockedAwaitingMainServerReconnect");
-                return;
-            }
-
-            activePostRejoinPathPurpose = PostRejoinPathPurpose.MainLobbyTransferRoutine;
-            if (restartRoutineStage == RestartRoutineStage.CrackedAwaitingMainLobbyReconnect) {
-                restartRoutineStage = RestartRoutineStage.MainLobbyTransferRoutine;
-                postRejoinStartedForCurrentRestart = false;
-                info("Cracked flow reached main lobby. Starting main-lobby transfer routine.");
-                runtimeFlag("crackedTransition:awaitingMainLobbyReconnect->mainLobbyTransferRoutine");
-            } else if (restartRoutineStage == RestartRoutineStage.None) {
-                restartRoutineStage = RestartRoutineStage.MainLobbyTransferRoutine;
-            }
-        }
-
-        startPostRejoinPathSequence(postRejoinRoutineCommands());
-    }
-
-    private void tryStartPostRejoinAfterReconnect(String source) {
-        if (!restartAutomationAllowed()) {
-            clearRestartAutomationState("tryStartPostRejoinAfterReconnect blocked: toggle off (" + source + ")", true, false);
-            return;
-        }
-
-        if (!restartHandlingArmed) return;
-        if (!awaitPostRejoinAfterReconnect) return;
-        traceExec("tryStartPostRejoinAfterReconnect:" + source + ":stage=" + restartRoutineStage);
-        maybeTakeDeferredRestartScreenshotAfterReconnect(source);
-
-        // Resume Timer/Speed state on each successful reconnect hop before any next-stage routine work.
-        restorePostJoinModuleStatesIfNeeded();
-
-        if (crackedAccountMode.get() && restartRoutineStage == RestartRoutineStage.CrackedAwaitingMainLobbyReconnect) {
-            restartRoutineStage = RestartRoutineStage.MainLobbyTransferRoutine;
-            postRejoinStartedForCurrentRestart = false;
-            runtimeFlag("crackedTransition:awaitingMainLobbyReconnect->mainLobbyTransferRoutine");
-        }
-
-        if (restartRoutineStage == RestartRoutineStage.AwaitingMainServerReconnect) {
-            awaitPostRejoinAfterReconnect = false;
-            postRejoinStartedForCurrentRestart = false;
-            info("Main-server reconnect detected (%s). Finalizing restart recovery.", source);
-            runtimeFlag("mainServerReconnectDetected:" + source);
-            completePostRejoinSuccessFlow();
-            return;
-        }
-
-        if (postRejoinStartedForCurrentRestart) {
-            runtimeFlag("tryStartPostRejoinAfterReconnectSkippedAlreadyStarted");
-            return;
-        }
-
-        ensureHighwayBuilderDisabledForRestart("post-rejoin start", false);
-        awaitPostRejoinAfterReconnect = false;
-        postRejoinStartedForCurrentRestart = true;
-        beginPostRejoinFlowAfterReconnect();
-        info("Successful server reconnection detected (%s). Starting post-rejoin routine.", source);
-        runtimeFlag("tryStartPostRejoinAfterReconnect:" + source);
-    }
-
-    private void rearmPostRejoinFlow(String source) {
-        if (!restartAutomationAllowed()) {
-            clearRestartAutomationState("rearmPostRejoinFlow blocked: toggle off (" + source + ")", true, false);
-            return;
-        }
-
-        traceExec("rearmPostRejoinFlow:" + source);
-        restartHandlingArmed = true;
-        postRejoinStartedForCurrentRestart = false;
-        restartModuleStateSnapshotTaken = postJoinModuleStateCaptured || timerWasActiveBeforePostJoin || speedWasActiveBeforePostJoin;
-        restartRoutineStage = crackedAccountMode.get() ? RestartRoutineStage.CrackedAuthLoginLobby : RestartRoutineStage.MainLobbyTransferRoutine;
-        activePostRejoinPathPurpose = PostRejoinPathPurpose.None;
-        awaitPostRejoinAfterReconnect = true;
-        crackedLoginPromptSeenThisCycle = false;
-        crackedLoginSuccessSeenThisCycle = false;
-        clearPostRejoinFlowState();
-        runtimeFlag("rearmPostRejoinFlow:" + source);
-        tryStartPostRejoinAfterReconnect(source);
-    }
-
-    private void completePostRejoinSuccessFlow() {
-        if (!restartAutomationAllowed()) {
-            clearRestartAutomationState("completePostRejoinSuccessFlow blocked: toggle off", true, false);
-            return;
-        }
-
-        info("Post-join connection verification succeeded.");
-        traceExec("completePostRejoinSuccessFlow:begin");
-        restartHandlingArmed = false;
-        postRejoinStartedForCurrentRestart = false;
-        restartRoutineStage = RestartRoutineStage.None;
-        activePostRejoinPathPurpose = PostRejoinPathPurpose.None;
-        crackedLoginPromptSeenThisCycle = false;
-        crackedLoginSuccessSeenThisCycle = false;
-        runtimeFlag("completePostRejoinSuccessFlow");
-
-        HorizontalDirection workingDirection = determinePostRejoinWorkingDirection();
-        if (workingDirection == null) traceExec("completePostRejoinSuccessFlow:direction=null");
-
-        if (!enableHighwayBuilderOnRestart.get()) {
-            pendingHighwayBuilderEnableAfterRestore = false;
-            pendingHighwayBuilderDirection = null;
-            pendingHighwayBuilderEnableAtMs = 0L;
-            pendingBuilderDirectionProbeFailures = 0;
-            info("Enable Highway Builder on restart is disabled. Skipping THM HighwayBuilder activation.");
-            return;
-        }
-
-        pendingHighwayBuilderEnableAfterRestore = true;
-        pendingHighwayBuilderDirection = workingDirection;
-        pendingHighwayBuilderEnableAtMs = 0L;
-        pendingBuilderDirectionProbeFailures = 0;
-        if (workingDirection == null) {
-            info("Post-rejoin routine complete. Highway direction is not ready yet; THM HighwayBuilder enable is armed and will retry after Timer/Speed restore.");
-            runtimeFlag("pendingBuilderEnable:directionPending");
-        } else {
-            info("Post-rejoin routine complete. THM HighwayBuilder will be enabled 6.0s after Timer/Speed restore.");
-        }
-        runtimeFlag("pendingBuilderEnable:armed");
-        traceExec("completePostRejoinSuccessFlow:pendingBuilderEnableArmed");
-    }
-
-    private void handleDeferredHighwayBuilderEnableAfterRestore() {
-        if (!restartAutomationAllowed()) {
-            if (pendingHighwayBuilderEnableAfterRestore) {
-                clearRestartAutomationState("deferred builder enable blocked: toggle off", true, false);
-            }
-            return;
-        }
-
-        if (!pendingHighwayBuilderEnableAfterRestore) return;
-        traceExec("handleDeferredHighwayBuilderEnableAfterRestore:pending");
-        if (!isSuccessfullyConnectedToServer()) {
-            // Require a full connected delay window; do not carry a previous timer across reconnects.
-            pendingHighwayBuilderEnableAtMs = 0L;
-            traceExec("handleDeferredHighwayBuilderEnableAfterRestore:notConnected");
-            return;
-        }
-        if (!isSupportedVanillaDimension()) {
-            pendingHighwayBuilderEnableAtMs = 0L;
-            runtimeFlag("pendingBuilderEnable:unsupportedDimension");
-            traceExec("handleDeferredHighwayBuilderEnableAfterRestore:unsupportedDimension");
-            return;
-        }
-
-        if (pendingHighwayBuilderEnableAtMs == 0L) {
-            pendingHighwayBuilderEnableAtMs = System.currentTimeMillis() + BUILDER_ENABLE_DELAY_MS;
-            runtimeFlag("pendingBuilderEnable:delayStarted");
-            traceExec("handleDeferredHighwayBuilderEnableAfterRestore:delayStarted");
-            return;
-        }
-        if (System.currentTimeMillis() < pendingHighwayBuilderEnableAtMs) return;
-
-        HorizontalDirection direction = pendingHighwayBuilderDirection;
-
-        if (!enableHighwayBuilderOnRestart.get()) {
-            pendingHighwayBuilderEnableAfterRestore = false;
-            pendingHighwayBuilderDirection = null;
-            pendingHighwayBuilderEnableAtMs = 0L;
-            pendingBuilderDirectionProbeFailures = 0;
-            info("Enable Highway Builder on restart was disabled before deferred activation.");
-            return;
-        }
-
-        if (direction == null) direction = determinePostRejoinWorkingDirection();
+    private void maybeRunPostRejoinDirectionGate() {
+        if (!postRejoinDirectionGateActive) return;
         if (!isActive()) {
-            pendingHighwayBuilderEnableAfterRestore = false;
-            pendingHighwayBuilderDirection = null;
-            pendingHighwayBuilderEnableAtMs = 0L;
-            pendingBuilderDirectionProbeFailures = 0;
-            warning("THM Hwy Monitor is not active. Skipping THM HighwayBuilder activation.");
+            clearPostRejoinDirectionGateState();
             return;
         }
-        if (direction == null) {
-            pendingBuilderDirectionProbeFailures++;
-            pendingHighwayBuilderEnableAtMs = 0L;
-            runtimeFlag("pendingBuilderEnable:directionNotReady:" + pendingBuilderDirectionProbeFailures);
-            traceExec("handleDeferredHighwayBuilderEnableAfterRestore:directionNull:" + pendingBuilderDirectionProbeFailures);
+        if (activeReconnectCycleId <= 0L || mc == null || mc.player == null || mc.world == null) return;
+        if (postRejoinDirectionNextAttemptAtMs > System.currentTimeMillis()) return;
 
-            if (!restartHandlingArmed && pendingBuilderDirectionProbeFailures >= PENDING_BUILDER_DIRECTION_FAIL_REARM_THRESHOLD) {
-                pendingHighwayBuilderEnableAfterRestore = false;
-                pendingHighwayBuilderDirection = null;
-                pendingHighwayBuilderEnableAtMs = 0L;
-                pendingBuilderDirectionProbeFailures = 0;
-                warning("Deferred HighwayBuilder direction checks failed repeatedly. Aborting deferred activation without re-arming login routines.");
-                runtimeFlag("pendingBuilderEnable:directionNotReadyAbort");
-                traceExec("handleDeferredHighwayBuilderEnableAfterRestore:abortFromDirectionNotReady");
-            }
+        PostRejoinDirectionResult result = determineConclusivePostRejoinWorkingDirection();
+        if (result.conclusive()) {
+            if (applyDirectionAndEnableHighwayBuilder(result.direction())) finishSuccessfulReconnectResume();
             return;
         }
-        pendingBuilderDirectionProbeFailures = 0;
 
-        pendingHighwayBuilderEnableAfterRestore = false;
-        pendingHighwayBuilderDirection = null;
-        pendingHighwayBuilderEnableAtMs = 0L;
-        applyDirectionAndEnableHighwayBuilder(direction);
-        info("Deferred THM HighwayBuilder activation completed after module restore and 6.0s delay.");
-        traceExec("handleDeferredHighwayBuilderEnableAfterRestore:enabledBuilder");
+        postRejoinDirectionRetryCount++;
+        postRejoinDirectionBlockReason = result.reason();
+        postRejoinDirectionBlockSummary = result.summary();
+        postRejoinDirectionNextAttemptAtMs = System.currentTimeMillis() + POST_REJOIN_DIRECTION_RETRY_DELAY_MS;
+
+        if (restartScreenshotsEnabled() && postRejoinDirectionRetryCount >= 3 && !postRejoinBlockedScreenshotTaken) {
+            postRejoinBlockedScreenshotTaken = true;
+            takeRestartScreenshot();
+        }
+
+        if (postRejoinDirectionRetryCount >= POST_REJOIN_DIRECTION_RETRY_LIMIT) {
+            enterReconnectSafetyStop("Reconnect resume stopped: " + result.reason());
+        }
     }
 
-    private void applyDirectionAndEnableHighwayBuilder(HorizontalDirection workingDirection) {
-        if (!enableHighwayBuilderOnRestart.get()) {
-            info("Enable Highway Builder on restart is disabled. Skipping THM HighwayBuilder activation.");
-            return;
-        }
-
+    private boolean applyDirectionAndEnableHighwayBuilder(HorizontalDirection workingDirection) {
         applyPostRejoinYaw(workingDirection);
         info("Post-rejoin direction selected: %s.", workingDirection.name);
 
         HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
         if (builder == null) {
-            warning("THM HighwayBuilder module not found, cannot resume.");
-            return;
+            enterReconnectSafetyStop("THM HighwayBuilder module not found, cannot resume.");
+            return false;
         }
 
-        if (!builder.isActive()) {
-            builder.toggle();
-            if (builder.isActive()) info("Resumed THM HighwayBuilder after post-rejoin checks.");
-            else warning("Failed to resume THM HighwayBuilder after post-rejoin checks.");
-        } else {
-            info("THM HighwayBuilder already active after post-rejoin checks.");
+        if (!builder.resumeFromReconnect(workingDirection, activeReconnectCycleId)) {
+            enterReconnectSafetyStop("HighwayBuilder refused reconnect resume for locked direction.");
+            return false;
         }
+
+        info("Resumed THM HighwayBuilder after post-rejoin checks.");
+        return true;
     }
 
-    private HorizontalDirection determinePostRejoinWorkingDirection() {
-        if (mc.player == null || mc.world == null) return null;
-        traceExec("determinePostRejoinWorkingDirection:begin");
-        int probeDistance = postRejoinAxisProbeDistanceForCurrentAttempt();
-        traceExec("determinePostRejoinWorkingDirection:probeDistance=" + probeDistance + ":retryIndex=" + (pendingBuilderDirectionProbeFailures + 1));
+    private void finishSuccessfulReconnectResume() {
+        maybeTakeDeferredRestartScreenshotAfterReconnect("main-server-ready");
+        clearRestartAutomationState("post-main-server finalization complete", true, true);
+    }
+
+    private PostRejoinDirectionResult determineConclusivePostRejoinWorkingDirection() {
+        if (mc.player == null || mc.world == null) return PostRejoinDirectionResult.blocked("player-or-world-missing", "");
 
         HorizontalDirection[] axisDirections = resolvePostRejoinAxisDirections();
         if (axisDirections == null) {
-            warning("Unable to resolve highway axis after rejoin. Using current facing direction.");
-            traceExec("determinePostRejoinWorkingDirection:axisUnknownFallbackFacing");
-            return HorizontalDirection.get(mc.player.getYaw());
+            postRejoinLastCompleteProbeWinner = null;
+            return PostRejoinDirectionResult.blocked("axis-unresolved", "line=unresolved");
         }
 
         HorizontalDirection dirA = axisDirections[0];
         HorizontalDirection dirB = axisDirections[1];
         HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
         boolean pavingSelected = builder != null && isPavingMode(builder);
+        AxisProbeResult probe = pavingSelected
+            ? probeAxis(dirA, dirB, 119, true)
+            : probeAxis(dirA, dirB, 122, false);
 
-        if (pavingSelected) {
-            boolean dirAObsidianY119 = isObsidianAtAxisProbe(dirA, probeDistance, 119);
-            boolean dirBObsidianY119 = isObsidianAtAxisProbe(dirB, probeDistance, 119);
-            traceExec("determinePostRejoinWorkingDirection:obsidianMode:dirA119=" + dirAObsidianY119 + ":dirB119=" + dirBObsidianY119);
-            if (dirAObsidianY119 != dirBObsidianY119) {
-                HorizontalDirection selected = dirAObsidianY119 ? dirB : dirA;
-                traceExec("determinePostRejoinWorkingDirection:obsidianMode:selected=" + selected.name);
-                return selected;
-            }
+        String summary = String.format(Locale.ROOT, "%s=%d %s=%d",
+            probe.dirA().name,
+            probe.dirAScore(),
+            probe.dirB().name,
+            probe.dirBScore()
+        );
 
-            warning("Post-rejoin obsidian direction checks at Y=119 were ambiguous. Deferring HighwayBuilder enable.");
-            traceExec("determinePostRejoinWorkingDirection:obsidianMode:ambiguous");
-            return null;
+        if (!probe.allSamplesLoaded()) {
+            postRejoinLastCompleteProbeWinner = null;
+            return PostRejoinDirectionResult.blocked("probe-unloaded", summary);
         }
 
-        boolean dirAAirY122 = isAirAtAxisProbe(dirA, probeDistance, 122);
-        boolean dirBAirY122 = isAirAtAxisProbe(dirB, probeDistance, 122);
-        traceExec("determinePostRejoinWorkingDirection:airMode:dirA122=" + dirAAirY122 + ":dirB122=" + dirBAirY122);
-        if (dirAAirY122 != dirBAirY122) {
-            HorizontalDirection selected = dirAAirY122 ? dirB : dirA;
-            traceExec("determinePostRejoinWorkingDirection:airMode:selected=" + selected.name);
-            return selected;
+        if (!probe.strongWinner() || probe.selectedDirection() == null) {
+            postRejoinLastCompleteProbeWinner = null;
+            return PostRejoinDirectionResult.blocked("probe-ambiguous", summary);
         }
 
-        if (dirAAirY122 && dirBAirY122) {
-            warning("Post-rejoin direction not ready yet: both axis directions are air at Y=122. Deferring HighwayBuilder enable.");
-            traceExec("determinePostRejoinWorkingDirection:airMode:bothAir");
-            return null;
+        if (postRejoinLastCompleteProbeWinner == probe.selectedDirection()) {
+            postRejoinLastCompleteProbeWinner = probe.selectedDirection();
+            return PostRejoinDirectionResult.success(probe.selectedDirection(), summary);
         }
 
-        warning("Post-rejoin direction checks were ambiguous. Deferring HighwayBuilder enable.");
-        traceExec("determinePostRejoinWorkingDirection:airMode:ambiguous");
-        return null;
-    }
-
-    private int postRejoinAxisProbeDistanceForCurrentAttempt() {
-        int retryIndex = Math.max(1, pendingBuilderDirectionProbeFailures + 1);
-        return POST_REJOIN_AXIS_PROBE_DISTANCE * retryIndex;
+        postRejoinLastCompleteProbeWinner = probe.selectedDirection();
+        return PostRejoinDirectionResult.blocked("probe-ambiguous", summary);
     }
 
     private HorizontalDirection[] resolvePostRejoinAxisDirections() {
-        WorkLine line = trackedLine;
-        if (line == null && mc.player != null) {
-            double centerOffset = trueCenterMode.get() ? 0.5 : 0.0;
-            line = nearestWorkLine(mc.player.getX(), mc.player.getZ(), centerOffset, trueCenterMode.get());
-        }
+        if (mc.player == null) return null;
+
+        WorkLine line = resolveReconnectLineFromCurrentPosition();
         if (line == null) return null;
 
         return switch (line) {
@@ -2327,24 +1845,111 @@ public class THMHwyMonitor extends Module {
         };
     }
 
-    private boolean isObsidianAtAxisProbe(HorizontalDirection direction, int distance, int y) {
-        if (mc.player == null || mc.world == null) return false;
-        BlockPos probe = BlockPos.ofFloored(
-            mc.player.getX() + (direction.offsetX * distance),
-            y,
-            mc.player.getZ() + (direction.offsetZ * distance)
+    private WorkLine resolveReconnectLineFromCurrentPosition() {
+        if (mc == null || mc.player == null) return null;
+        double centerOffset = trueCenterMode.get() ? 0.5 : 0.0;
+        ReconnectLineResolution resolved = nearestWorkLineWithAmbiguityBlock(
+            mc.player.getX(),
+            mc.player.getZ(),
+            centerOffset,
+            trueCenterMode.get(),
+            RECONNECT_LINE_AMBIGUITY_THRESHOLD
         );
-        return mc.world.getBlockState(probe).getBlock() == Blocks.OBSIDIAN;
+        if (resolved == null || resolved.distance() > RECONNECT_LINE_MAX_DISTANCE) return null;
+        return resolved.line();
     }
 
-    private boolean isAirAtAxisProbe(HorizontalDirection direction, int distance, int y) {
-        if (mc.player == null || mc.world == null) return false;
-        BlockPos probe = BlockPos.ofFloored(
-            mc.player.getX() + (direction.offsetX * distance),
-            y,
-            mc.player.getZ() + (direction.offsetZ * distance)
-        );
-        return mc.world.getBlockState(probe).isAir();
+    private AxisProbeResult probeAxis(HorizontalDirection dirA, HorizontalDirection dirB, int y, boolean obsidianProbe) {
+        if (mc.player == null || mc.world == null) {
+            return new AxisProbeResult(false, false, null, dirA, 0, dirB, 0);
+        }
+
+        int totalA = 0;
+        int totalB = 0;
+        int nearA = 0;
+        int nearB = 0;
+
+        for (int distance = 1; distance <= POST_REJOIN_AXIS_PROBE_DISTANCE; distance++) {
+            BlockPos probeA = BlockPos.ofFloored(
+                mc.player.getX() + (dirA.offsetX * distance),
+                y,
+                mc.player.getZ() + (dirA.offsetZ * distance)
+            );
+            BlockPos probeB = BlockPos.ofFloored(
+                mc.player.getX() + (dirB.offsetX * distance),
+                y,
+                mc.player.getZ() + (dirB.offsetZ * distance)
+            );
+
+            if (!isReconnectProbeChunkLoaded(probeA) || !isReconnectProbeChunkLoaded(probeB)) {
+                return new AxisProbeResult(false, false, null, dirA, totalA, dirB, totalB);
+            }
+
+            boolean matchA = obsidianProbe
+                ? mc.world.getBlockState(probeA).getBlock() == Blocks.OBSIDIAN
+                : mc.world.getBlockState(probeA).isAir();
+            boolean matchB = obsidianProbe
+                ? mc.world.getBlockState(probeB).getBlock() == Blocks.OBSIDIAN
+                : mc.world.getBlockState(probeB).isAir();
+
+            if (matchA) totalA++;
+            if (matchB) totalB++;
+            if (distance <= POST_REJOIN_AXIS_NEAR_PROBE_DISTANCE) {
+                if (matchA) nearA++;
+                if (matchB) nearB++;
+            }
+        }
+
+        int totalMargin = Math.abs(totalA - totalB);
+        int nearMargin = Math.abs(nearA - nearB);
+        if (totalMargin < 2 || nearMargin < 1 || totalA == totalB) {
+            return new AxisProbeResult(true, false, null, dirA, totalA, dirB, totalB);
+        }
+
+        HorizontalDirection selected = totalA > totalB ? dirB : dirA;
+        return new AxisProbeResult(true, true, selected, dirA, totalA, dirB, totalB);
+    }
+
+    private boolean isReconnectProbeChunkLoaded(BlockPos probe) {
+        if (mc == null || mc.world == null) return false;
+        return mc.world.getChunkManager().getChunk(probe.getX() >> 4, probe.getZ() >> 4, ChunkStatus.FULL, false) != null;
+    }
+
+    private void enterReconnectSafetyStop(String reason) {
+        HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
+        long cycleId = activeReconnectCycleId;
+
+        if (builder != null) {
+            builder.restoreCenterSpeedBaselineForFailedReconnect(cycleId);
+            builder.disableForReconnectSafetyStop();
+        }
+
+        if (restartScreenshotsEnabled() && !postRejoinTerminalScreenshotTaken) {
+            postRejoinTerminalScreenshotTaken = true;
+            takeRestartScreenshot();
+        }
+
+        intentionalSafetyDisconnectArmed = true;
+        disableMonitorAfterIntentionalSafetyDisconnect = true;
+        clearRestartAutomationStateForTerminalStop("reconnect-safety-stop");
+
+        if (hasLiveServerConnection()) {
+            mc.getNetworkHandler().getConnection().disconnect(Text.of("THMHwyMonitor Safety Stop: " + reason));
+            return;
+        }
+
+        intentionalSafetyDisconnectArmed = false;
+        disableMonitorAfterIntentionalSafetyDisconnect = false;
+
+        if (mc != null) {
+            mc.setScreen(new DisconnectedScreen(
+                new TitleScreen(),
+                Text.of("THMHwyMonitor Safety Stop"),
+                Text.of(reason + " HighwayBuilder stayed off for safety.")
+            ));
+        }
+
+        if (isActive()) toggle();
     }
 
     private void applyPostRejoinYaw(HorizontalDirection direction) {
@@ -2358,84 +1963,10 @@ public class THMHwyMonitor extends Module {
         }
     }
 
-    private void disconnectAndDisableHwyMonitor(String reason) {
-        disableAutoReconnectForNonRestartHardFail(reason);
-        warning(reason);
-        awaitingCrackedLoginSuccess = false;
-
-        if (mc != null && mc.getNetworkHandler() != null && mc.getNetworkHandler().getConnection() != null) {
-            mc.getNetworkHandler().getConnection().disconnect(Text.literal(reason));
-        }
-
-        pendingPostRejoinActions = false;
-        postRejoinActionsAtMs = 0L;
-        resetPostRejoinRetryState();
-        resetPostRejoinPathState();
-
-        if (isActive()) toggle();
-    }
-
-    private void captureAndDisablePostJoinModules() {
-        Timer timer = Modules.get().get(Timer.class);
-        Speed speed = Modules.get().get(Speed.class);
-        timerWasActiveBeforePostJoin = timer != null && timer.isActive();
-        speedWasActiveBeforePostJoin = speed != null && speed.isActive();
-        postJoinModuleStateCaptured = timerWasActiveBeforePostJoin || speedWasActiveBeforePostJoin;
-        restartModuleStateSnapshotTaken = postJoinModuleStateCaptured;
-        runtimeFlag("captureInitialPostJoinModuleSnapshot");
-
-        internalTimerSpeedToggleInProgress = true;
-        try {
-            if (timerWasActiveBeforePostJoin && timer != null && timer.isActive()) {
-                timer.toggle();
-                info("Disabled Timer for post-join routine.");
-            }
-
-            if (speedWasActiveBeforePostJoin && speed != null && speed.isActive()) {
-                speed.toggle();
-                info("Disabled Speed for post-join routine.");
-            }
-        } finally {
-            internalTimerSpeedToggleInProgress = false;
-        }
-    }
-
-    private void captureAndDisablePostJoinModulesForDisconnectSafety() {
-        Timer timer = Modules.get().get(Timer.class);
-        Speed speed = Modules.get().get(Speed.class);
-        boolean changed = false;
-
-        if (!restartModuleStateSnapshotTaken) {
-            if (!postJoinModuleStateCaptured) {
-                timerWasActiveBeforePostJoin = timer != null && timer.isActive();
-                speedWasActiveBeforePostJoin = speed != null && speed.isActive();
-                runtimeFlag("captureInitialPostJoinModuleSnapshot:disconnectSafety");
-            } else {
-                runtimeFlag("captureInitialPostJoinModuleSnapshot:disconnectSafety:preserved");
-            }
-            restartModuleStateSnapshotTaken = true;
-        }
-
-        if (timer != null && timer.isActive()) {
-            timer.toggle();
-            info("Disabled Timer for disconnect safety.");
-            changed = true;
-        }
-
-        if (speed != null && speed.isActive()) {
-            speed.toggle();
-            info("Disabled Speed for disconnect safety.");
-            changed = true;
-        }
-
-        postJoinModuleStateCaptured = timerWasActiveBeforePostJoin || speedWasActiveBeforePostJoin;
-        if (changed) runtimeFlag("captureAndDisablePostJoinModulesForDisconnectSafety");
-    }
-
     private void restorePostJoinModuleStatesIfNeeded() {
+        if (activeReconnectCycleId > 0L) return;
         if (!postJoinModuleStateCaptured) return;
         if (!isSuccessfullyConnectedToServer()) {
-            runtimeFlag("restorePostJoinModuleStatesDeferred:notConnected");
             return;
         }
 
@@ -2459,12 +1990,6 @@ public class THMHwyMonitor extends Module {
         boolean timerRestored = !timerWasActiveBeforePostJoin || (timer != null && timer.isActive());
         boolean speedRestored = !speedWasActiveBeforePostJoin || (speed != null && speed.isActive());
         if (!timerRestored || !speedRestored) {
-            runtimeFlag(String.format(
-                Locale.ROOT,
-                "restorePostJoinModuleStatesDeferred:timerRestored=%s,speedRestored=%s",
-                timerRestored,
-                speedRestored
-            ));
             return;
         }
 
@@ -2472,68 +1997,10 @@ public class THMHwyMonitor extends Module {
         timerWasActiveBeforePostJoin = false;
         speedWasActiveBeforePostJoin = false;
         restartModuleStateSnapshotTaken = false;
-        runtimeFlag("restorePostJoinModuleStatesComplete");
     }
 
     private boolean isSuccessfullyConnectedToServer() {
-        return mc != null
-            && mc.player != null
-            && mc.world != null
-            && mc.getNetworkHandler() != null
-            && !(mc.currentScreen instanceof DisconnectedScreen);
-    }
-
-    private boolean isSupportedVanillaDimension() {
-        if (mc == null || mc.world == null) return false;
-        RegistryKey<World> key = mc.world.getRegistryKey();
-        return key == World.OVERWORLD || key == World.NETHER || key == World.END;
-    }
-
-    private boolean hasPostRejoinCoordinateSuccess() {
-        if (!postRejoinStepStartCaptured || mc.player == null) return false;
-        double dx = mc.player.getX() - postRejoinStepStartX;
-        double dz = mc.player.getZ() - postRejoinStepStartZ;
-        return Math.hypot(dx, dz) >= POST_REJOIN_COORD_SUCCESS_DISTANCE;
-    }
-
-    private void resetPostRejoinRetryState() {
-        postRejoinRoutineRetryScheduled = false;
-        postRejoinRoutineRetryAtMs = 0L;
-        postRejoinRoutineRetryCount = 0;
-    }
-
-    private void resetPostRejoinPathState() {
-        postRejoinPathCommands = new String[0];
-        nextPostRejoinPathCommandIndex = 0;
-        activePostRejoinPathCommandIndex = -1;
-        activePostRejoinPathPurpose = PostRejoinPathPurpose.None;
-        waitingForPostRejoinCommandDelay = false;
-        postRejoinCommandDelayTicks = 0;
-        waitingForPostRejoinPathStart = false;
-        waitingForPostRejoinCompletionMessage = false;
-        postRejoinStepStartCaptured = false;
-        postRejoinStepStartX = 0.0;
-        postRejoinStepStartZ = 0.0;
-        postRejoinPathStartupTicks = 0;
-        postRejoinPathTimeoutTicks = 0;
-    }
-
-    private static String configuredCrackedPassword() {
-        THMSystem system = THMSystem.get();
-        if (system == null) return "";
-
-        // Login routine is currently disabled; keep the original call for future re-enable.
-        // String value = system.getCrackedPassword();
-        String value = "";
-        if (value == null) return "";
-
-        value = value.trim();
-        if (value.startsWith("/")) value = value.substring(1).trim();
-
-        String lower = value.toLowerCase(Locale.ROOT);
-        if (lower.startsWith("login ")) value = value.substring(6).trim();
-
-        return value;
+        return hasLiveServerConnection() && !(mc.currentScreen instanceof DisconnectedScreen);
     }
 
     private static WorkLine nearestWorkLine(double playerX, double playerZ, double centerOffset, boolean trueCenterMode) {
@@ -2565,6 +2032,34 @@ public class THMHwyMonitor extends Module {
         }
 
         return line;
+    }
+
+    private static ReconnectLineResolution nearestWorkLineWithAmbiguityBlock(double playerX, double playerZ, double centerOffset, boolean trueCenterMode, double ambiguityThreshold) {
+        double dCardinalNs = Math.abs(playerX - centerOffset);
+        double dCardinalEw = Math.abs(playerZ - centerOffset);
+        double dDiagNwSe = distanceToLine(playerX, playerZ, 1.0, -1.0, 0.0);
+        double c = trueCenterMode ? 1.0 : 0.0;
+        double dDiagNeSw = distanceToLine(playerX, playerZ, 1.0, 1.0, c);
+
+        double best = dCardinalNs;
+        double second = HUGE_DISTANCE;
+        WorkLine line = WorkLine.CardinalNS;
+
+        double[] distances = new double[] {dCardinalEw, dDiagNwSe, dDiagNeSw};
+        WorkLine[] lines = new WorkLine[] {WorkLine.CardinalEW, WorkLine.DiagonalNWSE, WorkLine.DiagonalNESW};
+        for (int i = 0; i < distances.length; i++) {
+            double distance = distances[i];
+            if (distance < best) {
+                second = best;
+                best = distance;
+                line = lines[i];
+            } else if (distance < second) {
+                second = distance;
+            }
+        }
+
+        if (Math.abs(second - best) <= ambiguityThreshold) return null;
+        return new ReconnectLineResolution(line, best);
     }
 
     private static String inferDirectionForLine(WorkLine line, float yaw) {
@@ -2616,6 +2111,20 @@ public class THMHwyMonitor extends Module {
         };
     }
 
+    private static String directionCode(HorizontalDirection direction) {
+        if (direction == null) return "";
+        return switch (direction) {
+            case North -> "N";
+            case NorthEast -> "NE";
+            case East -> "E";
+            case SouthEast -> "SE";
+            case South -> "S";
+            case SouthWest -> "SW";
+            case West -> "W";
+            case NorthWest -> "NW";
+        };
+    }
+
     private static int workingDirectionOffsetX(String direction) {
         return switch (normalizeDirection(direction)) {
             case "E", "NE", "SE" -> 1;
@@ -2644,15 +2153,12 @@ public class THMHwyMonitor extends Module {
     }
 
     private void applyWorkingYaw() {
-        if (pendingCorrectionTarget == null || mc.player == null) return;
+        if (pendingCorrectionTarget == null || mc.player == null || recoveryBuilder == null) return;
 
-        float referenceYaw = Float.isNaN(recoveryYawBeforeMove) ? mc.player.getYaw() : recoveryYawBeforeMove;
-        float yaw = closestParallelYawForSegment(
-            referenceYaw,
-            pendingCorrectionTarget.highway(),
-            pendingCorrectionTarget.direction(),
-            pendingCorrectionTarget.line()
-        );
+        HorizontalDirection direction = recoveryBuilder.getWorkingDirection();
+        if (direction == null) return;
+
+        float yaw = direction.yaw;
         mc.player.setYaw(yaw);
         mc.player.setPitch(20.0f);
 
@@ -2701,8 +2207,8 @@ public class THMHwyMonitor extends Module {
     }
 
     private static String resolveWorkingDirection(double playerX, double playerZ, double centerOffset) {
-        boolean xAxis = Math.abs(playerZ - centerOffset) <= ALIGN_TOLERANCE;
-        boolean zAxis = Math.abs(playerX - centerOffset) <= ALIGN_TOLERANCE;
+        boolean xAxis = Math.abs(playerZ - centerOffset) <= DIRECTION_RESOLUTION_TOLERANCE;
+        boolean zAxis = Math.abs(playerX - centerOffset) <= DIRECTION_RESOLUTION_TOLERANCE;
 
         String northSouth = northSouthDirection(playerZ, centerOffset);
         String eastWest = eastWestDirection(playerX, centerOffset);
@@ -2718,14 +2224,14 @@ public class THMHwyMonitor extends Module {
     }
 
     private static String northSouthDirection(double playerZ, double centerOffset) {
-        if (playerZ >= centerOffset + ALIGN_TOLERANCE) return "South";
-        if (playerZ <= centerOffset - ALIGN_TOLERANCE) return "North";
+        if (playerZ >= centerOffset + DIRECTION_RESOLUTION_TOLERANCE) return "South";
+        if (playerZ <= centerOffset - DIRECTION_RESOLUTION_TOLERANCE) return "North";
         return "";
     }
 
     private static String eastWestDirection(double playerX, double centerOffset) {
-        if (playerX >= centerOffset + ALIGN_TOLERANCE) return "East";
-        if (playerX <= centerOffset - ALIGN_TOLERANCE) return "West";
+        if (playerX >= centerOffset + DIRECTION_RESOLUTION_TOLERANCE) return "East";
+        if (playerX <= centerOffset - DIRECTION_RESOLUTION_TOLERANCE) return "West";
         return "";
     }
 
@@ -2860,108 +2366,6 @@ public class THMHwyMonitor extends Module {
         };
     }
 
-    private void startRuntimeWatchdogIfNeeded() {
-        if (!RUNTIME_WATCHDOG_LOG_ENABLED || runtimeWatchdogRunning) return;
-        runtimeWatchdogRunning = true;
-        lastRuntimeWatchdogState = "";
-        runtimeWatchdogThread = new Thread(() -> {
-            runtimeFlag("runtimeWatchdogStart");
-            while (runtimeWatchdogRunning) {
-                String snapshot = runtimeStateSnapshot();
-                if (!snapshot.equals(lastRuntimeWatchdogState)) {
-                    lastRuntimeWatchdogState = snapshot;
-                    runtimeFlag("runtimeState:" + snapshot);
-                }
-
-                try {
-                    Thread.sleep(1000L);
-                } catch (InterruptedException ignored) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-            runtimeFlag("runtimeWatchdogStop");
-        }, "thm-hwymonitor-runtime-watchdog");
-        runtimeWatchdogThread.setDaemon(true);
-        runtimeWatchdogThread.start();
-    }
-
-    private void stopRuntimeWatchdog() {
-        runtimeWatchdogRunning = false;
-        if (runtimeWatchdogThread != null) {
-            runtimeWatchdogThread.interrupt();
-            runtimeWatchdogThread = null;
-        }
-        lastRuntimeWatchdogState = "";
-    }
-
-    private String runtimeStateSnapshot() {
-        if (mc == null) return "mc=null";
-
-        String screen = mc.currentScreen == null ? "none" : mc.currentScreen.getClass().getSimpleName();
-        return String.format(
-            Locale.ROOT,
-            "active=%s connected=%s player=%s world=%s net=%s screen=%s restartArmed=%s stage=%s stageStarted=%s moduleSnapshot=%s awaitPost=%s pendingPost=%s pendingBuilderEnable=%s pendingBuilderAtMs=%s pathPurpose=%s crackedPrompt=%s crackedSuccess=%s restartEvidence=%s traceSeq=%s",
-            isActive(),
-            isSuccessfullyConnectedToServer(),
-            mc.player != null,
-            mc.world != null,
-            mc.getNetworkHandler() != null,
-            screen,
-            restartHandlingArmed,
-            restartRoutineStage,
-            postRejoinStartedForCurrentRestart,
-            restartModuleStateSnapshotTaken,
-            awaitPostRejoinAfterReconnect,
-            pendingPostRejoinActions,
-            pendingHighwayBuilderEnableAfterRestore,
-            pendingHighwayBuilderEnableAtMs,
-            activePostRejoinPathPurpose,
-            crackedLoginPromptSeenThisCycle,
-            crackedLoginSuccessSeenThisCycle,
-            restartDisconnectEvidenceArmed,
-            executionTraceCounter
-        );
-    }
-
-    private void traceExec(String step) {
-        if (!EXECUTION_TRACE_LOG_ENABLED) return;
-        executionTraceCounter++;
-        runtimeFlag("exec#" + executionTraceCounter + ":" + step);
-    }
-
-    private void runtimeFlag(String flag) {
-        if (!RUNTIME_WATCHDOG_LOG_ENABLED) return;
-
-        Path logPath = resolveRuntimeFlagLogPath();
-        String line = String.format(
-            Locale.ROOT,
-            "%s | %s%n",
-            LocalDateTime.now().format(RUNTIME_FLAG_TS),
-            flag
-        );
-
-        try {
-            Path parent = logPath.getParent();
-            if (parent != null) Files.createDirectories(parent);
-            Files.writeString(
-                logPath,
-                line,
-                StandardOpenOption.CREATE,
-                StandardOpenOption.APPEND
-            );
-        } catch (IOException ignored) {
-            // Debug logging should never interrupt module behavior.
-        }
-    }
-
-    private Path resolveRuntimeFlagLogPath() {
-        if (mc != null && mc.runDirectory != null) {
-            return mc.runDirectory.toPath().resolve("thm-hwymonitor-runtime-flags.log");
-        }
-        return Path.of("thm-hwymonitor-runtime-flags.log").toAbsolutePath();
-    }
-
     public record AlignmentResult(boolean aligned, String highway, String direction, double distance) {
         public static AlignmentResult notAligned() {
             return new AlignmentResult(false, "None", "None", HUGE_DISTANCE);
@@ -2994,21 +2398,6 @@ public class THMHwyMonitor extends Module {
         WaitBeforeResume
     }
 
-    private enum RestartRoutineStage {
-        None,
-        CrackedAuthLoginLobby,
-        CrackedLoginLobbyTransferRoutine,
-        CrackedAwaitingMainLobbyReconnect,
-        MainLobbyTransferRoutine,
-        AwaitingMainServerReconnect
-    }
-
-    private enum PostRejoinPathPurpose {
-        None,
-        CrackedLoginLobbyTransferRoutine,
-        MainLobbyTransferRoutine
-    }
-
     private enum WorkLine {
         CardinalNS,
         CardinalEW,
@@ -3016,3 +2405,5 @@ public class THMHwyMonitor extends Module {
         DiagonalNESW
     }
 }
+
+
