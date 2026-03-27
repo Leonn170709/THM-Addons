@@ -718,7 +718,7 @@ public class HighwayBuilderTHM extends Module {
     private final Setting<Boolean> autoScreenshotStatistics = sgStatistics.add(new BoolSetting.Builder()
         .name("auto-screenshot-statistics")
         .description("Captures a proof screenshot shortly after Highway Builder prints its statistics.")
-        .defaultValue(true)
+        .defaultValue(false)
         .visible(printStatistics::get)
         .build()
     );

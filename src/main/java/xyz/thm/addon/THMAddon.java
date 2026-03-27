@@ -78,7 +78,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
 
         // Modules
         Modules.get().add(new HighwayBuilderTHM());
-        Modules.get().add(new HighwayChecker());
+        Modules.get().add(new HighwayTools());
         Modules.get().add(new AxisViewer());
         Modules.get().add(new BlockCounter());
         Modules.get().add(new DiscordNotifs());
@@ -106,7 +106,6 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new KitbotFrontend());
         Modules.get().add(new ChestTrackerModule());
         if (BaritoneUtils.IS_AVAILABLE) {
-            Modules.get().add(new HighwaySearcher());
             Modules.get().add(new THMHwyMonitor());
         }
 

@@ -22,6 +22,7 @@
     "meteor.GuiThemeMixin",
     "meteor.KillAuraMixin",
     "meteor.MeteorGuiThemeMixin",
+    "meteor.NametagsMixin",
     "meteor.NoSlowMixin",
     "meteor.TimerMixin"
   ]
