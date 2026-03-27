@@ -1,5 +1,5 @@
 package xyz.thm.addon.mixin.accessor;
-
+import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.collection.DefaultedList;

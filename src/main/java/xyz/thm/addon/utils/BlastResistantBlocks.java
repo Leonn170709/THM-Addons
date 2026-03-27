@@ -1,13 +1,10 @@
 package xyz.thm.addon.utils;
-
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.util.math.BlockPos;
-
 import java.util.Set;
-
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 public class BlastResistantBlocks {
     private static final Set<Block> BLAST_RESISTANT = new ReferenceOpenHashSet<>(Set.of(

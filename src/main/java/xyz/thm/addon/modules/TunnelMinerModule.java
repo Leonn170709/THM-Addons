@@ -1,9 +1,9 @@
 package xyz.thm.addon.modules;
 
-import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
+import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -16,33 +16,36 @@ import meteordevelopment.meteorclient.systems.modules.player.Reach;
 import meteordevelopment.meteorclient.systems.modules.render.FreeLook;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.Rotations;
-import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
+import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.*;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.ContainerComponent;
-import net.minecraft.entity.EntityPose;
 import net.minecraft.entity.ItemEntity;
-import net.minecraft.item.BlockItem;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
+import net.minecraft.entity.EntityPose;
+import net.minecraft.item.*;
+import net.minecraft.nbt.NbtCompound;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
 import net.minecraft.util.Hand;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.Formatting;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.*;
 import xyz.thm.addon.THMAddon;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
-import java.nio.file.*;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -576,8 +579,7 @@ public class TunnelMinerModule extends Module {
     private final Setting<Boolean> fillBehind = sgGeneral.add(new BoolSetting.Builder()
         .name("fill-behind")
         .description("Fills the tunnel behind you with selected blocks.")
-        .defaultValue(false)
-        .build());
+        .defaultValue(true).build());
 
     private final Setting<List<Block>> fillBlocks = sgGeneral.add(new BlockListSetting.Builder()
         .name("fill-blocks")
@@ -635,8 +637,8 @@ public class TunnelMinerModule extends Module {
 
     private final Setting<Boolean> stealthMode = sgStealth.add(new BoolSetting.Builder()
         .name("stealth-mode")
-        .description("Probe ahead, mine ahead while moving, restore exact block types behind, and auto-enable all stealth avoidance rules.(VERY CPU INTENSIVE)")
-        .defaultValue(false)
+        .description("Probe ahead, mine ahead while moving, restore exact block types behind, and auto-enable all stealth avoidance rules.")
+        .defaultValue(true)
         .build());
 
     private final Setting<Integer> stealthProbeDistance = sgStealth.add(new IntSetting.Builder()

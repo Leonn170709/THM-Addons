@@ -1,8 +1,8 @@
 package xyz.thm.addon.gui.themes;
 
-import meteordevelopment.meteorclient.gui.themes.meteor.MeteorGuiTheme;
-import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import xyz.thm.addon.gui.RecolorGuiTheme;
+import meteordevelopment.meteorclient.utils.render.color.SettingColor;
+import meteordevelopment.meteorclient.gui.themes.meteor.MeteorGuiTheme;
 
 public class DarkTheme extends MeteorGuiTheme implements RecolorGuiTheme {
     public static final DarkTheme INSTANCE = new DarkTheme();

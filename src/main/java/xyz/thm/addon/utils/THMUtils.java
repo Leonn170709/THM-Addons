@@ -11,11 +11,13 @@ import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.Difficulty;
 import org.jetbrains.annotations.Nullable;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.modules.HighwaySearcher;
+import xyz.thm.addon.modules.THMHwyMonitor;
 import xyz.thm.addon.modules.TunnelMinerModule;
 
-import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.InputStream;
@@ -24,6 +26,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Locale;
+import javax.imageio.ImageIO;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 import static meteordevelopment.meteorclient.utils.world.BlockUtils.canPlace;
@@ -458,9 +461,5 @@ public class THMUtils {
     }
     public static boolean isBaritoneInstalled() {
         return BaritoneUtils.IS_AVAILABLE;
-    }
-    public static String getSaveName() {
-        if (mc.player == null) return "Unknown";
-        return mc.player.getName().getString();
     }
 }
