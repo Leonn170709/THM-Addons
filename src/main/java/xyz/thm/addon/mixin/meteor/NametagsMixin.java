@@ -80,7 +80,20 @@ public abstract class NametagsMixin extends Module {
         if (thm$drawContext != null) {
             int ix = (int) Math.round(x);
             int iy = (int) Math.round(y);
-            thm$drawContext.drawTexture(RenderPipelines.GUI_TEXTURED, THM_ICON, ix, iy, 0f, 0f, (int) Math.round(iconSize), (int) Math.round(iconSize), THM_ICON_SIZE, THM_ICON_SIZE);
+            thm$drawContext.drawTexture(
+                RenderPipelines.GUI_TEXTURED,
+                THM_ICON,
+                ix,
+                iy,
+                0f,
+                0f,
+                (int) Math.round(iconSize),
+                (int) Math.round(iconSize),
+                THM_ICON_SIZE,
+                THM_ICON_SIZE,
+                THM_ICON_SIZE,
+                THM_ICON_SIZE
+            );
         }
 
         return text.render(string, x + iconSize + THM_ICON_PAD, y, color, shadow);
