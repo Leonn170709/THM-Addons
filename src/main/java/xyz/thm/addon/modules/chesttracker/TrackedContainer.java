@@ -1,6 +1,11 @@
 package xyz.thm.addon.modules.chesttracker;
 
 import com.google.gson.JsonObject;
+import net.minecraft.block.Block;
+import net.minecraft.block.ShulkerBoxBlock;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.ContainerComponent;
+import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
@@ -46,14 +51,65 @@ public class TrackedContainer {
         String itemId = Registries.ITEM.getId(item).toString();
         return items.containsKey(itemId);
     }
+
+    public boolean containsItemIncludingShulker(Item item) {
+        String itemId = Registries.ITEM.getId(item).toString();
+        if (items.containsKey(itemId)) return true;
+        return getNestedItemCounts().containsKey(itemId);
+    }
+
+    public boolean matchesNameQuery(String queryLower) {
+        if (queryLower == null || queryLower.isEmpty()) return false;
+        for (ItemStack stack : itemStacks) {
+            if (stack == null || stack.isEmpty()) continue;
+            if (stack.getName().getString().toLowerCase().contains(queryLower)) return true;
+            String typeName = stack.getItem().getDefaultStack().getName().getString().toLowerCase();
+            if (typeName.contains(queryLower)) return true;
+            String itemId = Registries.ITEM.getId(stack.getItem()).toString().toLowerCase();
+            if (itemId.contains(queryLower)) return true;
+        }
+        for (ItemStack stack : getNestedItemStacks()) {
+            if (stack == null || stack.isEmpty()) continue;
+            if (stack.getName().getString().toLowerCase().contains(queryLower)) return true;
+            String typeName = stack.getItem().getDefaultStack().getName().getString().toLowerCase();
+            if (typeName.contains(queryLower)) return true;
+            String itemId = Registries.ITEM.getId(stack.getItem()).toString().toLowerCase();
+            if (itemId.contains(queryLower)) return true;
+        }
+        return false;
+    }
     public int getItemCount(String itemId) {
         return items.getOrDefault(itemId, 0);
+    }
+
+    public int getItemCountIncludingShulker(String itemId) {
+        int count = items.getOrDefault(itemId, 0);
+        return count + getNestedItemCounts().getOrDefault(itemId, 0);
     }
     public Map<String, Integer> getItems() {
         return new HashMap<>(items);
     }
     public List<ItemStack> getItemStacks() {
         return new ArrayList<>(itemStacks);
+    }
+
+    public Map<String, Integer> getNestedItemCounts() {
+        Map<String, Integer> nested = new HashMap<>();
+        for (ItemStack nestedStack : getNestedItemStacks()) {
+            if (nestedStack == null || nestedStack.isEmpty()) continue;
+            String itemId = Registries.ITEM.getId(nestedStack.getItem()).toString();
+            nested.put(itemId, nested.getOrDefault(itemId, 0) + nestedStack.getCount());
+        }
+        return nested;
+    }
+
+    public List<ItemStack> getNestedItemStacks() {
+        List<ItemStack> nestedStacks = new ArrayList<>();
+        for (ItemStack stack : itemStacks) {
+            if (stack == null || stack.isEmpty() || !isShulkerItem(stack)) continue;
+            nestedStacks.addAll(getShulkerContents(stack));
+        }
+        return nestedStacks;
     }
     public BlockPos getPosition() {
         return position;
@@ -72,6 +128,22 @@ public class TrackedContainer {
     }
     public String getContainerType() {
         return containerType;
+    }
+
+    private static boolean isShulkerItem(ItemStack stack) {
+        if (!(stack.getItem() instanceof BlockItem blockItem)) return false;
+        Block block = blockItem.getBlock();
+        return block instanceof ShulkerBoxBlock;
+    }
+
+    private static List<ItemStack> getShulkerContents(ItemStack stack) {
+        List<ItemStack> contents = new ArrayList<>();
+        ContainerComponent container = stack.get(DataComponentTypes.CONTAINER);
+        if (container == null) return contents;
+        for (ItemStack nested : container.iterateNonEmpty()) {
+            if (!nested.isEmpty()) contents.add(nested);
+        }
+        return contents;
     }
     public boolean isEmpty() {
         return items.isEmpty();

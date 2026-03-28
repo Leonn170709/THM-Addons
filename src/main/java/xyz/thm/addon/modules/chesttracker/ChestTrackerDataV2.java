@@ -19,6 +19,8 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
@@ -87,10 +89,10 @@ public class ChestTrackerDataV2 {
                 return new ArrayList<>();
             }
             return dimContainers.values().stream()
-                .filter(c -> c.containsItem(item))
+                .filter(c -> c.containsItemIncludingShulker(item))
                 .sorted((a, b) -> {
                     String itemId = net.minecraft.registry.Registries.ITEM.getId(item).toString();
-                    return Integer.compare(b.getItemCount(itemId), a.getItemCount(itemId));
+                    return Integer.compare(b.getItemCountIncludingShulker(itemId), a.getItemCountIncludingShulker(itemId));
                 })
                 .collect(Collectors.toList());
         } finally {
@@ -105,6 +107,37 @@ public class ChestTrackerDataV2 {
         try {
             Map<BlockPos, TrackedContainer> dimContainers = containers.get(dimension);
             return dimContainers != null ? new ArrayList<>(dimContainers.values()) : new ArrayList<>();
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
+    public Set<String> getItemIdsMatchingCustomName(String dimension, String queryLower) {
+        if (queryLower == null || queryLower.isEmpty()) return new HashSet<>();
+        lock.readLock().lock();
+        try {
+            Map<BlockPos, TrackedContainer> dimContainers = containers.get(dimension);
+            if (dimContainers == null) return new HashSet<>();
+            Set<String> matches = new HashSet<>();
+            for (TrackedContainer container : dimContainers.values()) {
+                for (ItemStack stack : container.getItemStacks()) {
+                    if (stack == null || stack.isEmpty()) continue;
+                    String name = stack.getName().getString().toLowerCase();
+                    if (name.contains(queryLower)) {
+                        String itemId = net.minecraft.registry.Registries.ITEM.getId(stack.getItem()).toString();
+                        matches.add(itemId);
+                    }
+                }
+                for (ItemStack stack : container.getNestedItemStacks()) {
+                    if (stack == null || stack.isEmpty()) continue;
+                    String name = stack.getName().getString().toLowerCase();
+                    if (name.contains(queryLower)) {
+                        String itemId = net.minecraft.registry.Registries.ITEM.getId(stack.getItem()).toString();
+                        matches.add(itemId);
+                    }
+                }
+            }
+            return matches;
         } finally {
             lock.readLock().unlock();
         }

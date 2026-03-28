@@ -6,11 +6,9 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
 import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import xyz.thm.addon.modules.ItemSearchBar;
 
@@ -107,21 +105,29 @@ public class ChestTrackerScreen extends Screen {
     }
     private void loadItems() {
         allItems = new ArrayList<>();
-        Map<String, Integer> itemCounts = new HashMap<>();
+        Map<String, ItemEntry> entries = new HashMap<>();
         String currentDim = getCurrentDimension();
         for (TrackedContainer container : data.getAllContainers(currentDim)) {
-            for (Map.Entry<String, Integer> entry : container.getItems().entrySet()) {
-                itemCounts.merge(entry.getKey(), entry.getValue(), Integer::sum);
+            for (ItemStack stack : container.getItemStacks()) {
+                addStackToEntries(entries, stack);
+            }
+            for (ItemStack stack : container.getNestedItemStacks()) {
+                addStackToEntries(entries, stack);
             }
         }
-        for (Map.Entry<String, Integer> entry : itemCounts.entrySet()) {
-            Identifier id = Identifier.tryParse(entry.getKey());
-            if (id != null && Registries.ITEM.containsId(id)) {
-                Item item = Registries.ITEM.get(id);
-                allItems.add(new ItemEntry(item, entry.getValue()));
-            }
-        }
+        allItems.addAll(entries.values());
         sortItems();
+    }
+
+    private void addStackToEntries(Map<String, ItemEntry> entries, ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return;
+        String displayName = stack.getName().getString();
+        ItemEntry entry = entries.get(displayName);
+        if (entry == null) {
+            entries.put(displayName, new ItemEntry(stack.copy(), stack.getCount()));
+        } else {
+            entry.count += stack.getCount();
+        }
     }
     private void sortItems() {
         switch (currentSortMode) {
@@ -132,10 +138,10 @@ public class ChestTrackerScreen extends Screen {
                 allItems.sort((a, b) -> Integer.compare(a.count, b.count));
                 break;
             case NAME_ASC:
-                allItems.sort((a, b) -> a.item.getName().getString().compareToIgnoreCase(b.item.getName().getString()));
+                allItems.sort((a, b) -> a.displayName.compareToIgnoreCase(b.displayName));
                 break;
             case NAME_DESC:
-                allItems.sort((a, b) -> b.item.getName().getString().compareToIgnoreCase(a.item.getName().getString()));
+                allItems.sort((a, b) -> b.displayName.compareToIgnoreCase(a.displayName));
                 break;
         }
     }
@@ -148,7 +154,10 @@ public class ChestTrackerScreen extends Screen {
         } else {
             String query = searchQuery.toLowerCase();
             filteredItems = allItems.stream()
-                .filter(entry -> entry.item.getName().getString().toLowerCase().contains(query))
+                .filter(entry -> {
+                    String itemName = entry.displayName.toLowerCase();
+                    return itemName.contains(query);
+                })
                 .collect(Collectors.toList());
         }
         int rows = (int) Math.ceil(filteredItems.size() / (double) ITEMS_PER_ROW);
@@ -161,6 +170,7 @@ public class ChestTrackerScreen extends Screen {
     }
     private void onSearchChanged(String query) {
         this.searchQuery = query;
+        module.setSearchQuery(query);
         filterItems();
         ItemSearchBar itemSearchBar = Modules.get().get(ItemSearchBar.class);
         if (itemSearchBar != null && itemSearchBar.isActive()) {
@@ -247,7 +257,7 @@ public class ChestTrackerScreen extends Screen {
                     context.fill(x + ITEM_SIZE - 1, y, x + ITEM_SIZE, y + ITEM_SIZE, 0xFF2A2A2A);
                     context.fill(x, y + ITEM_SIZE - 1, x + ITEM_SIZE, y + ITEM_SIZE, 0xFF2A2A2A);
                 }
-                context.drawItem(new ItemStack(entry.item), x + 1, y + 1);
+                context.drawItem(entry.stack, x + 1, y + 1);
                 index++;
             }
             if (index >= maxIndex) break;
@@ -315,7 +325,7 @@ public class ChestTrackerScreen extends Screen {
                 if (mouseX >= x && mouseX < x + ITEM_SIZE &&
                     mouseY >= y && mouseY < y + ITEM_SIZE) {
                     ItemEntry entry = filteredItems.get(index);
-                    List<TrackedContainer> containers = data.searchItem(entry.item);
+                    List<TrackedContainer> containers = data.searchItem(entry.stack.getItem());
                     int withinRange = 0;
                     double renderDist = module.getRenderDistance();
                     if (client != null && client.player != null) {
@@ -328,7 +338,7 @@ public class ChestTrackerScreen extends Screen {
                         }
                     }
                     List<Text> tooltip = new ArrayList<>();
-                    tooltip.add(Text.literal("§f§l" + entry.item.getName().getString()));
+                    tooltip.add(Text.literal("§f§l" + entry.displayName));
                     tooltip.add(Text.literal(""));
                     tooltip.add(Text.literal("§7Total Amount: §a" + formatCountFull(entry.count)));
                     tooltip.add(Text.literal("§7Found in: §e" + containers.size() + " §7container(s)"));
@@ -409,11 +419,11 @@ public class ChestTrackerScreen extends Screen {
         return super.mouseClicked(click, doubled);
     }
     private void onItemClicked(ItemEntry entry) {
-        List<TrackedContainer> results = data.searchItem(entry.item);
-        module.searchItem(entry.item);
+        String itemName = entry.displayName;
+        List<TrackedContainer> results = data.searchItem(entry.stack.getItem());
+        module.setSearchQuery(itemName);
         ItemSearchBar itemSearchBar = Modules.get().get(ItemSearchBar.class);
         if (itemSearchBar != null && itemSearchBar.isActive()) {
-            String itemName = entry.item.getName().getString();
             itemSearchBar.updateSearchQuery(itemName);
             searchField.setText(itemName);
             this.searchQuery = itemName;
@@ -496,10 +506,12 @@ public class ChestTrackerScreen extends Screen {
         return client.world.getRegistryKey().getValue().toString();
     }
     private static class ItemEntry {
-        final Item item;
-        final int count;
-        ItemEntry(Item item, int count) {
-            this.item = item;
+        final ItemStack stack;
+        final String displayName;
+        int count;
+        ItemEntry(ItemStack stack, int count) {
+            this.stack = stack;
+            this.displayName = stack.getName().getString();
             this.count = count;
         }
     }
