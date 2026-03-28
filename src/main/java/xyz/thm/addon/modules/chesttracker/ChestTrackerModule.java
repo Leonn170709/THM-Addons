@@ -19,6 +19,7 @@ import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.minecraft.block.*;
 import net.minecraft.block.enums.ChestType;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.screen.ScreenHandler;
@@ -34,6 +35,7 @@ import org.lwjgl.glfw.GLFW;
 import xyz.thm.addon.THMAddon;
 
 import java.util.*;
+import java.lang.reflect.Field;
 
 import static meteordevelopment.meteorclient.utils.Utils.getItemsInContainerItem;
 import static meteordevelopment.meteorclient.utils.Utils.hasItems;
@@ -104,6 +106,12 @@ public class ChestTrackerModule extends Module {
         .defaultValue(true)
         .build()
     );
+    private final Setting<Boolean> renderContainerHighlights = sgRender.add(new BoolSetting.Builder()
+        .name("render-container-highlights")
+        .description("Highlight matching items inside open containers.")
+        .defaultValue(true)
+        .build()
+    );
     private final Setting<Integer> renderDistance = sgRender.add(new IntSetting.Builder()
         .name("render-distance")
         .description("Maximum render distance.")
@@ -135,6 +143,13 @@ public class ChestTrackerModule extends Module {
         .name("search-line-color")
         .description("Line color for search results.")
         .defaultValue(new SettingColor(0, 255, 0, 255))
+        .build()
+    );
+    private final Setting<SettingColor> containerHighlightColor = sgRender.add(new ColorSetting.Builder()
+        .name("container-highlight-color")
+        .description("Highlight color inside container screens.")
+        .defaultValue(new SettingColor(0, 255, 0, 80))
+        .visible(renderContainerHighlights::get)
         .build()
     );
     private final Setting<Boolean> renderLabels = sgLabels.add(new BoolSetting.Builder()
@@ -211,6 +226,7 @@ public class ChestTrackerModule extends Module {
     );
     private final ChestTrackerDataV2 data;
     private Item currentSearchItem;
+    private String currentSearchQuery = "";
     private BlockPos lastInteractedBlock = null;
     private boolean awaiting = false;
     private int awaitingTicks = 0;
@@ -218,6 +234,10 @@ public class ChestTrackerModule extends Module {
     private BlockPos[] currentOpenPositions = new BlockPos[2];
     private List<TrackedContainer> renderCache = new ArrayList<>();
     private long lastRenderCacheUpdate = 0;
+    private static Field handledScreenXField;
+    private static Field handledScreenYField;
+    private static Field handledScreenBgWidthField;
+    private static Field handledScreenBgHeightField;
     private boolean shouldAutoClose = false;
     private int ticksUntilClose = 0;
     private static final int AWAITING_TIMEOUT = 40;
@@ -514,8 +534,12 @@ public class ChestTrackerModule extends Module {
             BlockPos pos = container.getPosition();
             double distSq = mc.player.squaredDistanceTo(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
             if (distSq > maxDistSq) continue;
-            boolean isSearchResult = currentSearchItem != null &&
-                                    container.containsItem(currentSearchItem);
+            boolean isSearchResult = false;
+            if (currentSearchItem != null) {
+                isSearchResult = container.containsItemIncludingShulker(currentSearchItem);
+            } else if (currentSearchQuery != null && !currentSearchQuery.isEmpty()) {
+                isSearchResult = container.matchesNameQuery(currentSearchQuery.toLowerCase());
+            }
             boolean shouldRender = false;
             SettingColor sideCol = null;
             SettingColor lineCol = null;
@@ -539,6 +563,9 @@ public class ChestTrackerModule extends Module {
     @EventHandler
     private void onRender2D(Render2DEvent event) {
         if (mc.player == null || mc.world == null) return;
+        if (renderContainerHighlights.get() && isInContainerScreen() && mc.currentScreen instanceof HandledScreen<?> screen) {
+            renderContainerHighlights(event.drawContext, screen);
+        }
         if (!renderLabels.get()) return;
         if (currentSearchItem == null) return;
         DrawContext context = event.drawContext;
@@ -689,13 +716,111 @@ public class ChestTrackerModule extends Module {
     public void setCurrentSearchItem(Item item) {
         this.currentSearchItem = item;
     }
+    public String getCurrentSearchQuery() {
+        return currentSearchQuery;
+    }
+    public void setSearchQuery(String query) {
+        String normalized = query == null ? "" : query.trim();
+        currentSearchQuery = normalized;
+        if (!currentSearchQuery.isEmpty()) {
+            currentSearchItem = null;
+        }
+    }
     public ChestTrackerDataV2 getData() {
         return data;
     }
     public void searchItem(Item item) {
         currentSearchItem = item;
+        currentSearchQuery = "";
     }
     public double getRenderDistance() {
         return renderDistance.get();
+    }
+
+    private void renderContainerHighlights(DrawContext context, HandledScreen<?> screen) {
+        Item searchItem = currentSearchItem;
+        String query = currentSearchQuery == null ? "" : currentSearchQuery.trim();
+        if (searchItem == null && query.isEmpty()) return;
+        String queryLower = query.toLowerCase();
+        int left = getScreenLeft(screen);
+        int top = getScreenTop(screen);
+        int color = containerHighlightColor.get().getPacked();
+        for (Slot slot : screen.getScreenHandler().slots) {
+            if (!slot.hasStack()) continue;
+            ItemStack stack = slot.getStack();
+            if (stack.isEmpty()) continue;
+            boolean match = false;
+            if (searchItem != null) {
+                match = matchesItemOrShulker(stack, searchItem);
+            } else if (!queryLower.isEmpty()) {
+                match = matchesQueryOrShulker(stack, queryLower);
+            }
+            if (!match) continue;
+            int x = left + slot.x;
+            int y = top + slot.y;
+            context.fill(x, y, x + 16, y + 16, color);
+        }
+    }
+
+    private boolean matchesItemOrShulker(ItemStack stack, Item item) {
+        if (stack.getItem() == item) return true;
+        if (hasItems(stack)) {
+            ItemStack[] nested = new ItemStack[27];
+            getItemsInContainerItem(stack, nested);
+            for (ItemStack nestedItem : nested) {
+                if (nestedItem != null && !nestedItem.isEmpty() && nestedItem.getItem() == item) return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean matchesQueryOrShulker(ItemStack stack, String queryLower) {
+        if (matchesDisplayName(stack, queryLower)) return true;
+        if (hasItems(stack)) {
+            ItemStack[] nested = new ItemStack[27];
+            getItemsInContainerItem(stack, nested);
+            for (ItemStack nestedItem : nested) {
+                if (nestedItem != null && !nestedItem.isEmpty() && matchesDisplayName(nestedItem, queryLower)) return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean matchesDisplayName(ItemStack stack, String queryLower) {
+        String displayName = stack.getName().getString().toLowerCase();
+        return displayName.contains(queryLower);
+    }
+
+    private int getScreenLeft(HandledScreen<?> screen) {
+        Integer x = getHandledScreenField(screen, "x", handledScreenXField);
+        if (x != null) return x;
+        Integer bgWidth = getHandledScreenField(screen, "backgroundWidth", handledScreenBgWidthField);
+        if (bgWidth != null) return (screen.width - bgWidth) / 2;
+        return (screen.width - 176) / 2;
+    }
+
+    private int getScreenTop(HandledScreen<?> screen) {
+        Integer y = getHandledScreenField(screen, "y", handledScreenYField);
+        if (y != null) return y;
+        Integer bgHeight = getHandledScreenField(screen, "backgroundHeight", handledScreenBgHeightField);
+        if (bgHeight != null) return (screen.height - bgHeight) / 2;
+        return (screen.height - 166) / 2;
+    }
+
+    private Integer getHandledScreenField(HandledScreen<?> screen, String fieldName, Field cached) {
+        try {
+            Field field = cached;
+            if (field == null) {
+                field = HandledScreen.class.getDeclaredField(fieldName);
+                field.setAccessible(true);
+                if ("x".equals(fieldName)) handledScreenXField = field;
+                if ("y".equals(fieldName)) handledScreenYField = field;
+                if ("backgroundWidth".equals(fieldName)) handledScreenBgWidthField = field;
+                if ("backgroundHeight".equals(fieldName)) handledScreenBgHeightField = field;
+            }
+            return (Integer) field.get(screen);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 }

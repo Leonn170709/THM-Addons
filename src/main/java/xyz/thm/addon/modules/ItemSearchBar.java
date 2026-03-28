@@ -319,6 +319,7 @@ public class ItemSearchBar extends Module {
         if (chestTracker == null || !chestTracker.isActive()) return;
         if (query == null || query.trim().isEmpty()) {
             chestTracker.searchItem(null);
+            chestTracker.setSearchQuery("");
             info("ChestTracker search cleared");
         } else {
             Item searchItem = null;
@@ -352,7 +353,11 @@ public class ItemSearchBar extends Module {
                     }
                 }
             }
-            chestTracker.searchItem(searchItem);
+            if (searchItem != null) {
+                chestTracker.searchItem(searchItem);
+            } else {
+                chestTracker.setSearchQuery(query);
+            }
             if (searchItem != null) {
                 String itemDisplayName = searchItem.getDefaultStack().getName().getString();
                 info("ChestTracker: Searching for §e" + itemDisplayName);
@@ -360,7 +365,7 @@ public class ItemSearchBar extends Module {
                 if (!results.isEmpty()) {
                     final Item finalSearchItem = searchItem;
                     int totalCount = results.stream()
-                        .mapToInt(c -> c.getItemCount(Registries.ITEM.getId(finalSearchItem).toString()))
+                        .mapToInt(c -> c.getItemCountIncludingShulker(Registries.ITEM.getId(finalSearchItem).toString()))
                         .sum();
                     info("Found §a" + totalCount + "§r items in §e" + results.size() + "§r containers");
                 }

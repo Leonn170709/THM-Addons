@@ -139,7 +139,8 @@ public final class ThmMembers {
         cachedByMcName = new HashMap<>();
         for (Member member : cachedMembers) {
             for (String mcName : member.mcNames) {
-                cachedByMcName.put(mcName, member);
+                String normalized = normalizeMcName(mcName);
+                if (normalized != null) cachedByMcName.put(normalized, member);
             }
         }
         lastCacheTime = currentTime;
@@ -153,7 +154,9 @@ public final class ThmMembers {
     public static synchronized Member getMemberByMcName(String mcName) {
         refreshIfNeeded();
         if (cachedByMcName == null) return null;
-        return cachedByMcName.get(mcName);
+        String normalized = normalizeMcName(mcName);
+        if (normalized == null) return null;
+        return cachedByMcName.get(normalized);
     }
 
     public static synchronized boolean isThmMember(PlayerEntity player) {
@@ -165,7 +168,15 @@ public final class ThmMembers {
     }
     public static synchronized boolean hasRank(String mcName, String rank) {
         Member member = getMemberByMcName(mcName);
-        return member != null && member.rank.equalsIgnoreCase(rank);
+        if (member == null || member.rank == null) return false;
+        return member.rank.trim().equalsIgnoreCase(rank);
+    }
+
+    private static String normalizeMcName(String mcName) {
+        if (mcName == null) return null;
+        String trimmed = mcName.trim();
+        if (trimmed.isEmpty() || "Unknown".equalsIgnoreCase(trimmed)) return null;
+        return trimmed;
     }
 
     public static synchronized void resetCache() {

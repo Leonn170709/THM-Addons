@@ -63,7 +63,6 @@ public class THMHwyMonitor extends Module {
     private static final int DISCONNECT_SCREEN_EVIDENCE_TIMEOUT_MS = 3000;
     private static final String RECONNECT_RESUME_LISTENER_KEY = "thm-hwymonitor-resume";
     private static final String RECONNECT_FAILURE_LISTENER_KEY = "thm-hwymonitor-failure";
-    private final boolean EXPOSE_RESTART_AUTOMATION_SETTINGS = ThmMembers.isNovice(getSaveName());
     private static final boolean RUNTIME_WATCHDOG_LOG_ENABLED = false;
     private static final boolean EXECUTION_TRACE_LOG_ENABLED = false;
     private static final String BARITONE_PATH_COMPLETE_MARKER = "pathing complete";
@@ -142,6 +141,7 @@ public class THMHwyMonitor extends Module {
         .name("auto-reconnect")
         .description("Handles Automatically Reconnecting on Disconnects, and Restarting HighwayBuilderTHM")
         .defaultValue(false)
+        .visible(this::exposeRestartAutomationSettings)
         .build()
     );
 
@@ -151,8 +151,13 @@ public class THMHwyMonitor extends Module {
         .defaultValue(15)
         .range(1, 240)
         .sliderRange(1, 60)
+        .visible(this::exposeRestartAutomationSettings)
         .build()
     );
+
+    private boolean exposeRestartAutomationSettings() {
+        return !ThmMembers.isNovice(getSaveName());
+    }
 
     private int ticksSinceCheck;
     private int cooldownTicks;
@@ -2400,5 +2405,4 @@ public class THMHwyMonitor extends Module {
         DiagonalNESW
     }
 }
-
 

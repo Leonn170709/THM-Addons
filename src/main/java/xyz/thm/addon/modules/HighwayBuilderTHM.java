@@ -80,6 +80,7 @@ import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.system.THMSystem;
 import xyz.thm.addon.utils.ServerStatusHandler;
 import xyz.thm.addon.utils.ServerStatusHandler.ServerState;
+import xyz.thm.addon.utils.THMUtils;
 import xyz.thm.addon.utils.ThmMembers;
 
 import javax.crypto.Cipher;
@@ -236,6 +237,7 @@ public class HighwayBuilderTHM extends Module {
     private final SettingGroup sgDigging = settings.createGroup("Digging");
     private final SettingGroup sgPaving = settings.createGroup("Paving");
     private final SettingGroup sgInventory = settings.createGroup("Inventory");
+    private final SettingGroup sgKitBotIntegration = settings.createGroup("KitBot Integration", true);
     private final SettingGroup sgStatistics = settings.createGroup("Logging");
     private final SettingGroup sgNotifies = settings.createGroup("Notifies");
     private final SettingGroup sgRenderDigging = settings.createGroup("Render Digging");
@@ -295,14 +297,15 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Boolean> kitbotRestock = sgInventory.add(new BoolSetting.Builder()
+    private final Setting<Boolean> kitbotRestock = sgKitBotIntegration.add(new BoolSetting.Builder()
         .name("kitbot-restock")
         .description("Order a kit from KitBot1 when out of building blocks.")
         .defaultValue(false)
+        .visible(() -> mc.player != null && !ThmMembers.isNovice(mc.player.getName().getString()))
         .build()
     );
 
-    public final Setting<KitbotRestockKit> kitbotRestockKit = sgInventory.add(new EnumSetting.Builder<KitbotRestockKit>()
+    public final Setting<KitbotRestockKit> kitbotRestockKit = sgKitBotIntegration.add(new EnumSetting.Builder<KitbotRestockKit>()
         .name("kitbot-restock-kit")
         .description("Kit to order when kitbot restock triggers.")
         .defaultValue(KitbotRestockKit.Highway)
@@ -350,7 +353,7 @@ public class HighwayBuilderTHM extends Module {
             if (value) syncThmHwyMonitorOnActivate();
             else disableThmHwyMonitorIfActive();
         })
-        .visible(() -> isBaritoneInstalled())
+        .visible(THMUtils::isBaritoneInstalled)
         .build()
     );
 
