@@ -102,10 +102,6 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-<<<<<<< HEAD
-import java.util.function.Supplier;
-=======
->>>>>>> parent of 7a68740 (Revert "Update")
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -1819,24 +1815,6 @@ public class HighwayBuilderTHM extends Module {
 
         normalMining = null;
         packetMining = null;
-    }
-
-    private boolean safeCanBreak(BlockPos pos, BlockState state) {
-        try {
-            return BlockUtils.canBreak(pos, state);
-        } catch (StackOverflowError ignored) {
-            if (mc.player == null || mc.world == null) return false;
-            if (state.isAir()) return false;
-            return state.getHardness(mc.world, pos) >= 0.0f;
-        }
-    }
-
-    private boolean safeCanInstaBreak(BlockPos pos) {
-        try {
-            return BlockUtils.canInstaBreak(pos);
-        } catch (StackOverflowError ignored) {
-            return false;
-        }
     }
 
     private void updateSignBreakRegex() {
@@ -5381,13 +5359,8 @@ public class HighwayBuilderTHM extends Module {
             private boolean breakBlockingBlock(HighwayBuilderTHM b, BlockPos pos, BlockState state, String label, FailureMode failureMode) {
                 if (b.isKitbotRequiredAirClear(state)) return false;
                 if (b.breakTimer > 0) return true;
-<<<<<<< HEAD
-                if (!BlockUtils.canBreak(pos, state)) {
-                    failKitbotOrder(b, "Unable to clear blocking " + state.getBlock().getName().getString() + " at " + b.formatBlockPos(pos) + " while reconciling the " + label + ".", failureMode);
-=======
                 if (!b.safeCanBreak(pos, state)) {
-                    failKitbotOrder(b, "Unable to clear blocking " + state.getBlock().getName().getString() + " at " + b.formatBlockPos(pos) + " while reconciling the " + label + ".");
->>>>>>> parent of 7a68740 (Revert "Update")
+                    failKitbotOrder(b, "Unable to clear blocking " + state.getBlock().getName().getString() + " at " + b.formatBlockPos(pos) + " while reconciling the " + label + ".", failureMode);
                     return true;
                 }
 
