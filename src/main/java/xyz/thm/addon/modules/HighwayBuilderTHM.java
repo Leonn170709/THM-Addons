@@ -1260,7 +1260,6 @@ public class HighwayBuilderTHM extends Module {
 
         blockPosProvider = dir.diagonal ? new DiagonalBlockPosProvider() : new StraightBlockPosProvider();
         state = State.Forward;
-        if (!reconnectActivation) setState(State.Center);
         lastBreakingPos.set(0, 0, 0);
         if (isPendingPrintStatsSession(statsCacheSnapshot)) {
             if (!completeFinalizationRecord(statsCacheSnapshot, "pending-print-on-activate", true)) {
@@ -1276,7 +1275,9 @@ public class HighwayBuilderTHM extends Module {
             restoreStatsFromCache(statsCacheSnapshot, resumeStatsSessionOnNextActivate ? "monitor-resume" : "cache-resume");
             markArtifactConsumed(statsCacheSnapshot);
         }
-        else startFreshStatsSession();
+
+        if (!reconnectActivation) setState(State.Center);
+        if (!resumedStatsSession) startFreshStatsSession();
 
         resumeStatsSessionOnNextActivate = false;
         monitorPauseDeactivateArmed = false;
@@ -1457,6 +1458,34 @@ public class HighwayBuilderTHM extends Module {
 
     public HorizontalDirection getWorkingDirection() {
         return dir;
+    }
+
+    public boolean isInForwardState() {
+        return state == State.Forward;
+    }
+
+    public void hardFailForMonitorRecovery(String message, Object... args) {
+        super.error(message, args);
+        try {
+            THMHwyMonitor.signalNonRestartHardFailFromHighwayBuilder();
+        } catch (NoClassDefFoundError | ExceptionInInitializerError ignored) {
+            // Baritone-dependent monitor not available.
+        }
+
+        monitorPauseDeactivateArmed = false;
+        reconnectFailureDeactivateArmed = false;
+        if (isActive()) {
+            suppressThmHwyMonitorSync = true;
+            try {
+                disable();
+            } finally {
+                suppressThmHwyMonitorSync = false;
+            }
+        }
+
+        if (disconnectOnToggle.get()) {
+            disconnect(message, args);
+        }
     }
 
     public boolean resumeFromReconnect(HorizontalDirection lockedDirection, long generation) {
@@ -6115,6 +6144,13 @@ public class HighwayBuilderTHM extends Module {
                     && b.restockTask.shouldAttemptKitbot();
             }
 
+            private boolean grabFromInventoryAndRegisterSuccessfulLocalAction(HighwayBuilderTHM b, Inventory inv, Predicate<ItemStack> filterItem, RestockTask.SourcePhase sourcePhase) {
+                if (!grabFromInventory(b, inv, filterItem)) return false;
+                b.restockTask.refreshSessionProgress();
+                b.restockTask.noteSuccessfulLocalSourceAction(sourcePhase);
+                return true;
+            }
+
             private boolean grabFromInventoryAndTrackProgress(HighwayBuilderTHM b, Inventory inv, Predicate<ItemStack> filterItem, RestockTask.SourcePhase sourcePhase) {
                 RestockTask.RestockSession session = b.restockTask.getSession();
                 int beforeProgress = session != null ? session.getProgressTowardsTarget() : 0;
@@ -6126,7 +6162,7 @@ public class HighwayBuilderTHM extends Module {
 
             private boolean handleEnderChestRestockStep(HighwayBuilderTHM b, Inventory inv) {
                 if (b.restockTask.materials && b.restockTask.isObsidianRestockSession()) {
-                    if (grabFromInventoryAndTrackProgress(b, inv, itemStack -> itemStack.getItem() == Items.OBSIDIAN, RestockTask.SourcePhase.EnderChest)) {
+                    if (grabFromInventoryAndRegisterSuccessfulLocalAction(b, inv, itemStack -> itemStack.getItem() == Items.OBSIDIAN, RestockTask.SourcePhase.EnderChest)) {
                         delayTimer = b.inventoryDelay.get();
                         return true;
                     }
@@ -6145,7 +6181,7 @@ public class HighwayBuilderTHM extends Module {
                     }
 
                     if (needsMoreRawEchests(b)
-                        && grabFromInventoryAndTrackProgress(b, inv, itemStack -> itemStack.getItem() == Items.ENDER_CHEST, RestockTask.SourcePhase.EnderChest)) {
+                        && grabFromInventoryAndRegisterSuccessfulLocalAction(b, inv, itemStack -> itemStack.getItem() == Items.ENDER_CHEST, RestockTask.SourcePhase.EnderChest)) {
                         delayTimer = b.inventoryDelay.get();
                         return true;
                     }
@@ -6168,13 +6204,13 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 if (b.restockTask.materials) {
-                    if (grabFromInventoryAndTrackProgress(b, inv, itemStack -> itemStack.getItem() instanceof BlockItem bi && b.blocksToPlace.get().contains(bi.getBlock()), RestockTask.SourcePhase.EnderChest)) {
+                    if (grabFromInventoryAndRegisterSuccessfulLocalAction(b, inv, itemStack -> itemStack.getItem() instanceof BlockItem bi && b.blocksToPlace.get().contains(bi.getBlock()), RestockTask.SourcePhase.EnderChest)) {
                         delayTimer = b.inventoryDelay.get();
                         return true;
                     }
                 }
                 if (b.restockTask.pickaxes) {
-                    if (grabFromInventoryAndTrackProgress(b, inv, itemStack -> itemStack.isIn(ItemTags.PICKAXES), RestockTask.SourcePhase.EnderChest)) {
+                    if (grabFromInventoryAndRegisterSuccessfulLocalAction(b, inv, itemStack -> itemStack.isIn(ItemTags.PICKAXES), RestockTask.SourcePhase.EnderChest)) {
                         delayTimer = b.inventoryDelay.get();
                         return true;
                     }
@@ -6226,15 +6262,15 @@ public class HighwayBuilderTHM extends Module {
             private boolean restockItems(HighwayBuilderTHM b, Inventory inv) {
                 if (b.restockTask.materials) {
                     // take raw material
-                    if (grabFromInventoryAndTrackProgress(b, inv, itemStack -> itemStack.getItem() instanceof BlockItem bi && b.blocksToPlace.get().contains(bi.getBlock()), RestockTask.SourcePhase.InventoryShulkers)) return true;
+                    if (grabFromInventoryAndRegisterSuccessfulLocalAction(b, inv, itemStack -> itemStack.getItem() instanceof BlockItem bi && b.blocksToPlace.get().contains(bi.getBlock()), RestockTask.SourcePhase.InventoryShulkers)) return true;
 
                     // prefer taking raw material before echests
                     if (b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && needsMoreRawEchests(b)) {
-                        if (grabFromInventoryAndTrackProgress(b, inv, itemStack -> itemStack.getItem() == Items.ENDER_CHEST, RestockTask.SourcePhase.InventoryShulkers)) return true;
+                        if (grabFromInventoryAndRegisterSuccessfulLocalAction(b, inv, itemStack -> itemStack.getItem() == Items.ENDER_CHEST, RestockTask.SourcePhase.InventoryShulkers)) return true;
                     }
                 }
                 if (b.restockTask.pickaxes) {
-                    if (grabFromInventoryAndTrackProgress(b, inv, itemStack -> itemStack.isIn(ItemTags.PICKAXES), RestockTask.SourcePhase.InventoryShulkers)) return true;
+                    if (grabFromInventoryAndRegisterSuccessfulLocalAction(b, inv, itemStack -> itemStack.isIn(ItemTags.PICKAXES), RestockTask.SourcePhase.InventoryShulkers)) return true;
                 }
                 if (b.restockTask.food) {
                     return grabFromInventoryAndTrackProgress(b, inv, b::isConfiguredFoodStack, RestockTask.SourcePhase.InventoryShulkers);
@@ -9554,13 +9590,7 @@ public class HighwayBuilderTHM extends Module {
                     || madeEnderChestForwardProgressThisSession;
             }
 
-            private void noteSourceForwardProgress(SourcePhase sourcePhase, int beforeProgress, int beforeUsablePulledEchests) {
-                refreshProgress();
-
-                boolean progressed = getProgressTowardsTarget() > beforeProgress
-                    || (isObsidianTask() && usablePulledEchests > beforeUsablePulledEchests);
-                if (!progressed) return;
-
+            private void noteSuccessfulLocalSourceAction(SourcePhase sourcePhase) {
                 switch (sourcePhase) {
                     case InventoryShulkers -> madeInventoryShulkerForwardProgressThisSession = true;
                     case EnderChest -> madeEnderChestForwardProgressThisSession = true;
@@ -9568,8 +9598,18 @@ public class HighwayBuilderTHM extends Module {
                 }
             }
 
+            private void noteSourceForwardProgress(SourcePhase sourcePhase, int beforeProgress, int beforeUsablePulledEchests) {
+                refreshProgress();
+
+                boolean progressed = getProgressTowardsTarget() > beforeProgress
+                    || (isObsidianTask() && usablePulledEchests > beforeUsablePulledEchests);
+                if (!progressed) return;
+
+                noteSuccessfulLocalSourceAction(sourcePhase);
+            }
+
             private void noteUsefulEnderChestShulkerExtraction() {
-                madeEnderChestForwardProgressThisSession = true;
+                noteSuccessfulLocalSourceAction(SourcePhase.EnderChest);
             }
 
             private boolean needsMoreRawEchests() {
@@ -9875,6 +9915,10 @@ public class HighwayBuilderTHM extends Module {
 
         public void noteSourceForwardProgress(SourcePhase phase, int beforeProgress, int beforeUsablePulledEchests) {
             if (session != null) session.noteSourceForwardProgress(phase, beforeProgress, beforeUsablePulledEchests);
+        }
+
+        public void noteSuccessfulLocalSourceAction(SourcePhase phase) {
+            if (session != null) session.noteSuccessfulLocalSourceAction(phase);
         }
 
         public void noteUsefulEnderChestShulkerExtraction() {
