@@ -101,6 +101,13 @@ public class THMSystem extends System<THMSystem> {
         .defaultValue(true)
         .build()
     );
+    public final Setting<Type> nametagType = sgRender.add(new EnumSetting.Builder<Type>()
+        .name("Icon Type")
+        .description("Select the nametag rendering style")
+        .defaultValue(Type.TransparentWhite)
+        .visible(showNametagIcon::get)
+        .build()
+    );
 
     // Store original values
     private int savedWidth = -1;
@@ -204,5 +211,10 @@ public class THMSystem extends System<THMSystem> {
         None,
         HighwayBuilding,
         HighwayDigging
+    }
+    public enum Type {
+        Obby,
+        TransparentWhite,
+        TransparentBlack
     }
 }

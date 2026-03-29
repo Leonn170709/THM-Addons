@@ -1,31 +1,32 @@
 package xyz.thm.addon.mixin.meteor;
 
+import meteordevelopment.meteorclient.events.render.Render2DEvent;
+import meteordevelopment.meteorclient.renderer.text.TextRenderer;
+import meteordevelopment.meteorclient.systems.friends.Friends;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Module;
-import meteordevelopment.meteorclient.systems.modules.render.Nametags;
-import meteordevelopment.meteorclient.utils.render.color.Color;
-import meteordevelopment.meteorclient.utils.player.PlayerUtils;
-import meteordevelopment.meteorclient.renderer.text.TextRenderer;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.player.NameProtect;
-import meteordevelopment.meteorclient.systems.friends.Friends;
-import meteordevelopment.meteorclient.events.render.Render2DEvent;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.Identifier;
+import meteordevelopment.meteorclient.systems.modules.render.Nametags;
+import meteordevelopment.meteorclient.utils.player.PlayerUtils;
+import meteordevelopment.meteorclient.utils.render.color.Color;
 import net.minecraft.client.gl.RenderPipelines;
+import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.texture.NativeImage;
+import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.resource.Resource;
-import java.io.InputStream;
-import java.util.Optional;
+import net.minecraft.util.Identifier;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Redirect;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.Unique;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import xyz.thm.addon.system.THMSystem;
 import xyz.thm.addon.utils.ThmMembers;
+
+import java.io.InputStream;
+import java.util.Optional;
 
 @Mixin(value = Nametags.class, priority = 1001)
 public abstract class NametagsMixin extends Module {
@@ -33,7 +34,11 @@ public abstract class NametagsMixin extends Module {
         super(category, name, description, aliases);
     }
 
-    @Unique private static final Identifier THM_ICON = Identifier.of("icon", "obby.png");
+    // Adding the icons to select them later
+    @Unique private static final Identifier THM_ICON_OBBY = Identifier.of("icon", "obby.png");
+    @Unique private static final Identifier THM_ICON_TRANSPARENT_WHITE = Identifier.of("icon", "whitetransparent.png");
+    @Unique private static final Identifier THM_ICON_TRANSPARENT_BLACK = Identifier.of("icon", "blacktransparent.png");
+
     @Unique private static final int THM_ICON_PAD = 2;
     @Unique private static int thm$iconWidth = 64;
     @Unique private static int thm$iconHeight = 64;
@@ -41,6 +46,7 @@ public abstract class NametagsMixin extends Module {
 
     @Unique private DrawContext thm$drawContext;
     @Unique private PlayerEntity thm$player;
+
     @Inject(method = "renderNametagPlayer", at = @At("HEAD"))
     private void thmAddon$captureContext(Render2DEvent event, PlayerEntity player, boolean shadow, CallbackInfo ci) {
         thm$drawContext = event.drawContext;
@@ -91,9 +97,13 @@ public abstract class NametagsMixin extends Module {
         if (thm$drawContext != null) {
             int ix = (int) Math.round(x);
             int iy = (int) Math.round(y);
+
+            // Getting the right icon for the type selected
+            Identifier iconId = thm$getIconForMember(thm$player);
+
             thm$drawContext.drawTexture(
                 RenderPipelines.GUI_TEXTURED,
-                THM_ICON,
+                iconId,
                 ix,
                 iy,
                 0f,
@@ -126,13 +136,36 @@ public abstract class NametagsMixin extends Module {
     }
 
     @Unique
+    private Identifier thm$getIconForMember(PlayerEntity player) {
+        THMSystem system = THMSystem.get();
+        if (system == null || player == null) return THM_ICON_OBBY;
+
+        ThmMembers.Member member = thm$getEligibleMember(player, system);
+        if (member == null) return THM_ICON_OBBY;
+
+        // Getting the right icon type for the type selected
+        THMSystem.Type iconType = system.nametagType.get();
+
+        switch (iconType) {
+            case Obby:
+                return THM_ICON_OBBY;
+            case TransparentWhite:
+                return THM_ICON_TRANSPARENT_WHITE;
+            case TransparentBlack:
+                return THM_ICON_TRANSPARENT_BLACK;
+            default:
+                return THM_ICON_OBBY;
+        }
+    }
+
+    @Unique
     private static void thm$ensureIconSize() {
         if (thm$iconSizeResolved) return;
         thm$iconSizeResolved = true;
         if (meteordevelopment.meteorclient.MeteorClient.mc == null || meteordevelopment.meteorclient.MeteorClient.mc.getResourceManager() == null) return;
 
         try {
-            Optional<Resource> resource = meteordevelopment.meteorclient.MeteorClient.mc.getResourceManager().getResource(THM_ICON);
+            Optional<Resource> resource = meteordevelopment.meteorclient.MeteorClient.mc.getResourceManager().getResource(THM_ICON_OBBY);
             if (resource.isEmpty()) return;
             try (InputStream input = resource.get().getInputStream()) {
                 NativeImage image = NativeImage.read(input);
