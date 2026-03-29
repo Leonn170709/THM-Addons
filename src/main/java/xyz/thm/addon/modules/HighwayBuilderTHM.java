@@ -4046,13 +4046,18 @@ public class HighwayBuilderTHM extends Module {
         restockTask.setFood();
     }
 
+    private boolean isEnderChestReserveRestockEnabled() {
+        return searchEnderChest.get();
+    }
+
     private boolean shouldTriggerEnderChestReserveRestock() {
-        if (mc.player == null) return false;
+        if (mc.player == null || !isEnderChestReserveRestockEnabled()) return false;
         return countLooseInventoryEnderChests() <= saveEchests.get() - 1;
     }
 
     private void maybeQueueEnderChestReserveRestock() {
         if (mc.player == null || mc.world == null) return;
+        if (!isEnderChestReserveRestockEnabled()) return;
         if (!shouldTriggerEnderChestReserveRestock()) return;
         restockTask.setEnderChests();
     }
@@ -5597,10 +5602,19 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 if (b.restockTask.enderChests && !b.shouldTriggerEnderChestReserveRestock()) {
-                    b.restockDebug("Restock.start skipping stale ender chest reserve restock because loose count has recovered to %d (threshold=%d).",
-                        b.countLooseInventoryEnderChests(),
-                        Math.max(b.saveEchests.get() - 1, 0)
-                    );
+                    int looseCount = b.countLooseInventoryEnderChests();
+                    int threshold = Math.max(b.saveEchests.get() - 1, 0);
+                    if (!b.isEnderChestReserveRestockEnabled()) {
+                        b.restockDebug("Restock.start skipping stale ender chest reserve restock because searchEnderChest is disabled (looseCount=%d, threshold=%d).",
+                            looseCount,
+                            threshold
+                        );
+                    } else {
+                        b.restockDebug("Restock.start skipping stale ender chest reserve restock because loose count has recovered to %d (threshold=%d).",
+                            looseCount,
+                            threshold
+                        );
+                    }
                     b.completeRestockTaskAndContinue();
                     return;
                 }
