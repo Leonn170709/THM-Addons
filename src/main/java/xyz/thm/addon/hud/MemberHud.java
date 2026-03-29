@@ -81,9 +81,6 @@ public class MemberHud extends HudElement {
     public void render(HudRenderer renderer) {
         if (mc.player == null) return;
 
-        // Get cached members (API is only called if cache expired)
-        List<ThmMembers.Member> thmMembers = ThmMembers.getCachedMembers();
-
         // Get all online players from tab list
         List<String> onlinePlayers = new ArrayList<>(mc.player.networkHandler.getPlayerList().stream()
             .map(playerInfo -> playerInfo.getProfile().name()).toList());
@@ -107,13 +104,11 @@ public class MemberHud extends HudElement {
             "Bot"
         );
 
-        // Create a map of player to member for easier lookup
+        // Create a map of player to member for easier lookup (case-insensitive)
         Map<String, ThmMembers.Member> playerMemberMap = new HashMap<>();
         onlinePlayers.forEach(player -> {
-            thmMembers.stream()
-                .filter(member -> member.mcNames.length > 0 && Arrays.asList(member.mcNames).contains(player))
-                .findFirst()
-                .ifPresent(member -> playerMemberMap.put(player, member));
+            ThmMembers.Member member = ThmMembers.getMemberByMcName(player);
+            if (member != null) playerMemberMap.put(player, member);
         });
 
         // Sort players by rank hierarchy
@@ -153,6 +148,10 @@ public class MemberHud extends HudElement {
             }
 
             if (!showBots.get() && member.rank.equals("Bot")) {
+                return;
+            }
+
+            if (ThmMembers.isKillOnSight(member)) {
                 return;
             }
 

@@ -140,7 +140,11 @@ public final class ThmMembers {
         for (Member member : cachedMembers) {
             for (String mcName : member.mcNames) {
                 String normalized = normalizeMcName(mcName);
-                if (normalized != null) cachedByMcName.put(normalized, member);
+                if (normalized == null) continue;
+                Member existing = cachedByMcName.get(normalized);
+                if (existing == null || (!isKillOnSight(existing) && isKillOnSight(member))) {
+                    cachedByMcName.put(normalized, member);
+                }
             }
         }
         lastCacheTime = currentTime;
@@ -159,6 +163,24 @@ public final class ThmMembers {
         return cachedByMcName.get(normalized);
     }
 
+    public static synchronized List<Member> getCachedKosMembers() {
+        refreshIfNeeded();
+        if (cachedMembers == null) return Collections.emptyList();
+        return cachedMembers.stream()
+            .filter(ThmMembers::isKillOnSight)
+            .toList();
+    }
+
+    public static boolean isKillOnSight(Member member) {
+        if (member == null) return false;
+        return isKillOnSight(member.rank, member.branch);
+    }
+
+    public static boolean isKillOnSight(String rank, String branch) {
+        if (rank == null || branch == null) return false;
+        return "Kill on Sight".equalsIgnoreCase(rank.trim()) && "KOS".equalsIgnoreCase(branch.trim());
+    }
+
     public static synchronized boolean isThmMember(PlayerEntity player) {
         if (player == null) return false;
         return getMemberByMcName(player.getGameProfile().name()) != null;
@@ -174,7 +196,7 @@ public final class ThmMembers {
 
     private static String normalizeMcName(String mcName) {
         if (mcName == null) return null;
-        String trimmed = mcName.trim();
+        String trimmed = mcName.trim().toLowerCase(Locale.ROOT);
         if (trimmed.isEmpty() || "Unknown".equalsIgnoreCase(trimmed)) return null;
         return trimmed;
     }
