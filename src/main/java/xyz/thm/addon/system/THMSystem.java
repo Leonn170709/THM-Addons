@@ -104,7 +104,7 @@ public class THMSystem extends System<THMSystem> {
     public final Setting<Type> nametagType = sgRender.add(new EnumSetting.Builder<Type>()
         .name("Icon Type")
         .description("Select the nametag rendering style")
-        .defaultValue(Type.Obby)
+        .defaultValue(Type.TransparentWhite)
         .visible(showNametagIcon::get)
         .build()
     );
