@@ -33,7 +33,7 @@ public class BetterTabMixin extends Module {
         THMSystem system = THMSystem.get();
         if (system == null || !system.highlightInTab.get()) return;
 
-        String playerName = entry.getProfile().name();
+        String playerName = entry.getProfile().getName();
         ThmMembers.Member member = ThmMembers.getMemberByMcName(playerName);
         if (member == null) return;
 
@@ -45,7 +45,7 @@ public class BetterTabMixin extends Module {
 
         // Let self/friends highlights take priority
         if (self.get() && mc.player != null &&
-            entry.getProfile().id().equals(mc.player.getGameProfile().id())) return;
+            entry.getProfile().getId().equals(mc.player.getGameProfile().getId())) return;
         if (friends.get() && Friends.get().isFriend(entry)) return;
 
         meteordevelopment.meteorclient.utils.render.color.Color color = system.useRankColor.get()

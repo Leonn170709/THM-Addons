@@ -526,7 +526,7 @@ public class AutoTrapPlus extends Module {
             case South, North -> 0;
             case TowardPlayer -> {
                 //? if >=1.21.9 {
-                Vec3d toPlayer = mc.player.getEntityPos().subtract(t.getEntityPos());
+                Vec3d toPlayer = mc.player.getPos().subtract(t.getPos());
                 //?} else
                 /*Vec3d toPlayer = mc.player.getPos().subtract(t.getPos());
                 */
@@ -544,7 +544,7 @@ public class AutoTrapPlus extends Module {
             case East, West -> 0;
             case TowardPlayer -> {
                 //? if >=1.21.9 {
-                Vec3d toPlayer = mc.player.getEntityPos().subtract(t.getEntityPos());
+                Vec3d toPlayer = mc.player.getPos().subtract(t.getPos());
                 //?} else
                 /*Vec3d toPlayer = mc.player.getPos().subtract(t.getPos());
                 */

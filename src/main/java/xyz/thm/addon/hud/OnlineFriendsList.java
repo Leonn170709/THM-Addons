@@ -129,7 +129,7 @@ public class OnlineFriendsList extends HudElement {
         String ourPlayerName = mc.player.getName().getString();
 
         for (PlayerListEntry player : mc.getNetworkHandler().getPlayerList()) {
-            String playerName = player.getProfile().name();
+            String playerName = player.getProfile().getName();
 
             // Skip ourselves and only include friends
             if (!playerName.equals(ourPlayerName) && Friends.get().isFriend(player)) {

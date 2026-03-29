@@ -246,7 +246,7 @@ public class RotationUtils {
         return getRotationsTo(mc.player.getEyePos(), targetEntityPos);
     }
     public static Vec3d getHitVector(Entity entity, HitVector hitVector) {
-        Vec3d feetPos = entity.getEntityPos();
+        Vec3d feetPos = entity.getPos();
         return switch (hitVector) {
             case FEET -> feetPos;
             case TORSO -> feetPos.add(0.0, entity.getHeight() / 2.0f, 0.0);

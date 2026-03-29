@@ -1604,7 +1604,7 @@ public class THMHwyMonitor extends Module {
             builder.preserveCenterSpeedBaselineForMonitorRecovery("thm-monitor-pause");
             builder.disableForMonitorRealignPause();
         } else {
-            module.disable();
+            if (module.isActive()) {toggle();};
         }
     }
 
@@ -1615,7 +1615,7 @@ public class THMHwyMonitor extends Module {
         try {
             for (Module module : recoveryPausedModules) {
                 if (module == null) continue;
-                module.enable();
+                if (!module.isActive()) {toggle();};
             }
         } finally {
             internalTimerSpeedToggleInProgress = false;

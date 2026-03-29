@@ -271,7 +271,7 @@ public class SignRender extends Module {
     private void collectSigns() {
         allSigns.clear();
         signCache.clear();
-        Vec3d playerPos = mc.player.getEntityPos();
+        Vec3d playerPos = mc.player.getPos();
         double maxDist = maxDistance.get();
         List<SignRenderData> tempSignList = new ArrayList<>();
         for (BlockEntity blockEntity : Utils.blockEntities()) {
@@ -309,7 +309,7 @@ public class SignRender extends Module {
     }
     private void updateSignPositions() {
         if (mc.player == null) return;
-        Vec3d playerPos = mc.player.getEntityPos();
+        Vec3d playerPos = mc.player.getPos();
         Iterator<SignRenderData> iterator = allSigns.iterator();
         while (iterator.hasNext()) {
             SignRenderData sign = iterator.next();

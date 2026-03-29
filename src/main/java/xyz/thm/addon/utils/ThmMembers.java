@@ -183,7 +183,7 @@ public final class ThmMembers {
 
     public static synchronized boolean isThmMember(PlayerEntity player) {
         if (player == null) return false;
-        return getMemberByMcName(player.getGameProfile().name()) != null;
+        return getMemberByMcName(player.getGameProfile().getName()) != null;
     }
     public static synchronized boolean isNovice(String mcName) {
         return hasRank(mcName, "Novice");

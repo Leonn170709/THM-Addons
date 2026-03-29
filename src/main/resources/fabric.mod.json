@@ -33,7 +33,7 @@
   },
   "depends": {
     "java": ">=21",
-    "minecraft": ">=1.21.10 <=1.21.11",
+    "minecraft": ">=1.21.8 <=1.21.9",
     "meteor-client": "*",
     "fabric-api": "*"
   }

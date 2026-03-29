@@ -26,7 +26,6 @@ import xyz.thm.addon.commands.EclipCommand;
 import xyz.thm.addon.gui.themes.*;
 import xyz.thm.addon.hud.*;
 import xyz.thm.addon.modules.*;
-import xyz.thm.addon.modules.chesttracker.ChestTrackerModule;
 import xyz.thm.addon.system.THMTab;
 import xyz.thm.addon.utils.JoinPayload;
 import xyz.thm.addon.utils.ServerReconnectService;
@@ -78,7 +77,6 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
 
         // Modules
         Modules.get().add(new HighwayBuilderTHM());
-        Modules.get().add(new HighwayTools());
         Modules.get().add(new AxisViewer());
         Modules.get().add(new BlockCounter());
         Modules.get().add(new DiscordNotifs());
@@ -102,11 +100,10 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new TunnelMinerModule());
         Modules.get().add(new SignRender());
         Modules.get().add(new AfkLogout());
-        Modules.get().add(new FlightBypass());
         Modules.get().add(new KitbotFrontend());
-        Modules.get().add(new ChestTrackerModule());
         if (BaritoneUtils.IS_AVAILABLE) {
             Modules.get().add(new THMHwyMonitor());
+            Modules.get().add(new HighwayTools());
         }
 
 

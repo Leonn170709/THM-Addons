@@ -187,7 +187,7 @@ public abstract class NametagsMixin extends Module {
     @Unique
     private ThmMembers.Member thm$getEligibleMember(PlayerEntity player, THMSystem system) {
         if (player == null) return null;
-        ThmMembers.Member member = ThmMembers.getMemberByMcName(player.getGameProfile().name());
+        ThmMembers.Member member = ThmMembers.getMemberByMcName(player.getGameProfile().getName());
         if (member == null) return null;
 
         String branchFilter = system.showBranch.get();

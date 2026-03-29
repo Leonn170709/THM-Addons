@@ -340,7 +340,7 @@ public abstract class KillAuraMixin extends Module {
     }
     @Unique
     private Vec3d bephax$getAttackRotateVec(Entity entity) {
-        Vec3d feetPos = entity.getEntityPos();
+        Vec3d feetPos = entity.getPos();
         return switch (bephax$hitVector.get()) {
             case FEET -> feetPos;
             case TORSO -> feetPos.add(0.0, entity.getHeight() / 2.0f, 0.0);

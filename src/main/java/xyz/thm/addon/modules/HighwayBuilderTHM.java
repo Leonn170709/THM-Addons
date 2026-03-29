@@ -1477,7 +1477,7 @@ public class HighwayBuilderTHM extends Module {
         if (isActive()) {
             suppressThmHwyMonitorSync = true;
             try {
-                disable();
+                if (isActive()) {toggle();}
             } finally {
                 suppressThmHwyMonitorSync = false;
             }
@@ -2920,7 +2920,7 @@ public class HighwayBuilderTHM extends Module {
     private void startFreshStatsSession() {
         statsSessionTerminalOrFinalizing = false;
         retiredStatsReportSnapshot = null;
-        start = mc.player.getEntityPos();
+        start = mc.player.getPos();
         blocksBroken = 0;
         blocksPlaced = 0;
         displayInfo = true;
@@ -4224,7 +4224,7 @@ public class HighwayBuilderTHM extends Module {
             protected void start(HighwayBuilderTHM b) {
                 timeoutTicks = RECENTER_TIMEOUT_TICKS;
                 b.applyCenterSpeedOverrideIfPossible("center-start");
-                if (b.mc.player.getEntityPos().isInRange(Vec3d.ofBottomCenter(b.mc.player.getBlockPos()), 0.1)) {
+                if (b.mc.player.getPos().isInRange(Vec3d.ofBottomCenter(b.mc.player.getBlockPos()), 0.1)) {
                     stop(b);
                 }
             }
@@ -4427,7 +4427,7 @@ public class HighwayBuilderTHM extends Module {
 
             @Override
             protected void tick(HighwayBuilderTHM b) {
-                Vec3d vec = b.mc.player.getEntityPos().add(b.mc.player.getVelocity()).add(0, -0.75, 0);
+                Vec3d vec = b.mc.player.getPos().add(b.mc.player.getVelocity()).add(0, -0.75, 0);
                 pos.set(b.mc.player.getBlockX(), vec.y, b.mc.player.getBlockZ());
 
                 if (pos.getY() >= b.mc.player.getBlockPos().getY()) {
@@ -7392,7 +7392,7 @@ public class HighwayBuilderTHM extends Module {
                 float velocity = BowItem.getPullProgress(b.mc.player.getItemUseTime());
 
                 // Positions
-                Vec3d pos = target.getEntityPos();
+                Vec3d pos = target.getPos();
 
                 double relativeX = pos.x - b.mc.player.getX();
                 double relativeY = pos.y + 0.5 - b.mc.player.getEyeY(); // aiming a little bit above the bottom of the crystal, hopefully prevents shooting the floor or failing the raytrace check
