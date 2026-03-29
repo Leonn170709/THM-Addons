@@ -299,7 +299,7 @@ public class AutoTrapPlus extends Module {
             if (player.isSpectator() || !player.isAlive()) return false;
             if (!PlayerUtils.isWithin(entity, targetRange.get())) return false;
             if (!Friends.get().shouldAttack(player)) return false;
-            if (entity instanceof FakePlayerEntity fakePlayer) return !fakePlayer.noHit;
+            if (entity instanceof FakePlayerEntity) return true;
             return EntityUtils.getGameMode(player) == GameMode.SURVIVAL;
         }, priority.get(), Integer.MAX_VALUE);
 
