@@ -10,6 +10,7 @@ import meteordevelopment.meteorclient.systems.modules.misc.NameProtect;
 import meteordevelopment.meteorclient.systems.modules.render.Nametags;
 import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
+import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.texture.NativeImage;
@@ -102,7 +103,7 @@ public abstract class NametagsMixin extends Module {
             Identifier iconId = thm$getIconForMember(thm$player);
 
             thm$drawContext.drawTexture(
-                RenderLayer::getGuiTextured,
+                RenderPipelines.GUI_TEXTURED,
                 iconId,
                 ix,
                 iy,

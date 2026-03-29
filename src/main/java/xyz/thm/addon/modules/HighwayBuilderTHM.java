@@ -3587,7 +3587,7 @@ public class HighwayBuilderTHM extends Module {
         if (mc == null || mc.getFramebuffer() == null) return;
 
         String fileName = buildStatsScreenshotFileName(sessionId);
-        ScreenshotRecorder.saveScreenshot(mc.runDirectory, fileName, mc.getFramebuffer(), message -> info(message.getString()));
+        ScreenshotRecorder.saveScreenshot(mc.runDirectory, fileName, mc.getFramebuffer(),1, message -> info(message.getString()));
         THMAddon.LOG.info("[highway-stats-cache] screenshot saved reason={} session={} file={}",
             reason,
             shortSessionId(sessionId),
