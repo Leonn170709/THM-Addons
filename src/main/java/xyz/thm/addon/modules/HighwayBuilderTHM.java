@@ -1902,7 +1902,7 @@ public class HighwayBuilderTHM extends Module {
 
     private String cleanSignText(String text) {
         if (text == null || text.isEmpty()) return "";
-        text = text.replaceAll("§.", "");
+        text = text.replaceAll("Â§.", "");
         text = text.replaceAll("&[0-9a-fklmnor]", "");
         text = text.replaceAll("[\\p{C}&&[^\\s]]", "");
         text = text.replaceAll("[\\u0000-\\u001F\\u007F-\\u009F]", "");
@@ -4873,7 +4873,7 @@ public class HighwayBuilderTHM extends Module {
                     b.restockTask.markCurrentSourceExhausted(RestockTask.SourcePhase.MineEnderChests);
                     if (b.restockTask.isTargetSatisfied()) {
                         completeAndReturnToAnchor(b);
-                    } else if (b.kitbotRestock.get()) {
+                    } else if (b.kitbotRestock.get() && b.restockTask.shouldAttemptKitbotAfterMineEnderChests()) {
                         b.setState(KitbotOrder);
                     } else {
                         b.error("No usable ender chests available to continue obsidian restock.");
@@ -5054,6 +5054,10 @@ public class HighwayBuilderTHM extends Module {
             private static final int KITBOT_FAILSAFE_DELAY_TICKS = 200;
             private static final int KITBOT_PARTIAL_DELIVERY_GRACE_TICKS = 40;
             private static final int KITBOT_NO_DELIVERY_RETRY_TICKS = 20 * 180;
+            private enum FailureMode {
+                KITBOT_LOCAL,
+                POST_DELIVERY_RESTORE
+            }
             private boolean orderSent;
             private boolean positionReady;
             private BlockadeType sourceBlockadeType;
@@ -5096,7 +5100,7 @@ public class HighwayBuilderTHM extends Module {
                 b.input.stop();
 
                 if (!b.kitbotRestock.get()) {
-                    failKitbotOrder(b, "Kitbot restock was disabled while the Kitbot enclosure was active.");
+                    failKitbotOrder(b, "Kitbot restock was disabled while the Kitbot enclosure was active.", FailureMode.KITBOT_LOCAL);
                     return;
                 }
 
@@ -5166,7 +5170,7 @@ public class HighwayBuilderTHM extends Module {
                     return true;
                 }
 
-                failKitbotOrder(b, "Kitbot restock failed.");
+                failKitbotOrder(b, "Kitbot restock failed.", FailureMode.KITBOT_LOCAL);
                 return true;
             }
 
@@ -5260,58 +5264,58 @@ public class HighwayBuilderTHM extends Module {
             private boolean reconcileKitbotEnclosure(HighwayBuilderTHM b) {
                 KitbotFootprint source = b.getNormalBlockadeFootprint(b.kitbotAnchorPos.toImmutable(), sourceBlockadeType, b.dir, containerDirection, expansionDirection);
                 KitbotFootprint target = b.getKitbotEnclosureFootprint(b.kitbotAnchorPos.toImmutable(), b.dir, containerDirection, expansionDirection);
-                return reconcileFootprint(b, source, target, "Kitbot enclosure");
+                return reconcileFootprint(b, source, target, "Kitbot enclosure", FailureMode.KITBOT_LOCAL);
             }
 
             private boolean restoreNormalBlockade(HighwayBuilderTHM b) {
                 KitbotFootprint source = b.getKitbotEnclosureFootprint(b.kitbotAnchorPos.toImmutable(), b.dir, containerDirection, expansionDirection);
                 KitbotFootprint target = b.getNormalBlockadeFootprint(b.kitbotAnchorPos.toImmutable(), b.getEffectiveBlockadeType(), b.dir, containerDirection, expansionDirection);
-                return reconcileFootprint(b, source, target, "normal blockade");
+                return reconcileFootprint(b, source, target, "normal blockade", FailureMode.POST_DELIVERY_RESTORE);
             }
 
-            private boolean reconcileFootprint(HighwayBuilderTHM b, KitbotFootprint source, KitbotFootprint target, String label) {
-                if (clearRequiredAir(b, target, label)) return true;
-                if (clearSourceOnlyBlocks(b, source, target, label)) return true;
-                if (ensureRequiredBlocks(b, target, label)) return true;
+            private boolean reconcileFootprint(HighwayBuilderTHM b, KitbotFootprint source, KitbotFootprint target, String label, FailureMode failureMode) {
+                if (clearRequiredAir(b, target, label, failureMode)) return true;
+                if (clearSourceOnlyBlocks(b, source, target, label, failureMode)) return true;
+                if (ensureRequiredBlocks(b, target, label, failureMode)) return true;
 
                 if (!probeFootprint(b, target)) {
-                    failKitbotOrder(b, "Unable to complete the " + label + " before continuing Kitbot.");
+                    failKitbotOrder(b, "Unable to complete the " + label + " before continuing Kitbot.", failureMode);
                     return true;
                 }
 
                 return false;
             }
 
-            private boolean clearRequiredAir(HighwayBuilderTHM b, KitbotFootprint target, String label) {
+            private boolean clearRequiredAir(HighwayBuilderTHM b, KitbotFootprint target, String label, FailureMode failureMode) {
                 for (BlockPos pos : target.requiredAir) {
                     BlockState state = b.mc.world.getBlockState(pos);
                     if (b.isKitbotRequiredAirClear(state)) continue;
 
                     if (state.getBlock() == Blocks.OBSIDIAN) {
-                        failKitbotOrder(b, "Obsidian is blocking required open space for the " + label + ".");
+                        failKitbotOrder(b, "Obsidian is blocking required open space for the " + label + ".", failureMode);
                         return true;
                     }
 
-                    if (breakBlockingBlock(b, pos, state, label)) return true;
+                    if (breakBlockingBlock(b, pos, state, label, failureMode)) return true;
                 }
 
                 return false;
             }
 
-            private boolean clearSourceOnlyBlocks(HighwayBuilderTHM b, KitbotFootprint source, KitbotFootprint target, String label) {
+            private boolean clearSourceOnlyBlocks(HighwayBuilderTHM b, KitbotFootprint source, KitbotFootprint target, String label, FailureMode failureMode) {
                 for (BlockPos pos : source.requiredBlocks.keySet()) {
                     if (target.requiredBlocks.containsKey(pos) || target.requiredAir.contains(pos)) continue;
 
                     BlockState state = b.mc.world.getBlockState(pos);
                     if (b.isKitbotRequiredAirClear(state) || state.getBlock() == Blocks.OBSIDIAN) continue;
 
-                    if (breakBlockingBlock(b, pos, state, label)) return true;
+                    if (breakBlockingBlock(b, pos, state, label, failureMode)) return true;
                 }
 
                 return false;
             }
 
-            private boolean ensureRequiredBlocks(HighwayBuilderTHM b, KitbotFootprint target, String label) {
+            private boolean ensureRequiredBlocks(HighwayBuilderTHM b, KitbotFootprint target, String label, FailureMode failureMode) {
                 for (Map.Entry<BlockPos, KitbotStructureBlockType> entry : target.requiredBlocks.entrySet()) {
                     BlockPos pos = entry.getKey();
                     KitbotStructureBlockType type = entry.getValue();
@@ -5320,12 +5324,12 @@ public class HighwayBuilderTHM extends Module {
                     if (b.isSatisfiedKitbotStructureBlock(state, type)) continue;
 
                     if (state.getBlock() == Blocks.OBSIDIAN) {
-                        failKitbotOrder(b, "Obsidian is blocking a required " + type.name().toLowerCase(Locale.ROOT) + " block for the " + label + ".");
+                        failKitbotOrder(b, "Obsidian is blocking a required " + type.name().toLowerCase(Locale.ROOT) + " block for the " + label + ".", failureMode);
                         return true;
                     }
 
                     if (!BlockUtils.canPlace(pos)) {
-                        if (breakBlockingBlock(b, pos, state, label)) return true;
+                        if (breakBlockingBlock(b, pos, state, label, failureMode)) return true;
                         continue;
                     }
 
@@ -5333,7 +5337,7 @@ public class HighwayBuilderTHM extends Module {
 
                     int slot = findKitbotBlockSlot(b);
                     if (slot == -1) {
-                        failKitbotOrder(b, "Not enough blocks are available to complete the " + label + ".");
+                        failKitbotOrder(b, "Not enough blocks are available to complete the " + label + ".", failureMode);
                         return true;
                     }
 
@@ -5355,11 +5359,11 @@ public class HighwayBuilderTHM extends Module {
                 return false;
             }
 
-            private boolean breakBlockingBlock(HighwayBuilderTHM b, BlockPos pos, BlockState state, String label) {
+            private boolean breakBlockingBlock(HighwayBuilderTHM b, BlockPos pos, BlockState state, String label, FailureMode failureMode) {
                 if (b.isKitbotRequiredAirClear(state)) return false;
                 if (b.breakTimer > 0) return true;
                 if (!b.safeCanBreak(pos, state)) {
-                    failKitbotOrder(b, "Unable to clear blocking " + state.getBlock().getName().getString() + " at " + b.formatBlockPos(pos) + " while reconciling the " + label + ".");
+                    failKitbotOrder(b, "Unable to clear blocking " + state.getBlock().getName().getString() + " at " + b.formatBlockPos(pos) + " while reconciling the " + label + ".", failureMode);
                     return true;
                 }
 
@@ -5411,19 +5415,29 @@ public class HighwayBuilderTHM extends Module {
                 b.returnPlayerToKitbotAnchorIfSaved();
                 b.restockTask.setBlockadeReady(true);
                 if (!b.restockTask.validateOrInvalidateBlockadeLease()) {
-                    failKitbotOrder(b, "Kitbot restore completed, but the restored blockade lease could not be revalidated.");
+                    failKitbotOrder(b, "Kitbot restore completed, but the restored blockade lease could not be revalidated.", FailureMode.POST_DELIVERY_RESTORE);
                     return;
                 }
 
+                boolean sessionUsableAfterKitbotClamp = true;
                 if (b.restockTask.isSequenceActive() && !b.restockTask.tasksInactive()) {
-                    // Kitbot just injected fresh shulker supply into inventory, so the pre-Kitbot
-                    // "inventory shulkers exhausted" result must be reopened before source selection reruns.
-                    b.restockTask.reopenSourcePhase(RestockTask.SourcePhase.InventoryShulkers);
+                    sessionUsableAfterKitbotClamp = b.restockTask.recalculateFrozenSessionCapacityAfterKitbotDelivery();
                 }
 
                 b.clearKitbotRuntimeState("kitbot-order-restored");
 
                 if (b.restockTask.isSequenceActive() && !b.restockTask.tasksInactive()) {
+                    if (!sessionUsableAfterKitbotClamp) {
+                        if (b.restockDebugLog.get()) {
+                            b.restockDebug("KitbotOrder post-delivery frozen target clamp found no usable loose capacity for the active restock task.");
+                        }
+                        b.restockTask.reportUnusableSessionTarget();
+                        return;
+                    }
+
+                    // Kitbot just injected fresh shulker supply into inventory, so the pre-Kitbot
+                    // "inventory shulkers exhausted" result must be reopened before source selection reruns.
+                    b.restockTask.reopenSourcePhase(RestockTask.SourcePhase.InventoryShulkers);
                     b.restockDebug("KitbotOrder restored the blockade and is returning to Restock.");
                     b.setState(Restock);
                 } else {
@@ -5431,10 +5445,14 @@ public class HighwayBuilderTHM extends Module {
                 }
             }
 
-            private void failKitbotOrder(HighwayBuilderTHM b, String message) {
+            private void failKitbotOrder(HighwayBuilderTHM b, String message, FailureMode failureMode) {
+                if (failureMode == FailureMode.POST_DELIVERY_RESTORE && b.restockDebugLog.get()) {
+                    b.restockDebug("KitbotOrder post-delivery restore failure: %s", message);
+                }
                 b.returnPlayerToKitbotAnchorIfSaved();
                 b.invalidateKitbotBlockadeState("kitbot-order-failed");
                 b.clearKitbotRuntimeState("kitbot-order-failed");
+                if (failureMode == FailureMode.POST_DELIVERY_RESTORE && b.restockTask.failActiveTaskHard()) return;
                 b.errorEarly(message);
             }
         },
@@ -5733,9 +5751,7 @@ public class HighwayBuilderTHM extends Module {
                     } else if (b.restockTask.isObsidianRestockSession() && b.restockTask.getSession() != null && b.restockTask.getSession().usingGreatestAvailable && b.restockTask.getSession().getProgressTowardsTarget() > 0) {
                         b.completeRestockTaskAndContinue();
                     } else {
-                        if (b.restockTask.getSession() != null) b.restockTask.getSession().fail();
-                        b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", "Unable to perform restock for '" + b.restockTask.item() + "'.");
-                        b.error("Unable to perform restock for '" + b.restockTask.item() + "'.");
+                        b.restockTask.failActiveTaskHard();
                     }
 
                     return;
@@ -6099,9 +6115,18 @@ public class HighwayBuilderTHM extends Module {
                     && b.restockTask.shouldAttemptKitbot();
             }
 
+            private boolean grabFromInventoryAndTrackProgress(HighwayBuilderTHM b, Inventory inv, Predicate<ItemStack> filterItem, RestockTask.SourcePhase sourcePhase) {
+                RestockTask.RestockSession session = b.restockTask.getSession();
+                int beforeProgress = session != null ? session.getProgressTowardsTarget() : 0;
+                int beforeUsablePulledEchests = session != null ? session.getUsablePulledEchests() : 0;
+                if (!grabFromInventory(b, inv, filterItem)) return false;
+                b.restockTask.noteSourceForwardProgress(sourcePhase, beforeProgress, beforeUsablePulledEchests);
+                return true;
+            }
+
             private boolean handleEnderChestRestockStep(HighwayBuilderTHM b, Inventory inv) {
                 if (b.restockTask.materials && b.restockTask.isObsidianRestockSession()) {
-                    if (grabFromInventory(b, inv, itemStack -> itemStack.getItem() == Items.OBSIDIAN)) {
+                    if (grabFromInventoryAndTrackProgress(b, inv, itemStack -> itemStack.getItem() == Items.OBSIDIAN, RestockTask.SourcePhase.EnderChest)) {
                         delayTimer = b.inventoryDelay.get();
                         return true;
                     }
@@ -6119,7 +6144,8 @@ public class HighwayBuilderTHM extends Module {
                         }
                     }
 
-                    if (needsMoreRawEchests(b) && grabFromInventory(b, inv, itemStack -> itemStack.getItem() == Items.ENDER_CHEST)) {
+                    if (needsMoreRawEchests(b)
+                        && grabFromInventoryAndTrackProgress(b, inv, itemStack -> itemStack.getItem() == Items.ENDER_CHEST, RestockTask.SourcePhase.EnderChest)) {
                         delayTimer = b.inventoryDelay.get();
                         return true;
                     }
@@ -6142,25 +6168,25 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 if (b.restockTask.materials) {
-                    if (grabFromInventory(b, inv, itemStack -> itemStack.getItem() instanceof BlockItem bi && b.blocksToPlace.get().contains(bi.getBlock()))) {
+                    if (grabFromInventoryAndTrackProgress(b, inv, itemStack -> itemStack.getItem() instanceof BlockItem bi && b.blocksToPlace.get().contains(bi.getBlock()), RestockTask.SourcePhase.EnderChest)) {
                         delayTimer = b.inventoryDelay.get();
                         return true;
                     }
                 }
                 if (b.restockTask.pickaxes) {
-                    if (grabFromInventory(b, inv, itemStack -> itemStack.isIn(ItemTags.PICKAXES))) {
+                    if (grabFromInventoryAndTrackProgress(b, inv, itemStack -> itemStack.isIn(ItemTags.PICKAXES), RestockTask.SourcePhase.EnderChest)) {
                         delayTimer = b.inventoryDelay.get();
                         return true;
                     }
                 }
                 if (b.restockTask.food) {
-                    if (grabFromInventory(b, inv, b::isConfiguredFoodStack)) {
+                    if (grabFromInventoryAndTrackProgress(b, inv, b::isConfiguredFoodStack, RestockTask.SourcePhase.EnderChest)) {
                         delayTimer = b.inventoryDelay.get();
                         return true;
                     }
                 }
                 if (b.restockTask.enderChests) {
-                    if (grabFromInventory(b, inv, itemStack -> itemStack.getItem() == Items.ENDER_CHEST)) {
+                    if (grabFromInventoryAndTrackProgress(b, inv, itemStack -> itemStack.getItem() == Items.ENDER_CHEST, RestockTask.SourcePhase.EnderChest)) {
                         delayTimer = b.inventoryDelay.get();
                         return true;
                     }
@@ -6200,21 +6226,21 @@ public class HighwayBuilderTHM extends Module {
             private boolean restockItems(HighwayBuilderTHM b, Inventory inv) {
                 if (b.restockTask.materials) {
                     // take raw material
-                    if (grabFromInventory(b, inv, itemStack -> itemStack.getItem() instanceof BlockItem bi && b.blocksToPlace.get().contains(bi.getBlock()))) return true;
+                    if (grabFromInventoryAndTrackProgress(b, inv, itemStack -> itemStack.getItem() instanceof BlockItem bi && b.blocksToPlace.get().contains(bi.getBlock()), RestockTask.SourcePhase.InventoryShulkers)) return true;
 
                     // prefer taking raw material before echests
                     if (b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && needsMoreRawEchests(b)) {
-                        if (grabFromInventory(b, inv, itemStack -> itemStack.getItem() == Items.ENDER_CHEST)) return true;
+                        if (grabFromInventoryAndTrackProgress(b, inv, itemStack -> itemStack.getItem() == Items.ENDER_CHEST, RestockTask.SourcePhase.InventoryShulkers)) return true;
                     }
                 }
                 if (b.restockTask.pickaxes) {
-                    if (grabFromInventory(b, inv, itemStack -> itemStack.isIn(ItemTags.PICKAXES))) return true;
+                    if (grabFromInventoryAndTrackProgress(b, inv, itemStack -> itemStack.isIn(ItemTags.PICKAXES), RestockTask.SourcePhase.InventoryShulkers)) return true;
                 }
                 if (b.restockTask.food) {
-                    return grabFromInventory(b, inv, b::isConfiguredFoodStack);
+                    return grabFromInventoryAndTrackProgress(b, inv, b::isConfiguredFoodStack, RestockTask.SourcePhase.InventoryShulkers);
                 }
                 if (b.restockTask.enderChests) {
-                    return grabFromInventory(b, inv, itemStack -> itemStack.getItem() == Items.ENDER_CHEST);
+                    return grabFromInventoryAndTrackProgress(b, inv, itemStack -> itemStack.getItem() == Items.ENDER_CHEST, RestockTask.SourcePhase.InventoryShulkers);
                 }
 
                 return false;
@@ -6386,6 +6412,7 @@ public class HighwayBuilderTHM extends Module {
                 if (!shiftClickInventorySlot(b, inv, shulkerSlot)) return false;
 
                 b.restockTask.reopenSourcePhase(RestockTask.SourcePhase.InventoryShulkers);
+                b.restockTask.noteUsefulEnderChestShulkerExtraction();
                 reserveEnderChestUnits(b, kind, usefulUnits);
                 b.restockDebug("Restock.tick reopened InventoryShulkers after extracting a %s shulker from the ender chest into slot %d (usefulUnits=%d, remainingNeed=%d, reservedUnits=%d, sourceSlot=%d).",
                     describeRestockShulkerKind(kind),
@@ -9192,6 +9219,8 @@ public class HighwayBuilderTHM extends Module {
             private boolean inventoryShulkersExhausted;
             private boolean enderChestExhausted;
             private boolean mineEnderChestsExhausted;
+            private boolean madeInventoryShulkerForwardProgressThisSession;
+            private boolean madeEnderChestForwardProgressThisSession;
             private boolean enderChestExhaustedSnapshotValid;
             private boolean enderChestExhaustedMemoryKnown;
             private boolean enderChestExhaustedAccessAvailable;
@@ -9281,6 +9310,40 @@ public class HighwayBuilderTHM extends Module {
                 if (isTargetSatisfied()) phase = SourcePhase.Complete;
             }
 
+            private boolean recalculateFrozenCapacityAfterKitbotDelivery() {
+                if (!targetFrozen || b.mc.player == null) return false;
+
+                refreshProgress();
+
+                int oldTargetFinal = targetFinal;
+                int currentProgress = getProgressTowardsTarget();
+                int usableFreeSlots = Math.max(countEmptyInventorySlots() - b.minEmpty.get(), 0);
+                int currentAdditionalCapacity = switch (taskType) {
+                    case Pickaxes -> usableFreeSlots;
+                    case Materials -> isObsidianTask() ? usableFreeSlots * 64 : usableFreeSlots;
+                    case Food, EnderChests -> usableFreeSlots > 0 ? 1 : 0;
+                };
+
+                workingStageCapacity = usableFreeSlots;
+                targetFinal = Math.max(Math.min(oldTargetFinal, currentProgress + currentAdditionalCapacity), 0);
+                targetInitialized = targetFinal > 0;
+                remainingTarget = Math.max(targetFinal - currentProgress, 0);
+
+                if (b.restockDebugLog.get()) {
+                    b.restockDebug("RestockSession recalculated frozen target after Kitbot delivery for task=%s (oldTarget=%d, newTarget=%d, progress=%d, usableFreeSlots=%d, additionalCapacity=%d, usable=%s).",
+                        item(taskType),
+                        oldTargetFinal,
+                        targetFinal,
+                        currentProgress,
+                        usableFreeSlots,
+                        currentAdditionalCapacity,
+                        targetFinal > 0
+                    );
+                }
+
+                return targetFinal > 0;
+            }
+
             private void notePhase(SourcePhase phase) {
                 this.phase = phase;
                 if (b.restockDebugLog.get()) {
@@ -9308,6 +9371,10 @@ public class HighwayBuilderTHM extends Module {
                     case Food -> foodItemsAcquired;
                     case EnderChests -> enderChestItemsAcquired;
                 };
+            }
+
+            private int getUsablePulledEchests() {
+                return usablePulledEchests;
             }
 
             private int getRemainingTarget() {
@@ -9472,7 +9539,37 @@ public class HighwayBuilderTHM extends Module {
             }
 
             private boolean shouldAttemptKitbot() {
-                return !isTargetSatisfied() && !isMineEnderChestsExhausted();
+                return !isTargetSatisfied()
+                    && !isMineEnderChestsExhausted()
+                    && !isKitbotSuppressedByLocalSourceSuccess();
+            }
+
+            private boolean shouldAttemptKitbotAfterMineEnderChests() {
+                return !isTargetSatisfied()
+                    && !isKitbotSuppressedByLocalSourceSuccess();
+            }
+
+            private boolean isKitbotSuppressedByLocalSourceSuccess() {
+                return madeInventoryShulkerForwardProgressThisSession
+                    || madeEnderChestForwardProgressThisSession;
+            }
+
+            private void noteSourceForwardProgress(SourcePhase sourcePhase, int beforeProgress, int beforeUsablePulledEchests) {
+                refreshProgress();
+
+                boolean progressed = getProgressTowardsTarget() > beforeProgress
+                    || (isObsidianTask() && usablePulledEchests > beforeUsablePulledEchests);
+                if (!progressed) return;
+
+                switch (sourcePhase) {
+                    case InventoryShulkers -> madeInventoryShulkerForwardProgressThisSession = true;
+                    case EnderChest -> madeEnderChestForwardProgressThisSession = true;
+                    default -> { }
+                }
+            }
+
+            private void noteUsefulEnderChestShulkerExtraction() {
+                madeEnderChestForwardProgressThisSession = true;
             }
 
             private boolean needsMoreRawEchests() {
@@ -9754,12 +9851,34 @@ public class HighwayBuilderTHM extends Module {
             b.error("No empty slots for restocking items.");
         }
 
+        public boolean failActiveTaskHard() {
+            if (tasksInactive()) return false;
+
+            if (session != null) session.fail();
+            String activeItem = item();
+            b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", "Unable to perform restock for '" + activeItem + "'.");
+            b.error("Unable to perform restock for '" + activeItem + "'.");
+            return true;
+        }
+
         public void notePhase(SourcePhase phase) {
             if (session != null) session.notePhase(phase);
         }
 
         public void refreshSessionProgress() {
             if (session != null) session.refreshProgress();
+        }
+
+        public boolean recalculateFrozenSessionCapacityAfterKitbotDelivery() {
+            return session != null && session.recalculateFrozenCapacityAfterKitbotDelivery();
+        }
+
+        public void noteSourceForwardProgress(SourcePhase phase, int beforeProgress, int beforeUsablePulledEchests) {
+            if (session != null) session.noteSourceForwardProgress(phase, beforeProgress, beforeUsablePulledEchests);
+        }
+
+        public void noteUsefulEnderChestShulkerExtraction() {
+            if (session != null) session.noteUsefulEnderChestShulkerExtraction();
         }
 
         public boolean isTargetSatisfied() {
@@ -9814,6 +9933,10 @@ public class HighwayBuilderTHM extends Module {
 
         public boolean shouldAttemptKitbot() {
             return session != null && session.shouldAttemptKitbot();
+        }
+
+        public boolean shouldAttemptKitbotAfterMineEnderChests() {
+            return session != null && session.shouldAttemptKitbotAfterMineEnderChests();
         }
 
         public boolean isObsidianRestockSession() {
