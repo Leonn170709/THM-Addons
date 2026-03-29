@@ -1954,6 +1954,33 @@ public class HighwayBuilderTHM extends Module {
 
     private void setState(State state, State lastState) {
         State previousState = this.state;
+
+        if (previousState == State.Center && state != State.Center) {
+            restoreCenterSpeedIfOwned("center-exit:" + stateName(state));
+        }
+
+        if (state == State.Forward && restockTask.isSequenceActive()) {
+            String activeSummary = restockTask.activeSummary();
+            String pendingSummary = restockTask.pendingSummary();
+            boolean blockadeReady = restockTask.isBlockadeReady();
+            boolean sequenceActive = restockTask.isSequenceActive();
+
+            if (restockDebugLog.get()) {
+                restockDebug("Clearing stale restock sequence on Forward entry from %s (last=%s, active=%s, pending=%s, blockadeReady=%s, sequence=%s).",
+                    stateName(previousState),
+                    stateName(lastState),
+                    activeSummary,
+                    pendingSummary,
+                    blockadeReady,
+                    sequenceActive
+                );
+            }
+
+            invalidRestockRecoveryPending = false;
+            restockTask.finishSequence();
+            clearKitbotRuntimeState("forward-state-entry");
+        }
+
         this.lastState = lastState;
         this.state = state;
 
@@ -4641,24 +4668,21 @@ public class HighwayBuilderTHM extends Module {
 
         ThrowOutTrash {
             private final Set<Integer> keepSlots = new HashSet<>();
-            private boolean timerEnabled, firstTick, threwItems;
+            private boolean firstTick;
             private int timer;
             private static final ItemStack[] ITEMS = new ItemStack[27];
 
             @Override
             protected void start(HighwayBuilderTHM b) {
                 keepSlots.clear();
-                timerEnabled = false;
                 firstTick = true;
-                threwItems = false;
+                timer = 0;
             }
 
             @Override
             protected void tick(HighwayBuilderTHM b) {
-                if (timerEnabled) {
-                    if (timer > 0) timer--;
-                    else b.setState(b.lastState);
-
+                if (timer > 0) {
+                    timer--;
                     return;
                 }
 
@@ -4673,7 +4697,7 @@ public class HighwayBuilderTHM extends Module {
                 refreshProtectedTrashSlots(b);
 
                 if (!b.mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
-                    handleCursorStack(b);
+                    if (handleCursorStack(b)) timer = 1;
                     return;
                 }
 
@@ -4684,40 +4708,44 @@ public class HighwayBuilderTHM extends Module {
 
                     if (Utils.isShulker(itemStack.getItem()) && b.ejectUselessShulkers.get()) {
                         if (!isUsefulShulker(b, itemStack)) {
+                            if (b.restockDebugLog.get()) {
+                                b.restockDebug("ThrowOutTrash dropping useless shulker from slot %d (%s).", i, itemStack.getItem());
+                            }
                             InvUtils.drop().slot(i);
-                            threwItems = true;
+                            timer = 10;
                             return;
                         }
                         continue;
                     }
 
                     if (b.trashItems.get().contains(itemStack.getItem())) {
+                        if (b.restockDebugLog.get()) {
+                            b.restockDebug("ThrowOutTrash dropping trash item from slot %d (%s).", i, itemStack.getItem());
+                        }
                         InvUtils.drop().slot(i);
-                        threwItems = true;
+                        timer = 10;
                         return;
                     }
                 }
 
-                timerEnabled = true;
-                timer = threwItems ? 10 : 1;
+                b.setState(b.lastState);
             }
 
-            private void handleCursorStack(HighwayBuilderTHM b) {
+            private boolean handleCursorStack(HighwayBuilderTHM b) {
                 ItemStack cursorStack = b.mc.player.currentScreenHandler.getCursorStack();
-                if (b.clearCursorStackToEmptySlot("ThrowOutTrash")) return;
+                if (b.clearCursorStackToEmptySlot("ThrowOutTrash")) return true;
 
-                if (resolveUsefulCursorStack(b)) return;
-                if (resolveTrashCursorStack(b, cursorStack)) return;
+                if (resolveUsefulCursorStack(b)) return true;
+                if (resolveTrashCursorStack(b, cursorStack)) return true;
 
                 if (Utils.isShulker(cursorStack.getItem()) && b.ejectUselessShulkers.get()) {
                     if (!isUsefulShulker(b, cursorStack)) {
-                        threwItems = b.dropCursorStackIfSafe("ThrowOutTrash-useless-shulker");
-                        return;
+                        return b.dropCursorStackIfSafe("ThrowOutTrash-useless-shulker");
                     }
-                    return;
+                    return false;
                 }
 
-                threwItems = b.dropCursorStackIfSafe("ThrowOutTrash-default");
+                return b.dropCursorStackIfSafe("ThrowOutTrash-default");
             }
 
             private boolean resolveUsefulCursorStack(HighwayBuilderTHM b) {
@@ -4756,7 +4784,7 @@ public class HighwayBuilderTHM extends Module {
                 if (b.restockDebugLog.get() && usedProtectedTrash) {
                     b.restockDebug("ThrowOutTrash spent a protected trash block as a last resort to clear a useful cursor stack.");
                 }
-                threwItems = b.dropCursorStackIfSafe(usedProtectedTrash ? "ThrowOutTrash-protected-trash-cursor-swap" : "ThrowOutTrash-trash-cursor-swap");
+                b.dropCursorStackIfSafe(usedProtectedTrash ? "ThrowOutTrash-protected-trash-cursor-swap" : "ThrowOutTrash-trash-cursor-swap");
                 return true;
             }
 
@@ -4774,7 +4802,7 @@ public class HighwayBuilderTHM extends Module {
                     b.mc.player
                 );
 
-                threwItems = b.dropCursorStackIfSafe("ThrowOutTrash-reserved-trash-cursor-swap");
+                b.dropCursorStackIfSafe("ThrowOutTrash-reserved-trash-cursor-swap");
                 return true;
             }
 
