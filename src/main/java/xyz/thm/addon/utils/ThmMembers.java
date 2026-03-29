@@ -173,12 +173,25 @@ public final class ThmMembers {
 
     public static boolean isKillOnSight(Member member) {
         if (member == null) return false;
-        return isKillOnSight(member.rank, member.branch);
+        return isKillOnSight(member.rank, member.rankId, member.branch);
     }
 
     public static boolean isKillOnSight(String rank, String branch) {
-        if (rank == null || branch == null) return false;
-        return "Kill on Sight".equalsIgnoreCase(rank.trim()) && "KOS".equalsIgnoreCase(branch.trim());
+        return isKillOnSight(rank, null, branch);
+    }
+
+    public static boolean isKillOnSight(String rank, String rankId, String branch) {
+        String rankNorm = normalizeRankField(rank);
+        String rankIdNorm = normalizeRankField(rankId);
+        String branchNorm = normalizeRankField(branch);
+
+        if (rankNorm == null && rankIdNorm == null && branchNorm == null) return false;
+
+        if (rankIdNorm != null && rankIdNorm.equals("kos")) return true;
+        if (branchNorm != null && branchNorm.equals("kos")) return true;
+
+        if (rankNorm == null) return false;
+        return rankNorm.equals("kos") || rankNorm.equals("kill on sight") || rankNorm.equals("kill-on-sight");
     }
 
     public static synchronized boolean isThmMember(PlayerEntity player) {
@@ -223,7 +236,14 @@ public final class ThmMembers {
             case "Apprentice" -> new Color(95, 70, 53, 255); // Brown
             case "Novice" -> new Color(76, 173, 208, 255); // Cyan
             case "Bot" -> new Color(52, 152, 219, 255); // Blue
+            case "Kill on Sight", "Kill-on-Sight", "KOS" -> new Color(255, 0, 0, 255); // Red
             default -> new Color(255, 255, 255, 255); // White fallback
         };
+    }
+
+    private static String normalizeRankField(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim().toLowerCase(Locale.ROOT);
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }
