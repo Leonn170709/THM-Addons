@@ -7,9 +7,12 @@ import meteordevelopment.meteorclient.systems.modules.misc.AutoReconnect;
 import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.meteorclient.utils.world.Dimension;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.network.packet.s2c.common.DisconnectS2CPacket;
 import net.minecraft.text.Text;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.utils.THMUtils;
 
 public class AfkLogout extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -28,7 +31,7 @@ public class AfkLogout extends Module {
         .defaultValue(30)
         .min(1)
         .sliderRange(1, 120)
-        .visible(() -> enableTimeBased.get())
+        .visible(enableTimeBased::get)
         .build()
     );
 
@@ -92,15 +95,34 @@ public class AfkLogout extends Module {
         .build()
     );
 
+    // Elytra monitor logout settings
+    private final Setting<Boolean> enableElytraMonitor = sgGeneral.add(new BoolSetting.Builder()
+        .name("enable-elytra-monitor")
+        .description("Enable logout when you reach the elytra threshold in your inventory.")
+        .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Integer> elytraThreshold = sgGeneral.add(new IntSetting.Builder()
+        .name("elytra-threshold")
+        .description("Log out when usable elytras in inventory are at or below this number.")
+        .defaultValue(1)
+        .min(0)
+        .sliderRange(0, 30)
+        .visible(enableElytraMonitor::get)
+        .build()
+    );
+
     // Internal tracking for time-based logout
     private long moduleActivationTime = 0;
 
     // Public variables for displaying time and distance until logout
     public int timeUntilLogout = 0;
     public int distanceUntilLogout = 0;
+    public int usableElytras = 0;
 
     public AfkLogout() {
-        super(THMAddon.MAIN, "afk-logout", "Logs out when you reach certain coords or after a timeout. Useful for afk travelling.");
+        super(THMAddon.MAIN, "afk-logout", "Logs out when you reach certain conditions. Useful for afk travelling.");
     }
 
     @Override
@@ -123,9 +145,20 @@ public class AfkLogout extends Module {
             timeUntilLogout = calculateTimeUntilLogout();
         }
 
+        // Update elytra count if elytra monitor is enabled
+        if (enableElytraMonitor.get()) {
+            usableElytras = countUsableElytras();
+        }
+
         // Check time-based logout condition
         if (enableTimeBased.get() && isTimeoutReached()) {
             logout("Time-based logout triggered after " + timeoutMinutes.get() + " minute(s).");
+            return;
+        }
+
+        // Check elytra monitor logout condition
+        if (enableElytraMonitor.get() && usableElytras <= elytraThreshold.get()) {
+            logout("Elytra monitor triggered (usable elytras: " + usableElytras + ", threshold: " + elytraThreshold.get() + ").");
             return;
         }
 
@@ -180,10 +213,29 @@ public class AfkLogout extends Module {
         // Disconnect with the provided reason
         mc.player.networkHandler.onDisconnect(new DisconnectS2CPacket(Text.literal("[AfkLogout] " + reason)));
     }
+
+    private int countUsableElytras() {
+        if (mc.player == null) return 0;
+        int count = 0;
+        for (int i = 0; i < mc.player.getInventory().size(); i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (isUsableElytra(stack)) count++;
+        }
+        return count;
+    }
+
+    private boolean isUsableElytra(ItemStack stack) {
+        if (stack == null || stack.isEmpty() || stack.getItem() != Items.ELYTRA) return false;
+        // Ignore broken elytras or those under 10% durability.
+        return THMUtils.getDamage(stack) >= 10.0;
+    }
+
     @Override
     public String getInfoString() {
         if (enableTimeBased.get()) {
             return String.valueOf(timeUntilLogout);
+        } else if (enableElytraMonitor.get()) {
+            return String.valueOf(usableElytras);
         } else if (enableCoordBased.get()) {
             return String.valueOf(distanceUntilLogout);
         } else
