@@ -13,6 +13,7 @@ import meteordevelopment.meteorclient.systems.modules.Categories;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.world.PacketMine;
+import meteordevelopment.meteorclient.systems.modules.world.Timer;
 import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
@@ -49,6 +50,17 @@ public class BetterEchestFarmer extends Module {
         .build()
     );
 
+    private final Setting<Integer> amount = sgGeneral.add(new IntSetting.Builder()
+        .name("amount")
+        .description("The amount of obsidian to farm.")
+        .defaultValue(64)
+        .sliderMax(128)
+        .range(8, 512)
+        .sliderRange(8, 128)
+        .visible(selfToggle::get)
+        .build()
+    );
+
     private final Setting<Boolean> ignoreExisting = sgGeneral.add(new BoolSetting.Builder()
         .name("ignore-existing")
         .description("Ignores existing obsidian in your inventory and mines the total target amount.")
@@ -64,6 +76,30 @@ public class BetterEchestFarmer extends Module {
         .build()
     );
 
+    private final Setting<Boolean> useTimer = sgGeneral.add(new BoolSetting.Builder()
+        .name("use-timer")
+        .description("Use Timer module override while the farmer is active.")
+        .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Double> timerMultiplier = sgGeneral.add(new DoubleSetting.Builder()
+        .name("timer-multiplier")
+        .description("Timer speed multiplier while the farmer is active.")
+        .defaultValue(1.5)
+        .range(1.0, 5.0)
+        .sliderRange(1.0, 3.0)
+        .visible(useTimer::get)
+        .build()
+    );
+
+    private final Setting<Boolean> instaMineSilentSwap = sgGeneral.add(new BoolSetting.Builder()
+        .name("Silent-swap")
+        .description("Silently swap to the enderchest when placing it")
+        .defaultValue(true)
+        .build()
+    );
+
     private final Setting<Boolean> instaMine = sgGeneral.add(new BoolSetting.Builder()
         .name("insta-mine")
         .description("Use instant packet mining to break the ender chest.")
@@ -75,13 +111,7 @@ public class BetterEchestFarmer extends Module {
         .name("insta-mine-rotate")
         .description("Rotate when instant mining the ender chest.")
         .defaultValue(false)
-        .build()
-    );
-
-    private final Setting<Boolean> instaMineSilentSwap = sgGeneral.add(new BoolSetting.Builder()
-        .name("insta-mine-silent-swap")
-        .description("Silently swap to the best tool when instant mining.")
-        .defaultValue(true)
+        .visible(instaMine::get)
         .build()
     );
 
@@ -91,17 +121,7 @@ public class BetterEchestFarmer extends Module {
         .defaultValue(1)
         .range(0, 20)
         .sliderRange(0, 10)
-        .build()
-    );
-
-    private final Setting<Integer> amount = sgGeneral.add(new IntSetting.Builder()
-        .name("amount")
-        .description("The amount of obsidian to farm.")
-        .defaultValue(64)
-        .sliderMax(128)
-        .range(8, 512)
-        .sliderRange(8, 128)
-        .visible(selfToggle::get)
+        .visible(instaMine::get)
         .build()
     );
 
@@ -143,12 +163,16 @@ public class BetterEchestFarmer extends Module {
     );
 
     private final VoxelShape SHAPE = Block.createCuboidShape(1.0D, 0.0D, 1.0D, 15.0D, 14.0D, 15.0D);
+    private static final double PLACE_RANGE = 4.0;
 
     private BlockPos target;
     private int startCount;
     private boolean primed;
     private int rebreakTimer;
     private int rebreakTimeout;
+    private boolean timerApplied;
+    private boolean timerWasActive;
+    private Double timerPrevOverride;
 
     public BetterEchestFarmer() {
         super(THMAddon.MAIN, "Better-echest-farmer", "Places and breaks EChests to farm obsidian.");
@@ -161,6 +185,10 @@ public class BetterEchestFarmer extends Module {
         primed = false;
         rebreakTimer = 0;
         rebreakTimeout = 0;
+        timerApplied = false;
+        timerWasActive = false;
+        timerPrevOverride = null;
+        if (useTimer.get()) applyTimerOverride();
     }
 
     @Override
@@ -169,24 +197,34 @@ public class BetterEchestFarmer extends Module {
         primed = false;
         rebreakTimer = 0;
         rebreakTimeout = 0;
+        restoreTimerOverride();
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
+        if (useTimer.get()) {
+            if (!timerApplied) applyTimerOverride();
+            else syncTimerOverride();
+        } else if (timerApplied) {
+            restoreTimerOverride();
+        }
+
         // Finding target pos
         if (target == null) {
-            if (mc.crosshairTarget == null || mc.crosshairTarget.getType() != HitResult.Type.BLOCK) return;
+            if (mc.player == null) return;
+            HitResult hit = mc.player.raycast(PLACE_RANGE, 0, false);
+            if (hit.getType() != HitResult.Type.BLOCK) return;
 
-            BlockPos pos = ((BlockHitResult) mc.crosshairTarget).getBlockPos().up();
+            BlockPos pos = ((BlockHitResult) hit).getBlockPos().up();
             BlockState state = mc.world.getBlockState(pos);
 
             if (state.isReplaceable() || state.getBlock() == Blocks.ENDER_CHEST) {
-                target = ((BlockHitResult) mc.crosshairTarget).getBlockPos().up();
+                target = ((BlockHitResult) hit).getBlockPos().up();
             } else return;
         }
 
         // Disable if the block is too far away
-        if (!PlayerUtils.isWithinReach(target)) {
+        if (!PlayerUtils.isWithinReach(target) || mc.player.getEyePos().distanceTo(target.toCenterPos()) > PLACE_RANGE) {
             error("Target block pos out of reach.");
             target = null;
             return;
@@ -199,6 +237,9 @@ public class BetterEchestFarmer extends Module {
             return;
         }
 
+        // Keep pickaxe selected unless we are placing.
+        ensurePickaxeSelected();
+
         // Break existing echest at target pos
         if (mc.world.getBlockState(target).getBlock() == Blocks.ENDER_CHEST) {
             breakEchest(target);
@@ -206,7 +247,7 @@ public class BetterEchestFarmer extends Module {
 
         // Place echest if the target pos is empty
         if (mc.world.getBlockState(target).isReplaceable()) {
-            FindItemResult echest = InvUtils.findInHotbar(Items.ENDER_CHEST);
+            FindItemResult echest = ensureEchestInHotbar();
 
             if (!echest.found()) {
                 error("No Echests in hotbar, disabling");
@@ -223,7 +264,9 @@ public class BetterEchestFarmer extends Module {
         if (target == null || !render.get() || Modules.get().get(PacketMine.class).isMiningBlock(target)) return;
 
         Box box = SHAPE.getBoundingBoxes().getFirst();
-        event.renderer.box(target.getX() + box.minX, target.getY() + box.minY, target.getZ() + box.minZ, target.getX() + box.maxX, target.getY() + box.maxY, target.getZ() + box.maxZ, sideColor.get(), lineColor.get(), shapeMode.get(), 0);
+        event.renderer.box(target.getX() + box.minX, target.getY() + box.minY, target.getZ() + box.minZ,
+            target.getX() + box.maxX, target.getY() + box.maxY, target.getZ() + box.maxZ,
+            sideColor.get(), lineColor.get(), shapeMode.get(), 0);
     }
 
     private void breakEchest(BlockPos pos) {
@@ -288,9 +331,12 @@ public class BetterEchestFarmer extends Module {
     private void placeEchest(BlockPos pos, FindItemResult echest) {
         int slot = echest.slot();
         if (slot < 0 || slot > 8) return;
+        int selectedSlot = mc.player.getInventory().getSelectedSlot();
+        InvUtils.swap(slot, false);
         BlockUtils.place(pos, Hand.MAIN_HAND, slot, rotatePlace.get(), 0, true, true, true);
+        if (selectedSlot != slot) InvUtils.swap(selectedSlot, false);
         primed = true;
-        rebreakTimer = 0;
+        rebreakTimer = instaMineDelay.get();
         rebreakTimeout = 0;
     }
 
@@ -320,6 +366,39 @@ public class BetterEchestFarmer extends Module {
         return bestSlot;
     }
 
+    private void ensurePickaxeSelected() {
+        int bestSlot = findBestNonSilkToolSlot();
+        if (bestSlot == -1) return;
+        int selectedSlot = mc.player.getInventory().getSelectedSlot();
+        if (selectedSlot != bestSlot) InvUtils.swap(bestSlot, false);
+    }
+
+    private FindItemResult ensureEchestInHotbar() {
+        FindItemResult hotbar = InvUtils.findInHotbar(Items.ENDER_CHEST);
+        if (hotbar.found()) return hotbar;
+
+        FindItemResult inv = InvUtils.find(Items.ENDER_CHEST);
+        if (!inv.found()) return hotbar;
+
+        int pickSlot = findBestNonSilkToolSlot();
+        int hotbarSlot = findHotbarSlotForEchest(pickSlot);
+        if (hotbarSlot == -1) return hotbar;
+
+        InvUtils.move().from(inv.slot()).toHotbar(hotbarSlot);
+        return InvUtils.findInHotbar(Items.ENDER_CHEST);
+    }
+
+    private int findHotbarSlotForEchest(int pickSlot) {
+        int fallback = -1;
+        for (int i = 0; i < 9; i++) {
+            if (i == pickSlot) continue;
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.isEmpty()) return i;
+            if (fallback == -1) fallback = i;
+        }
+        return fallback;
+    }
+
     private void rotateTo(BlockPos pos) {
         if (mc.player == null) return;
         Rotations.rotate(Rotations.getYaw(pos.toCenterPos()), Rotations.getPitch(pos.toCenterPos()));
@@ -332,6 +411,46 @@ public class BetterEchestFarmer extends Module {
         mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, direction));
         if (swingHand.get()) {
             mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
+        }
+    }
+
+    private void applyTimerOverride() {
+        Timer timer = Modules.get().get(Timer.class);
+        if (timer == null) return;
+        timerWasActive = timer.isActive();
+        timerPrevOverride = readRawTimerOverride(timer);
+        timer.setOverride(timerMultiplier.get());
+        if (!timer.isActive()) timer.toggle();
+        timerApplied = true;
+    }
+
+    private void syncTimerOverride() {
+        Timer timer = Modules.get().get(Timer.class);
+        if (timer == null) return;
+        timer.setOverride(timerMultiplier.get());
+    }
+
+    private void restoreTimerOverride() {
+        if (!timerApplied) return;
+        Timer timer = Modules.get().get(Timer.class);
+        if (timer == null) {
+            timerApplied = false;
+            return;
+        }
+        double restore = timerPrevOverride == null ? Timer.OFF : timerPrevOverride;
+        timer.setOverride(restore);
+        if (!timerWasActive && timer.isActive()) timer.toggle();
+        timerApplied = false;
+    }
+
+    private Double readRawTimerOverride(Timer timer) {
+        try {
+            java.lang.reflect.Field overrideField = Timer.class.getDeclaredField("override");
+            overrideField.setAccessible(true);
+            Object value = overrideField.get(timer);
+            return value instanceof Double ? (Double) value : null;
+        } catch (Throwable ignored) {
+            return null;
         }
     }
 }
