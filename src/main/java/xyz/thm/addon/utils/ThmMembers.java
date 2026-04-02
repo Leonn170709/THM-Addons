@@ -176,6 +176,11 @@ public final class ThmMembers {
         return isKillOnSight(member.rank, member.rankId, member.branch);
     }
 
+    public static boolean isIgnore(Member member) {
+        if (member == null) return false;
+        return isIgnore(member.rank, member.rankId, member.branch);
+    }
+
     public static boolean isKillOnSight(String rank, String branch) {
         return isKillOnSight(rank, null, branch);
     }
@@ -192,6 +197,20 @@ public final class ThmMembers {
 
         if (rankNorm == null) return false;
         return rankNorm.equals("kos") || rankNorm.equals("kill on sight") || rankNorm.equals("kill-on-sight");
+    }
+
+    public static boolean isIgnore(String rank, String rankId, String branch) {
+        String rankNorm = normalizeRankField(rank);
+        String rankIdNorm = normalizeRankField(rankId);
+        String branchNorm = normalizeRankField(branch);
+
+        if (rankNorm == null && rankIdNorm == null && branchNorm == null) return false;
+
+        if (rankIdNorm != null && rankIdNorm.equals("ignore")) return true;
+        if (branchNorm != null && branchNorm.equals("ignore")) return true;
+
+        if (rankNorm == null) return false;
+        return rankNorm.equals("ignore");
     }
 
     public static synchronized boolean isThmMember(PlayerEntity player) {
