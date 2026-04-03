@@ -41,6 +41,8 @@ public final class ThmMembers {
     private static Map<String, Member> cachedByMcName = null;
     private static long lastCacheTime = 0;
     private static final long CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+    private static boolean fetchInProgress = false;
+    private static Thread fetchThread = null;
 
     private ThmMembers() {
     }
@@ -78,11 +80,9 @@ public final class ThmMembers {
     }
 
     private static List<Member> fetchMembersFromApi() {
-        List<Member> members = new ArrayList<>();
-
         try {
             String apiUrl = decryptAPI(API_URL, getPassword());
-            if (apiUrl == null) return members;
+            if (apiUrl == null) return null;
 
             HttpURLConnection connection = (HttpURLConnection) new URI(apiUrl).toURL().openConnection();
             connection.setRequestMethod("GET");
@@ -91,7 +91,7 @@ public final class ThmMembers {
 
             if (connection.getResponseCode() != 200) {
                 THMAddon.LOG.error("Failed to fetch members from API. Response code: {}", connection.getResponseCode());
-                return members;
+                return null;
             }
             THMAddon.LOG.info("Fetched Members");
 
@@ -104,6 +104,7 @@ public final class ThmMembers {
 
             Gson gson = new Gson();
             JsonArray jsonArray = gson.fromJson(response.toString(), JsonArray.class);
+            List<Member> members = new ArrayList<>();
 
             for (int i = 0; i < jsonArray.size(); i++) {
                 JsonObject jsonObject = jsonArray.get(i).getAsJsonObject();
@@ -123,21 +124,69 @@ public final class ThmMembers {
             }
 
             connection.disconnect();
+            return members;
         } catch (Exception e) {
-            System.err.println("Error fetching members from API: " + e.getMessage());
-            e.printStackTrace();
+            THMAddon.LOG.warn("Error fetching members from API: {}", e.getMessage());
         }
-
-        return members;
+        return null;
     }
 
     private static void refreshIfNeeded() {
         long currentTime = System.currentTimeMillis();
         if (cachedMembers != null && (currentTime - lastCacheTime) < CACHE_DURATION) return;
+        startFetch(false);
+    }
 
-        cachedMembers = fetchMembersFromApi();
+    private static void startFetch(boolean force) {
+        synchronized (ThmMembers.class) {
+            if (fetchInProgress) return;
+            if (!force && cachedMembers != null && (System.currentTimeMillis() - lastCacheTime) < CACHE_DURATION) return;
+
+            fetchInProgress = true;
+            fetchThread = new Thread(() -> runFetchLoop(force), "THM-MemberFetch");
+            fetchThread.setDaemon(true);
+            fetchThread.start();
+        }
+    }
+
+    private static void runFetchLoop(boolean force) {
+        long delayMs = 2000;
+        while (true) {
+            List<Member> members = fetchMembersFromApi();
+            if (members != null) {
+                synchronized (ThmMembers.class) {
+                    updateCache(members);
+                    fetchInProgress = false;
+                }
+                return;
+            }
+
+            try {
+                Thread.sleep(delayMs);
+            } catch (InterruptedException e) {
+                synchronized (ThmMembers.class) {
+                    fetchInProgress = false;
+                }
+                Thread.currentThread().interrupt();
+                return;
+            }
+
+            delayMs = Math.min(delayMs * 2, 30000);
+            if (!force) {
+                synchronized (ThmMembers.class) {
+                    if (cachedMembers != null && (System.currentTimeMillis() - lastCacheTime) < CACHE_DURATION) {
+                        fetchInProgress = false;
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    private static void updateCache(List<Member> members) {
+        cachedMembers = members;
         cachedByMcName = new HashMap<>();
-        for (Member member : cachedMembers) {
+        for (Member member : members) {
             for (String mcName : member.mcNames) {
                 String normalized = normalizeMcName(mcName);
                 if (normalized == null) continue;
@@ -147,7 +196,7 @@ public final class ThmMembers {
                 }
             }
         }
-        lastCacheTime = currentTime;
+        lastCacheTime = System.currentTimeMillis();
     }
 
     public static synchronized List<Member> getCachedMembers() {
@@ -237,6 +286,11 @@ public final class ThmMembers {
         cachedMembers = null;
         cachedByMcName = null;
         lastCacheTime = 0;
+    }
+
+    public static synchronized void refreshNow() {
+        resetCache();
+        startFetch(true);
     }
 
     public static Color getRankColor(String rankName) {

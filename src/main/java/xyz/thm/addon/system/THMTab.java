@@ -9,6 +9,7 @@ import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import meteordevelopment.meteorclient.settings.Settings;
 import meteordevelopment.meteorclient.utils.misc.NbtUtils;
 import net.minecraft.client.gui.screen.Screen;
+import xyz.thm.addon.utils.ThmMembers;
 
 public class THMTab extends Tab {
     private static boolean thmTabOpen;
@@ -58,6 +59,10 @@ public class THMTab extends Tab {
             WButton applyButton = theme.button("Apply Profile");
             applyButton.action = () -> THMSystem.get().applyProfile();
             add(applyButton).expandX();
+
+            WButton refreshMembers = theme.button("Refresh Members");
+            refreshMembers.action = ThmMembers::refreshNow;
+            add(refreshMembers).expandX();
         }
 
         @Override
