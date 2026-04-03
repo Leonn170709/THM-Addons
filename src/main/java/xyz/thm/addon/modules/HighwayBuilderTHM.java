@@ -1311,8 +1311,16 @@ public class HighwayBuilderTHM extends Module {
         //all modules that may cause error now print errors/warnings
         if (Modules.get().get(InstantRebreak.class).isActive())
             warning("It's recommended to disable the Instant Rebreak module and instead use the 'instantly-rebreak-echests' setting to avoid errors.");
-        if (Modules.get().get(SpeedMine.class).isActive())
-            warning("It's recommended to disable the Speedmine module and instead use the 'fast-break' setting to avoid errors.");
+        SpeedMine speedMine = Modules.get().get(SpeedMine.class);
+        Setting<SpeedMine.ListMode> speedMineBlocksFilter = speedMine.settings.get("blocks-filter", SpeedMine.ListMode.class);
+        @SuppressWarnings("unchecked")
+        Setting<List<Block>> speedMineBlocks = (Setting<List<Block>>) speedMine.settings.get("blocks");
+        if (speedMineBlocksFilter != null
+            && speedMineBlocksFilter.get() == SpeedMine.ListMode.Blacklist
+            && speedMineBlocks != null
+            && speedMineBlocks.get().contains(Blocks.NETHERRACK)) {
+            warning("It's recommended to add Netherrack to the blacklist in Speed Mine (Ignore if you let highway builder manage it)");
+        }
         if (Modules.get().get(Speed.class).isActive() && dir.diagonal)
             warning("It's recommended to disable the Speed module to avoid misalignment on diagonals.");
         if (Modules.get().get(Timer.class).isActive() && dir.diagonal)
