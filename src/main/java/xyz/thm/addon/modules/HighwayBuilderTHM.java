@@ -374,6 +374,13 @@ public class HighwayBuilderTHM extends Module {
         .visible(doubleMine::get)
         .build()
     );
+    private final Setting<Boolean> speedmine = sgDigging.add(new BoolSetting.Builder()
+        .name("speedmine")
+        .description("Wether to use the Speedmine module to speed up basalt breaking")
+        .defaultValue(true)
+        .visible(doubleMine::get)
+        .build()
+    );
 
     private final Setting<Boolean> dontBreakTools = sgDigging.add(new BoolSetting.Builder()
         .name("dont-break-tools")
@@ -881,6 +888,7 @@ public class HighwayBuilderTHM extends Module {
     private volatile boolean statsProofScreenshotScheduled;
     private volatile boolean statsDisconnectScreenshotScheduled;
     private String lastPrintedStatsSessionId;
+    private SpeedMineSettingsSnapshot speedMineSettingsSnapshot;
     private boolean previousPauseOnLostFocus;
     private boolean pauseOnLostFocusChanged;
     private boolean executionPausedByServerState;
@@ -893,6 +901,7 @@ public class HighwayBuilderTHM extends Module {
     public DoubleMineBlock normalMining, packetMining;
     private final MBlockPos posRender2 = new MBlockPos();
     private final MBlockPos posRender3 = new MBlockPos();
+
 
     private int debugStateLastAge = -1;
     private List<Pattern> signBreakPatterns = Collections.emptyList();
@@ -922,6 +931,14 @@ public class HighwayBuilderTHM extends Module {
         boolean vanillaOnGround,
         boolean wasActive,
         boolean timerWasActive
+    ) {}
+
+    private record SpeedMineSettingsSnapshot(
+        SpeedMine.Mode mode,
+        SpeedMine.ListMode blocksFilter,
+        List<Block> blocks,
+        boolean instamine,
+        boolean grimBypass
     ) {}
 
     private enum ReconnectBaselineLeaseState {
@@ -1315,6 +1332,10 @@ public class HighwayBuilderTHM extends Module {
         }
         if (!Modules.get().get(HotbarManager.class).isActive() && hotbarmanager.get()) { Modules.get().get(HotbarManager.class).toggle();}
         if (!Modules.get().get(AntiDrop.class).isActive() && antidrop.get()) { Modules.get().get(AntiDrop.class).toggle();}
+        if (!Modules.get().get(SpeedMine.class).isActive() && speedmine.get()) { Modules.get().get(SpeedMine.class).toggle();
+            SpeedMine spedmine = Modules.get().get(SpeedMine.class);
+            applySpeedMineHighwayBuilderOverrides(spedmine);
+        }
 
         THMSystem thmSystem = THMSystem.get();
         if (thmSystem != null) {
@@ -1368,6 +1389,8 @@ public class HighwayBuilderTHM extends Module {
             togglePauseOnLostFocus(previousPauseOnLostFocus);
             pauseOnLostFocusChanged = false;
         }
+
+        restoreSpeedMineSettingsIfNeeded();
 
         if (mc.player == null || mc.world == null || !Utils.canUpdate()) {
             if (hasActiveInMemoryStatsSession()) {
@@ -1866,6 +1889,78 @@ public class HighwayBuilderTHM extends Module {
         }
 
         signBreakPatterns = compiled;
+    }
+
+    @SuppressWarnings("unchecked")
+    private SpeedMineSettingsSnapshot captureSpeedMineSettings(SpeedMine speedMine) {
+        Setting<SpeedMine.ListMode> blocksFilter = speedMine.settings.get("blocks-filter", SpeedMine.ListMode.class);
+        Setting<List<Block>> blocksSetting = (Setting<List<Block>>) speedMine.settings.get("blocks");
+        Setting<Boolean> instamineSetting = (Setting<Boolean>) speedMine.settings.get("instamine");
+        Setting<Boolean> grimBypassSetting = (Setting<Boolean>) speedMine.settings.get("grim-bypass");
+
+        List<Block> blocks = blocksSetting != null ? new ArrayList<>(blocksSetting.get()) : new ArrayList<>();
+        boolean instamine = instamineSetting != null && instamineSetting.get();
+        boolean grimBypass = grimBypassSetting != null && grimBypassSetting.get();
+        SpeedMine.ListMode filter = blocksFilter != null ? blocksFilter.get() : SpeedMine.ListMode.Blacklist;
+
+        return new SpeedMineSettingsSnapshot(
+            speedMine.mode.get(),
+            filter,
+            blocks,
+            instamine,
+            grimBypass
+        );
+    }
+
+    @SuppressWarnings("unchecked")
+    private void applySpeedMineHighwayBuilderOverrides(SpeedMine speedMine) {
+        if (speedMineSettingsSnapshot == null) speedMineSettingsSnapshot = captureSpeedMineSettings(speedMine);
+
+        speedMine.mode.set(SpeedMine.Mode.Damage);
+
+        Setting<SpeedMine.ListMode> blocksFilter = speedMine.settings.get("blocks-filter", SpeedMine.ListMode.class);
+        if (blocksFilter != null) blocksFilter.set(SpeedMine.ListMode.Blacklist);
+
+        Setting<List<Block>> blocksSetting = (Setting<List<Block>>) speedMine.settings.get("blocks");
+        if (blocksSetting != null) {
+            List<Block> blocks = new ArrayList<>(1);
+            blocks.add(Blocks.NETHERRACK);
+            blocksSetting.set(blocks);
+        }
+
+        Setting<Boolean> instamineSetting = (Setting<Boolean>) speedMine.settings.get("instamine");
+        if (instamineSetting != null) instamineSetting.set(true);
+
+        Setting<Boolean> grimBypassSetting = (Setting<Boolean>) speedMine.settings.get("grim-bypass");
+        if (grimBypassSetting != null) grimBypassSetting.set(false);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void restoreSpeedMineSettingsIfNeeded() {
+        if (speedMineSettingsSnapshot == null) return;
+
+        SpeedMine speedMine = Modules.get().get(SpeedMine.class);
+        if (speedMine == null) {
+            speedMineSettingsSnapshot = null;
+            return;
+        }
+
+        SpeedMineSettingsSnapshot snapshot = speedMineSettingsSnapshot;
+        speedMine.mode.set(snapshot.mode());
+
+        Setting<SpeedMine.ListMode> blocksFilter = speedMine.settings.get("blocks-filter", SpeedMine.ListMode.class);
+        if (blocksFilter != null) blocksFilter.set(snapshot.blocksFilter());
+
+        Setting<List<Block>> blocksSetting = (Setting<List<Block>>) speedMine.settings.get("blocks");
+        if (blocksSetting != null) blocksSetting.set(new ArrayList<>(snapshot.blocks()));
+
+        Setting<Boolean> instamineSetting = (Setting<Boolean>) speedMine.settings.get("instamine");
+        if (instamineSetting != null) instamineSetting.set(snapshot.instamine());
+
+        Setting<Boolean> grimBypassSetting = (Setting<Boolean>) speedMine.settings.get("grim-bypass");
+        if (grimBypassSetting != null) grimBypassSetting.set(snapshot.grimBypass());
+
+        speedMineSettingsSnapshot = null;
     }
 
     private boolean shouldSkipSignBreak(BlockPos pos, BlockState state) {
