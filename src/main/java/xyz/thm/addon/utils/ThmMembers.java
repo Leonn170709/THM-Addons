@@ -230,6 +230,11 @@ public final class ThmMembers {
         return isIgnore(member.rank, member.rankId, member.branch);
     }
 
+    public static synchronized boolean isIgnore(String mcName) {
+        Member member = getMemberByMcName(mcName);
+        return isIgnore(member);
+    }
+
     public static boolean isKillOnSight(String rank, String branch) {
         return isKillOnSight(rank, null, branch);
     }
@@ -264,7 +269,14 @@ public final class ThmMembers {
 
     public static synchronized boolean isThmMember(PlayerEntity player) {
         if (player == null) return false;
-        return getMemberByMcName(player.getGameProfile().name()) != null;
+        Member member = getMemberByMcName(player.getGameProfile().name());
+        if (member == null) return false;
+        return !isKillOnSight(member) && !isIgnore(member);
+    }
+
+    public static synchronized boolean isIgnoredMcName(String mcName) {
+        Member member = getMemberByMcName(mcName);
+        return isIgnore(member);
     }
     public static synchronized boolean isNovice(String mcName) {
         return hasRank(mcName, "Novice");

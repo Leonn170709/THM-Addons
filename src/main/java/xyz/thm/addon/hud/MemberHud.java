@@ -154,6 +154,9 @@ public class MemberHud extends HudElement {
             if (ThmMembers.isKillOnSight(member)) {
                 return;
             }
+            if (ThmMembers.isIgnore(member)) {
+                return;
+            }
 
             if (!showSelf.get() && player.equals(mc.player.getName().getString())) {
                 return;

@@ -36,6 +36,8 @@ public class BetterTabMixin extends Module {
         String playerName = entry.getProfile().name();
         ThmMembers.Member member = ThmMembers.getMemberByMcName(playerName);
         if (member == null) return;
+        if (ThmMembers.isKillOnSight(member)) return;
+        if (ThmMembers.isIgnore(member)) return;
 
         String branchFilter = system.showBranch.get();
         if (!THMSystem.BRANCH_ALL.equalsIgnoreCase(branchFilter)) {

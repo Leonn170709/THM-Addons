@@ -108,6 +108,9 @@ public class KosHud extends HudElement {
             if (!showSelf.get() && player.equals(mc.player.getName().getString())) {
                 return;
             }
+            if (ThmMembers.isIgnore(player)) {
+                return;
+            }
 
             String rankLabel = "Kill on Sight";
             String displayText = String.format("[%s] %s", rankLabel, player);

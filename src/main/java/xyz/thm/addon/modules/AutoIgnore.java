@@ -7,6 +7,7 @@ import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
 import xyz.thm.addon.THMAddon;
@@ -32,19 +33,10 @@ public class AutoIgnore extends Module {
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
-    private final Setting<Integer> refreshDelaySeconds = sgGeneral.add(new IntSetting.Builder()
-        .name("refresh-delay-seconds")
-        .description("How often to refresh the ignore targets from the API.")
-        .defaultValue(60)
-        .range(5, 3600)
-        .sliderRange(10, 600)
-        .build()
-    );
-
     private final Setting<Integer> commandDelayTicks = sgGeneral.add(new IntSetting.Builder()
         .name("command-delay-ticks")
         .description("Ticks to wait between /ignore commands.")
-        .defaultValue(10)
+        .defaultValue(40)
         .range(1, 200)
         .sliderRange(1, 40)
         .build()
@@ -69,7 +61,6 @@ public class AutoIgnore extends Module {
     private final Set<String> pendingNames = new HashSet<>();
     private final Map<String, String> latestDisplayNames = new HashMap<>();
 
-    private long lastRefreshMs;
     private int commandDelay;
     private Path ignorePath;
 
@@ -85,7 +76,6 @@ public class AutoIgnore extends Module {
         pendingNames.clear();
         latestDisplayNames.clear();
         commandDelay = 0;
-        lastRefreshMs = 0L;
         loadIgnored();
     }
 
@@ -100,11 +90,7 @@ public class AutoIgnore extends Module {
     private void onTick(TickEvent.Post event) {
         if (mc.player == null || mc.world == null) return;
 
-        long now = System.currentTimeMillis();
-        if (now - lastRefreshMs >= refreshDelaySeconds.get() * 1000L) {
-            refreshTargets();
-            lastRefreshMs = now;
-        }
+        refreshTargets();
 
         if (commandDelay > 0) {
             commandDelay--;
@@ -122,7 +108,7 @@ public class AutoIgnore extends Module {
         ClientPlayNetworkHandler handler = mc.getNetworkHandler();
         if (handler == null) return;
 
-        handler.sendChatCommand("ignore " + target.displayName);
+        ChatUtils.sendPlayerMsg("/ignore " + target.displayName);
         ignoredNames.add(target.normalized);
         appendIgnored(target.normalized);
         commandDelay = commandDelayTicks.get();
