@@ -6135,10 +6135,6 @@ public class HighwayBuilderTHM extends Module {
                         && b.mc.currentScreen instanceof ShulkerBoxScreen screen
                         && screen.getScreenHandler().syncId == b.syncId) {
                         Inventory inv = ((ShulkerBoxScreenHandlerAccessor) screen.getScreenHandler()).meteor$getInventory();
-                        if (returnSmallestExtraFoodStackToContainer(b)) {
-                            delayTimer = b.inventoryDelay.get();
-                            return;
-                        }
                         if (extractedFoodShulkerFromEnderChest) {
                             prepareFoodShulkerReturn(b, inv);
                         }
@@ -7224,50 +7220,6 @@ public class HighwayBuilderTHM extends Module {
             private boolean isReturnableEnderChestShulker(HighwayBuilderTHM b, ItemStack stack) {
                 return !b.isContainerItemEmpty(stack)
                     && countRestockUnitsInShulker(b, stack, ECHEST_RESERVE_MATCHING) > 0;
-            }
-
-            private boolean returnSmallestExtraFoodStackToContainer(HighwayBuilderTHM b) {
-                int matchingFoodStacks = 0;
-                int smallestSlot = -1;
-                int smallestCount = Integer.MAX_VALUE;
-
-                for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
-                    ItemStack stack = b.mc.player.getInventory().getStack(i);
-                    if (!b.isConfiguredFoodStack(stack)) continue;
-
-                    matchingFoodStacks++;
-                    if (stack.getCount() < smallestCount
-                        || (stack.getCount() == smallestCount && preferRestockReturnSlot(i, smallestSlot))) {
-                        smallestSlot = i;
-                        smallestCount = stack.getCount();
-                    }
-                }
-
-                if (matchingFoodStacks <= 1 || smallestSlot == -1) return false;
-
-                ItemStack before = b.mc.player.getInventory().getStack(smallestSlot).copy();
-                b.mc.interactionManager.clickSlot(
-                    b.mc.player.currentScreenHandler.syncId,
-                    SlotUtils.indexToId(smallestSlot),
-                    0,
-                    SlotActionType.QUICK_MOVE,
-                    b.mc.player
-                );
-
-                ItemStack after = b.mc.player.getInventory().getStack(smallestSlot);
-                boolean moved = after.isEmpty()
-                    || after.getCount() < before.getCount()
-                    || !ItemStack.areItemsAndComponentsEqual(before, after);
-
-                if (moved && b.restockDebugLog.get()) {
-                    b.restockDebug("Returned smallest matching food stack from inventory slot %d to the open food container (count=%d, totalStacksBefore=%d).",
-                        smallestSlot,
-                        before.getCount(),
-                        matchingFoodStacks
-                    );
-                }
-
-                return moved;
             }
 
             private boolean returnSmallestExtraEnderChestStackToContainer(HighwayBuilderTHM b) {
