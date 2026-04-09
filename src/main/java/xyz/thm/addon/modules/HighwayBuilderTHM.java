@@ -439,7 +439,7 @@ public class HighwayBuilderTHM extends Module {
     private final Setting<Boolean> ignoreSigns = sgDigging.add(new BoolSetting.Builder()
         .name("ignore-signs")
         .description("Ignore breaking signs = preserving history (based).")
-        .defaultValue(true)
+        .defaultValue(false)
         .onChanged(value -> updateSignBreakRegex())
         .build()
     );
@@ -447,7 +447,7 @@ public class HighwayBuilderTHM extends Module {
     private final Setting<Boolean> breakAdvertisementSigns = sgDigging.add(new BoolSetting.Builder()
         .name("break-advertisement-signs")
         .description("Only break signs that look like advertisements/invites.")
-        .defaultValue(false)
+        .defaultValue(true)
         .onChanged(value -> updateSignBreakRegex())
         .visible(() -> !ignoreSigns.get())
         .build()
@@ -7418,6 +7418,11 @@ public class HighwayBuilderTHM extends Module {
              */
             @Override
             protected void tick(HighwayBuilderTHM b) {
+                if (b.mc.player == null || b.mc.world == null || b.mc.interactionManager == null) {
+                    b.drawingBow = false;
+                    return;
+                }
+
                 if (cooldown > 0) {
                     cooldown--;
                     return;
