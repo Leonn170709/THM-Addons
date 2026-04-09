@@ -4775,9 +4775,15 @@ public class HighwayBuilderTHM extends Module {
         },
 
         ThrowOutTrash {
+            private static final int MAX_ROTATION_RETRIES = 2;
+            private static final float TARGET_PITCH = -25.0f;
+            private static final float ROTATION_TOLERANCE = 0.5f;
             private final Set<Integer> keepSlots = new HashSet<>();
             private boolean firstTick;
             private int timer;
+            private int failedRotationRetries;
+            private float cachedPreRotateYaw;
+            private float cachedPreRotatePitch;
             private static final ItemStack[] ITEMS = new ItemStack[27];
 
             @Override
@@ -4785,6 +4791,9 @@ public class HighwayBuilderTHM extends Module {
                 keepSlots.clear();
                 firstTick = true;
                 timer = 0;
+                failedRotationRetries = 0;
+                cachedPreRotateYaw = b.mc.player.getYaw();
+                cachedPreRotatePitch = b.mc.player.getPitch();
             }
 
             @Override
@@ -4794,8 +4803,7 @@ public class HighwayBuilderTHM extends Module {
                     return;
                 }
 
-                b.mc.player.setYaw(b.dir.opposite().yaw);
-                b.mc.player.setPitch(-25);
+                if (!alignForTrashRoutine(b)) return;
 
                 if (firstTick) {
                     firstTick = false;
@@ -4837,6 +4845,51 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 b.setState(b.lastState);
+            }
+
+            private boolean alignForTrashRoutine(HighwayBuilderTHM b) {
+                float targetYaw = b.dir.opposite().yaw;
+                float targetPitch = TARGET_PITCH;
+
+                if (isRotationAligned(b.mc.player.getYaw(), b.mc.player.getPitch(), targetYaw, targetPitch)) {
+                    failedRotationRetries = 0;
+                    return true;
+                }
+
+                cachedPreRotateYaw = b.mc.player.getYaw();
+                cachedPreRotatePitch = b.mc.player.getPitch();
+                b.mc.player.setYaw(targetYaw);
+                b.mc.player.setPitch(targetPitch);
+
+                if (isRotationAligned(b.mc.player.getYaw(), b.mc.player.getPitch(), targetYaw, targetPitch)) {
+                    failedRotationRetries = 0;
+                    return true;
+                }
+
+                failedRotationRetries++;
+                if (b.restockDebugLog.get()) {
+                    b.restockDebug("ThrowOutTrash rotation align failed retry=%d/%d before=(yaw=%.2f,pitch=%.2f) after=(yaw=%.2f,pitch=%.2f) target=(yaw=%.2f,pitch=%.2f).",
+                        failedRotationRetries,
+                        MAX_ROTATION_RETRIES,
+                        cachedPreRotateYaw,
+                        cachedPreRotatePitch,
+                        b.mc.player.getYaw(),
+                        b.mc.player.getPitch(),
+                        targetYaw,
+                        targetPitch
+                    );
+                }
+
+                if (failedRotationRetries > MAX_ROTATION_RETRIES) {
+                    b.error("trash routine failed");
+                }
+
+                return false;
+            }
+
+            private boolean isRotationAligned(float yaw, float pitch, float targetYaw, float targetPitch) {
+                return Math.abs(MathHelper.wrapDegrees(yaw - targetYaw)) <= ROTATION_TOLERANCE
+                    && Math.abs(pitch - targetPitch) <= ROTATION_TOLERANCE;
             }
 
             private boolean handleCursorStack(HighwayBuilderTHM b) {
