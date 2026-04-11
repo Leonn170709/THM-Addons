@@ -28,6 +28,9 @@ import xyz.thm.addon.utils.ThmMembers;
 import java.io.InputStream;
 import java.util.Optional;
 
+import static xyz.thm.addon.utils.ThmMembers.isIgnore;
+import static xyz.thm.addon.utils.ThmMembers.isKillOnSight;
+
 @Mixin(value = Nametags.class, priority = 1001)
 public abstract class NametagsMixin extends Module {
     public NametagsMixin(Category category, String name, String description, String... aliases) {
@@ -195,6 +198,8 @@ public abstract class NametagsMixin extends Module {
             if (THMSystem.BRANCH_PVP.equalsIgnoreCase(branchFilter) && !"PvP".equalsIgnoreCase(member.branch)) return null;
             if (THMSystem.BRANCH_MAIN.equalsIgnoreCase(branchFilter) && !"Main".equalsIgnoreCase(member.branch)) return null;
         }
+        if (isKillOnSight(member)) return null;
+        if (isIgnore(member)) return null;
 
         return member;
     }

@@ -7,6 +7,7 @@
   },
   "mixins": [
     "BlockedServersMixin",
+    "HighwayBuilderBowMixin",
     "HighwayBuilderCameraMixin",
     "HighwayBuilderEntityMixin",
     "SystemsMixin",
@@ -14,8 +15,8 @@
     "accessor.ExplosionS2CPacketAccessor",
     "accessor.PlayerInventoryAccessor",
     "accessor.UpdateSelectedSlotS2CPacketAccessor",
-    "meteor.AutoEatMixin",
     "meteor.AnchorAuraMixin",
+    "meteor.AutoEatMixin",
     "meteor.BetterTabMixin",
     "meteor.BetterTooltipsMixin",
     "meteor.CrystalAuraMixin",
@@ -24,6 +25,8 @@
     "meteor.MeteorGuiThemeMixin",
     "meteor.NametagsMixin",
     "meteor.NoSlowMixin",
+    "meteor.NotifierMixin",
+    "meteor.ScaffoldMixin",
     "meteor.TimerMixin"
   ]
 }

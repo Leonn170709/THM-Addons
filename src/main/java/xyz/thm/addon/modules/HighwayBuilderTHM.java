@@ -241,6 +241,7 @@ public class HighwayBuilderTHM extends Module {
     private final SettingGroup sgKitBotIntegration = settings.createGroup("KitBot Integration", true);
     private final SettingGroup sgStatistics = settings.createGroup("Logging");
     private final SettingGroup sgNotifies = settings.createGroup("Notifies");
+    private final SettingGroup sgDebugging = settings.createGroup("Debugging", false);
     private final SettingGroup sgRenderDigging = settings.createGroup("Render Digging");
     private final SettingGroup sgRenderPaving = settings.createGroup("Render Paving");
 
@@ -505,14 +506,14 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Boolean> debugLog = sgStatistics.add(new BoolSetting.Builder()
+    private final Setting<Boolean> debugLog = sgDebugging.add(new BoolSetting.Builder()
         .name("debug")
         .description("Logs state transitions and movement input for debugging.")
         .defaultValue(false)
         .build()
     );
 
-    private final Setting<Boolean> forwardSchedulerDebugLog = sgStatistics.add(new BoolSetting.Builder()
+    private final Setting<Boolean> forwardSchedulerDebugLog = sgDebugging.add(new BoolSetting.Builder()
         .name("forward-scheduler-debug")
         .description("Logs active row, queue, boundary, and actionability details for the forward scheduler.")
         .defaultValue(false)
@@ -775,7 +776,7 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Boolean> restockDebugLog = sgStatistics.add(new BoolSetting.Builder()
+    private final Setting<Boolean> restockDebugLog = sgDebugging.add(new BoolSetting.Builder()
         .name("restock-debug-log")
         .description("Prints detailed blockade and restock diagnostics, including placement probes and state transitions.")
         .defaultValue(false)
