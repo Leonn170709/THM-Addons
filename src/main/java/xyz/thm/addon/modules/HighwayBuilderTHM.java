@@ -891,6 +891,7 @@ public class HighwayBuilderTHM extends Module {
     private SpeedMineSettingsSnapshot speedMineSettingsSnapshot;
     private boolean previousPauseOnLostFocus;
     private boolean pauseOnLostFocusChanged;
+    private boolean pauseOnLostFocusForcedOff;
     private boolean executionPausedByServerState;
     private boolean offMainEpisodeCheckpointed;
     private ServerState lastCommittedServerState = ServerState.UNKNOWN;
@@ -1264,8 +1265,12 @@ public class HighwayBuilderTHM extends Module {
         loadStatsCacheFromDisk();
 
         previousPauseOnLostFocus = mc.options.pauseOnLostFocus;
-        pauseOnLostFocusChanged = previousPauseOnLostFocus;
-        if (pauseOnLostFocusChanged) togglePauseOnLostFocus(false);
+        pauseOnLostFocusForcedOff = false;
+        if (previousPauseOnLostFocus) {
+            togglePauseOnLostFocus(false);
+            pauseOnLostFocusForcedOff = true;
+        }
+        pauseOnLostFocusChanged = pauseOnLostFocusForcedOff;
         if (blockadeType.get() != getEffectiveBlockadeType()) blockadeType.set(getEffectiveBlockadeType());
         if (saveEchests.get() < 4) saveEchests.set(4);
 
@@ -1393,10 +1398,11 @@ public class HighwayBuilderTHM extends Module {
             );
         }
 
-        if (pauseOnLostFocusChanged) {
-            togglePauseOnLostFocus(previousPauseOnLostFocus);
-            pauseOnLostFocusChanged = false;
+        if (pauseOnLostFocusChanged && pauseOnLostFocusForcedOff && previousPauseOnLostFocus) {
+            togglePauseOnLostFocus(true);
         }
+        pauseOnLostFocusChanged = false;
+        pauseOnLostFocusForcedOff = false;
 
         restoreSpeedMineSettingsIfNeeded();
 
