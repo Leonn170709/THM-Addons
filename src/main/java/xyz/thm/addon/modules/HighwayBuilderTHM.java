@@ -6416,7 +6416,7 @@ public class HighwayBuilderTHM extends Module {
                 // Move
                 if (moveTimer > 0) {
                     b.mc.player.setYaw(dir.yaw);
-                    b.input.forward(moveTimer > 2);
+                    b.input.stop();
 
                     moveTimer--;
                     return;
