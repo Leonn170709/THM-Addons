@@ -249,7 +249,7 @@ public class THMUtils {
     private static Image getNotificationImage() {
         if (notificationImage != null) return notificationImage;
 
-        try (InputStream input = THMUtils.class.getClassLoader().getResourceAsStream("assets/icon/icon.png")) {
+        try (InputStream input = THMUtils.class.getClassLoader().getResourceAsStream("assets/icon/obby.png")) {
             if (input != null) {
                 notificationImage = ImageIO.read(input);
                 if (notificationImage != null) return notificationImage;

@@ -22,7 +22,9 @@ import net.fabricmc.loader.api.metadata.ModMetadata;
 import net.minecraft.item.Items;
 import org.slf4j.Logger;
 import xyz.thm.addon.commands.Center;
+import xyz.thm.addon.commands.DesyncCommand;
 import xyz.thm.addon.commands.EclipCommand;
+import xyz.thm.addon.commands.UUIDCommand;
 import xyz.thm.addon.gui.themes.*;
 import xyz.thm.addon.hud.*;
 import xyz.thm.addon.modules.*;
@@ -84,6 +86,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         //Modules.get().add(new WebhookEncrypt());
         Modules.get().add(new AntiDrop());
         Modules.get().add(new ScaffoldTHM());
+        Modules.get().add(new PaketLimiter());
         Modules.get().add(new OffhandManager());
         Modules.get().add(new HotbarManager());
         Modules.get().add(new UnfocusedFpsLimiter());
@@ -106,7 +109,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new FlightBypass());
         Modules.get().add(new KitbotFrontend());
         Modules.get().add(new ChestTrackerModule());
-        Modules.get().add(new ElytraUAV());
+        //Modules.get().add(new ElytraUAV());
         if (BaritoneUtils.IS_AVAILABLE) {
             Modules.get().add(new THMHwyMonitor());
             Modules.get().add(new HighwayTools());
@@ -116,6 +119,8 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         //Commands
         Commands.add(new Center());
         Commands.add(new EclipCommand());
+        Commands.add(new DesyncCommand());
+        Commands.add(new UUIDCommand());
 
 
         //Hud

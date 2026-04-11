@@ -58,9 +58,14 @@ public final class PacketPlaceUtils {
     }
 
     public static boolean placeBlockPacket(BlockPos pos, FindItemResult item, boolean rotate, int rotateTicks) {
+        return placeBlockPacket(pos, item, rotate, rotateTicks, true);
+    }
+
+    public static boolean placeBlockPacket(BlockPos pos, FindItemResult item, boolean rotate, int rotateTicks, boolean airPlace) {
         if (!BlockUtils.canPlace(pos)) return false;
 
         Direction side = BlockUtils.getPlaceSide(pos);
+        if (side == null && !airPlace) return false;
         BlockPos neighbour = side == null ? pos : pos.offset(side);
         Direction hitSide = side == null ? Direction.UP : side.getOpposite();
         Vec3d hitPos = Vec3d.ofCenter(pos);
