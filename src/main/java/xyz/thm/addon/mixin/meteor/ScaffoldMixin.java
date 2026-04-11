@@ -1,12 +1,16 @@
 package xyz.thm.addon.mixin.meteor;
 
+import meteordevelopment.meteorclient.MeteorClient;
+import meteordevelopment.meteorclient.events.entity.player.ClipAtLedgeEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
+import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.movement.Scaffold;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
+import meteordevelopment.orbit.EventHandler;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
 import org.spongepowered.asm.mixin.Final;
@@ -24,10 +28,22 @@ import static meteordevelopment.meteorclient.MeteorClient.mc;
 @Mixin(value = Scaffold.class, remap = false)
 public abstract class ScaffoldMixin {
     @Shadow @Final private SettingGroup sgGeneral;
+
     @Unique private Setting<Boolean> thm$packetPlace;
     @Unique private Setting<Boolean> thm$packetAirPlace;
     @Unique private Setting<Integer> thm$packetRotateTicks;
     @Unique private Setting<Boolean> thm$safeMove;
+
+    @Unique
+    private final Object thm$safeMoveListener = new Object() {
+        @EventHandler
+        public void onClipAtLedge(ClipAtLedgeEvent event) {
+            if (thm$safeMove == null || !thm$safeMove.get()) return;
+            if (!((Module)(Object)ScaffoldMixin.this).isActive()) return;
+            if (mc.player == null || mc.world == null) return;
+            event.setClip(true);
+        }
+    };
 
     @Inject(method = "<init>", at = @At("TAIL"))
     private void thm$init(CallbackInfo ci) {
@@ -59,33 +75,8 @@ public abstract class ScaffoldMixin {
             .defaultValue(false)
             .build()
         );
-    }
 
-    @Inject(method = "onTick", at = @At("HEAD"))
-    private void thm$safeMove(CallbackInfo ci) {
-        if (thm$safeMove == null || !thm$safeMove.get()) return;
-        if (mc.player == null || mc.world == null) return;
-        if (!mc.player.isOnGround()) return;
-
-        double yaw = Math.toRadians(mc.player.getYaw());
-        double moveX = -Math.sin(yaw);
-        double moveZ = Math.cos(yaw);
-
-        BlockPos nextPos = mc.player.getBlockPos().add(
-            (int) Math.round(moveX),
-            0,
-            (int) Math.round(moveZ)
-        );
-        BlockPos belowNext = nextPos.down();
-
-        boolean isSafe = !mc.world.getBlockState(belowNext).isAir()
-            || !mc.world.getBlockState(nextPos.down(2)).isAir();
-
-        if (!isSafe) {
-            mc.options.sneakKey.setPressed(true);
-        } else {
-            mc.options.sneakKey.setPressed(false);
-        }
+        MeteorClient.EVENT_BUS.subscribe(thm$safeMoveListener);
     }
 
     @Redirect(method = "place", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/utils/world/BlockUtils;place(Lnet/minecraft/util/math/BlockPos;Lmeteordevelopment/meteorclient/utils/player/FindItemResult;ZIZZ)Z"))
