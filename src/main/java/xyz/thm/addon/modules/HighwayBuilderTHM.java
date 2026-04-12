@@ -57,10 +57,14 @@ import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.decoration.EndCrystalEntity;
+import net.minecraft.entity.effect.StatusEffect;
+import net.minecraft.entity.effect.StatusEffectInstance;
+import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.*;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
+import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
@@ -1347,7 +1351,9 @@ public class HighwayBuilderTHM extends Module {
 
         updateVariables();
         updateSignBreakRegex();
-        dir = reconnectActivation ? reconnectResume.direction() : HorizontalDirection.get(mc.player.getYaw());
+        HorizontalDirection activationDirection = reconnectActivation ? reconnectResume.direction() : resolveActivationWorkingDirection();
+        if (!reconnectActivation) applyActivationWorkingYaw(activationDirection);
+        dir = activationDirection != null ? activationDirection : HorizontalDirection.get(mc.player.getYaw());
         leftDir = dir.rotateLeftSkipOne();
         rightDir = leftDir.opposite();
 
@@ -1600,12 +1606,191 @@ public class HighwayBuilderTHM extends Module {
         return parseWorkingDirectionName(statsCacheSnapshot.workingDirectionName());
     }
 
+    private HorizontalDirection resolveActivationWorkingDirection() {
+        if (mc.player == null) return null;
+
+        HorizontalDirection cachedDirection = peekCachedWorkingDirectionForActivation();
+        if (cachedDirection != null) return cachedDirection;
+
+        THMHwyMonitor monitor = Modules.get().get(THMHwyMonitor.class);
+        boolean useTrueCenterMode = monitor == null || monitor.usesTrueCenterMode();
+        HorizontalDirection inferredDirection = THMHwyMonitor.inferClosestWorkingDirection(
+            mc.player.getX(),
+            mc.player.getZ(),
+            mc.player.getYaw(),
+            useTrueCenterMode
+        );
+        return inferredDirection != null ? inferredDirection : HorizontalDirection.get(mc.player.getYaw());
+    }
+
+    private void applyActivationWorkingYaw(HorizontalDirection direction) {
+        if (mc.player == null || direction == null) return;
+        mc.player.setYaw(direction.yaw);
+    }
+
+    private HorizontalDirection peekCachedWorkingDirectionForActivation() {
+        HorizontalDirection inMemoryDirection = peekInMemoryCachedWorkingDirectionForActivation();
+        if (inMemoryDirection != null) return inMemoryDirection;
+
+        StatsArtifactSnapshot selected = peekAuthoritativeStatsArtifact();
+        if (!isResumableStatsSession(selected)) return null;
+        return parseWorkingDirectionName(selected.workingDirectionName());
+    }
+
+    private HorizontalDirection peekInMemoryCachedWorkingDirectionForActivation() {
+        if (!isResumableStatsSession(statsCacheSnapshot)) return null;
+        if (consumedStatsArtifactKeys.contains(identityOf(statsCacheSnapshot).key())) return null;
+        return parseWorkingDirectionName(statsCacheSnapshot.workingDirectionName());
+    }
+
+    private StatsArtifactSnapshot peekAuthoritativeStatsArtifact() {
+        StatsArtifactSnapshot canonical = peekStatsArtifact(resolveCanonicalStatsArtifactPath(), StatsArtifactKind.CANONICAL);
+        StatsArtifactSnapshot finalization = peekStatsArtifact(resolveFinalizationRecordPath(), StatsArtifactKind.FINALIZATION);
+        StatsArtifactSnapshot shadow = peekStatsArtifact(resolveShadowStatsArtifactPath(), StatsArtifactKind.SHADOW);
+
+        StatsArtifactSnapshot selected = selectAuthoritativeStatsArtifact(canonical, finalization, shadow);
+        if (selected == null) return null;
+        if (consumedStatsArtifactKeys.contains(identityOf(selected).key())) return null;
+        return selected;
+    }
+
+    private StatsArtifactSnapshot peekStatsArtifact(Path path, StatsArtifactKind kind) {
+        if (!Files.exists(path)) return null;
+
+        List<String> lines;
+        try {
+            lines = Files.readAllLines(path, StandardCharsets.UTF_8);
+        } catch (IOException ignored) {
+            return null;
+        }
+
+        if (lines.isEmpty() || !STATS_ARTIFACT_MAGIC.equals(lines.get(0).trim())) return null;
+
+        String versionValue = null;
+        String nonceValue = null;
+        String cipherValue = null;
+        for (int i = 1; i < lines.size(); i++) {
+            String line = lines.get(i);
+            if (line == null) continue;
+            line = line.trim();
+            if (line.isEmpty()) continue;
+            String[] parts = line.split("\\|", 2);
+            if (parts.length != 2) continue;
+            switch (parts[0]) {
+                case "version" -> versionValue = parts[1];
+                case "nonce" -> nonceValue = parts[1];
+                case "ciphertext" -> cipherValue = parts[1];
+                default -> { }
+            }
+        }
+
+        if (parseIntSafe(versionValue, -1) != STATS_ARTIFACT_VERSION) return null;
+
+        try {
+            StatsArtifactSnapshot snapshot = parseStatsArtifactPayload(kind, decryptStatsArtifactPayload(nonceValue, cipherValue));
+            return validateStatsArtifactSnapshot(snapshot) ? snapshot : null;
+        } catch (IOException | GeneralSecurityException | IllegalArgumentException ignored) {
+            return null;
+        }
+    }
+
     public boolean isInForwardState() {
         return state == State.Forward;
     }
 
     public boolean isInCenterState() {
         return state == State.Center;
+    }
+
+    private boolean shouldPauseForAutoEat() {
+        AutoEat autoEat = Modules.get().get(AutoEat.class);
+        if (autoEat == null || !autoEat.isActive() || mc.player == null) return false;
+        return autoEat.eating || autoEat.shouldEat();
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean shouldPauseForAutoGap() {
+        AutoGap autoGap = Modules.get().get(AutoGap.class);
+        if (autoGap == null || !autoGap.isActive() || mc.player == null) return false;
+        if (autoGap.isEating()) return true;
+        if (mc.player.isUsingItem() && isUsingGapLikeFood(mc.player.getActiveItem())) return true;
+        return doesAutoGapWantToEat(autoGap);
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean doesAutoGapWantToEat(AutoGap autoGap) {
+        Setting<Boolean> alwaysSetting = (Setting<Boolean>) autoGap.settings.get("always");
+        Setting<Boolean> allowEgapSetting = (Setting<Boolean>) autoGap.settings.get("allow-egap");
+        if (alwaysSetting == null || allowEgapSetting == null) return false;
+
+        boolean requiresEGap = false;
+        if (!alwaysSetting.get()) {
+            boolean regenTrigger = shouldAutoGapForRegeneration(autoGap);
+            requiresEGap = requiresEGapForPotions(autoGap, allowEgapSetting.get());
+            if (!regenTrigger && !requiresEGap && !shouldAutoGapForHealth(autoGap)) return false;
+        }
+
+        return hasAutoGapHotbarFood(allowEgapSetting.get(), requiresEGap);
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean shouldAutoGapForHealth(AutoGap autoGap) {
+        Setting<Boolean> healthEnabledSetting = (Setting<Boolean>) autoGap.settings.get("health-enabled");
+        Setting<Integer> healthThresholdSetting = autoGap.settings.get("health-threshold", Integer.class);
+        if (healthEnabledSetting == null || healthThresholdSetting == null || !healthEnabledSetting.get() || mc.player == null) return false;
+
+        int health = Math.round(mc.player.getHealth() + mc.player.getAbsorptionAmount());
+        return health < healthThresholdSetting.get();
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean shouldAutoGapForRegeneration(AutoGap autoGap) {
+        Setting<Boolean> regenSetting = (Setting<Boolean>) autoGap.settings.get("potions-regeneration");
+        return regenSetting != null && regenSetting.get() && isPotionMissingOrExpiring(StatusEffects.REGENERATION, autoGap);
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean requiresEGapForPotions(AutoGap autoGap, boolean allowEgap) {
+        if (!allowEgap) return false;
+
+        Setting<Boolean> fireResSetting = (Setting<Boolean>) autoGap.settings.get("potions-fire-resistance");
+        if (fireResSetting != null && fireResSetting.get() && isPotionMissingOrExpiring(StatusEffects.FIRE_RESISTANCE, autoGap)) return true;
+
+        Setting<Boolean> absorptionSetting = (Setting<Boolean>) autoGap.settings.get("potions-absorption");
+        return absorptionSetting != null && absorptionSetting.get() && isPotionMissingOrExpiring(StatusEffects.ABSORPTION, autoGap);
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean isPotionMissingOrExpiring(RegistryEntry<StatusEffect> effect, AutoGap autoGap) {
+        if (mc.player == null) return false;
+
+        Setting<Boolean> beforeExpirySetting = (Setting<Boolean>) autoGap.settings.get("before-expiry");
+        Setting<Integer> expiryThresholdSetting = autoGap.settings.get("expiry-threshold", Integer.class);
+
+        StatusEffectInstance instance = mc.player.getStatusEffect(effect);
+        if (instance == null) return true;
+        return beforeExpirySetting != null
+            && beforeExpirySetting.get()
+            && expiryThresholdSetting != null
+            && instance.getDuration() <= expiryThresholdSetting.get();
+    }
+
+    private boolean hasAutoGapHotbarFood(boolean allowEgap, boolean requiresEGap) {
+        if (mc.player == null) return false;
+
+        for (int i = 0; i < 9; i++) {
+            Item item = mc.player.getInventory().getStack(i).getItem();
+            if (item == Items.ENCHANTED_GOLDEN_APPLE && allowEgap) return true;
+            if (item == Items.GOLDEN_APPLE && !requiresEGap) return true;
+        }
+
+        return false;
+    }
+
+    private boolean isUsingGapLikeFood(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        Item item = stack.getItem();
+        return item == Items.GOLDEN_APPLE || item == Items.ENCHANTED_GOLDEN_APPLE;
     }
 
     public void hardFailForMonitorRecovery(String message, Object... args) {
@@ -1807,8 +1992,8 @@ public class HighwayBuilderTHM extends Module {
         }
 
         if (
-            (Modules.get().get(AutoEat.class) != null && Modules.get().get(AutoEat.class).eating)
-                || (Modules.get().get(AutoGap.class) != null && Modules.get().get(AutoGap.class).isEating())
+            shouldPauseForAutoEat()
+                || shouldPauseForAutoGap()
                 || (Modules.get().get(KillAura.class) != null && Modules.get().get(KillAura.class).attacking)
                 || (Modules.get().get(OffhandManager.class) != null && Modules.get().get(OffhandManager.class).isEating())
         ) {
