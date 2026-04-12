@@ -13,6 +13,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import xyz.thm.addon.mixin.accessor.CameraAccessor;
 import xyz.thm.addon.modules.HighwayBuilderTHM;
+import xyz.thm.addon.modules.THMHwyMonitor;
 
 @Mixin(Entity.class)
 public abstract class HighwayBuilderEntityMixin {
@@ -22,7 +23,10 @@ public abstract class HighwayBuilderEntityMixin {
         if ((Object) this != mc.player) return;
 
         HighwayBuilderTHM highwayBuilder = Modules.get().get(HighwayBuilderTHM.class);
-        if (highwayBuilder == null || !highwayBuilder.isActive()) return;
+        THMHwyMonitor highwayMonitor = Modules.get().get(THMHwyMonitor.class);
+        boolean highwayBuilderOwnsControl = highwayBuilder != null && highwayBuilder.isActive();
+        boolean highwayMonitorOwnsControl = highwayMonitor != null && highwayMonitor.ownsIntegratedFreelookControl();
+        if (!highwayBuilderOwnsControl && !highwayMonitorOwnsControl) return;
 
         FreeLook freeLook = Modules.get().get(FreeLook.class);
         if (freeLook != null && freeLook.isActive()) return;

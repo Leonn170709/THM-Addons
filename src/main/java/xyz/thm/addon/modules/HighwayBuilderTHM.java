@@ -118,6 +118,7 @@ public class HighwayBuilderTHM extends Module {
     private static final long STATS_CHECKPOINT_INTERVAL_MS = 10 * 60 * 1000L;
     private static final int STATS_SCREENSHOT_DELAY_MS = 250;
     private static final long STATS_MEMORY_RETRY_RECHECK_MS = 5_000L;
+    private static final String FORWARD_SCHEDULER_DEBUG_FILE_NAME = "highwaybuilder-forward-scheduler.log";
     private static final String STATS_CANONICAL_FILE_NAME = "highwaybuildersettings";
     private static final String STATS_FINALIZATION_FILE_NAME = "highwaybuildersettings.finalization";
     private static final String STATS_SHADOW_FILE_NAME = "highwaybuildersettings.shadow";
@@ -240,6 +241,7 @@ public class HighwayBuilderTHM extends Module {
     private final SettingGroup sgKitBotIntegration = settings.createGroup("KitBot Integration", true);
     private final SettingGroup sgStatistics = settings.createGroup("Logging");
     private final SettingGroup sgNotifies = settings.createGroup("Notifies");
+    private final SettingGroup sgDebugging = settings.createGroup("Debugging", false);
     private final SettingGroup sgRenderDigging = settings.createGroup("Render Digging");
     private final SettingGroup sgRenderPaving = settings.createGroup("Render Paving");
 
@@ -294,6 +296,13 @@ public class HighwayBuilderTHM extends Module {
         .name("rotation")
         .description("Mode of rotation.")
         .defaultValue(Rotation.None)
+        .build()
+    );
+
+    private final Setting<Boolean> legacyMode = sgGeneral.add(new BoolSetting.Builder()
+        .name("legacy-mode")
+        .description("Uses the old legacy forward path instead of the new rolling row scheduler.")
+        .defaultValue(false)
         .build()
     );
 
@@ -374,6 +383,7 @@ public class HighwayBuilderTHM extends Module {
         .visible(doubleMine::get)
         .build()
     );
+
     private final Setting<Boolean> speedmine = sgDigging.add(new BoolSetting.Builder()
         .name("speedmine")
         .description("Wether to use the Speedmine module to speed up basalt breaking")
@@ -427,12 +437,22 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Integer> blocksPerTick = sgDigging.add(new IntSetting.Builder()
+    private final Setting<Double> blocksPerTick = sgDigging.add(new DoubleSetting.Builder()
         .name("blocks-per-tick")
-        .description("The maximum amount of blocks that can be mined in a tick. Only applies to blocks instantly breakable.")
+        .description("The maximum amount of blocks that can be mined in a tick. Supports fractional values like 7.5 for real averaged throughput. Only applies to blocks instantly breakable.")
         .defaultValue(7)
         .range(1, 100)
-        .sliderRange(1, 25)
+        .sliderMax(25)
+        .build()
+    );
+
+    private final Setting<Double> instamineOverrideBlocksPerTick = sgDigging.add(new DoubleSetting.Builder()
+        .name("instamine-override-blocks-per-tick")
+        .description("Mining speed for basalt/blackstone-type forward instamine override blocks.")
+        .defaultValue(3.5)
+        .range(0.25, 100)
+        .sliderMax(25)
+        .visible(() -> false)
         .build()
     );
 
@@ -486,18 +506,27 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Boolean> debugLog = sgStatistics.add(new BoolSetting.Builder()
+    private final Setting<Boolean> debugLog = sgDebugging.add(new BoolSetting.Builder()
         .name("debug")
         .description("Logs state transitions and movement input for debugging.")
         .defaultValue(false)
         .build()
     );
 
-    public final Setting<Integer> placementsPerTick = sgPaving.add(new IntSetting.Builder()
+    private final Setting<Boolean> forwardSchedulerDebugLog = sgDebugging.add(new BoolSetting.Builder()
+        .name("forward-scheduler-debug")
+        .description("Logs active row, queue, boundary, and actionability details for the forward scheduler.")
+        .defaultValue(false)
+        .visible(() -> !legacyMode.get())
+        .build()
+    );
+
+    public final Setting<Double> placementsPerTick = sgPaving.add(new DoubleSetting.Builder()
         .name("placements-per-tick")
-        .description("The maximum amount of blocks that can be placed in a tick.")
+        .description("The maximum amount of blocks that can be placed in a tick. Supports fractional values like 1.5 for real averaged throughput.")
         .defaultValue(1)
-        .min(1)
+        .range(1, 100)
+        .sliderMax(10)
         .build()
     );
 
@@ -644,6 +673,24 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+    private final Setting<Boolean> useBreakSpeedMultiplier = sgInventory.add(new BoolSetting.Builder()
+        .name("use-break-speed-multiplier")
+        .description("Temporarily boosts Timer while mining ender chests for restock, then restores your previous Timer state.")
+        .defaultValue(true)
+        .visible(mineEnderChests::get)
+        .build()
+    );
+
+    private final Setting<Double> breakSpeedMultiplier = sgInventory.add(new DoubleSetting.Builder()
+        .name("break-speed-multiplier")
+        .description("Break Speed Multiplier")
+        .defaultValue(1.5)
+        .range(1, 3)
+        .sliderRange(1, 3)
+        .visible(() -> mineEnderChests.get() && useBreakSpeedMultiplier.get())
+        .build()
+    );
+
     private final Setting<Boolean> silentRebreakSwap = sgInventory.add(new BoolSetting.Builder()
         .name("silent-rebreak-swap")
         .description("Silently swaps to the best pick for instant rebreak packets, then restores your selected slot.")
@@ -729,7 +776,7 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Boolean> restockDebugLog = sgStatistics.add(new BoolSetting.Builder()
+    private final Setting<Boolean> restockDebugLog = sgDebugging.add(new BoolSetting.Builder()
         .name("restock-debug-log")
         .description("Prints detailed blockade and restock diagnostics, including placement probes and state transitions.")
         .defaultValue(false)
@@ -841,7 +888,16 @@ public class HighwayBuilderTHM extends Module {
     private boolean displayInfo, sentLagMessage;
     private boolean suspended = true, inventory = true;
     private int placeTimer, breakTimer, count, syncId, statusLogTimer;
+    private int forwardMineCount, forwardPlaceCount;
+    private int mineActionsThisTick;
+    private double mineFractionCarry;
+    private int placeActionsThisTick;
+    private double placeFractionCarry;
+    private final Set<BlockPos> countedBrokenForwardPositions = new HashSet<>();
+    private final Set<BlockPos> countedPlacedForwardPositions = new HashSet<>();
+    private boolean forwardSchedulerDebugFileErrorLogged;
     private final RestockTask restockTask = new RestockTask(this);
+    private final ForwardSchedulerRuntime forwardSchedulerRuntime = new ForwardSchedulerRuntime();
     private int invalidRestockRecoveryRetries;
     private boolean invalidRestockRecoveryPending;
     private boolean kitbotTpHandled;
@@ -865,6 +921,8 @@ public class HighwayBuilderTHM extends Module {
     private boolean centerSpeedRestorePending;
     private int centerSpeedRestoreRetryTicks;
     private String centerSpeedLastReason = "";
+    private EChestBreakSpeedSnapshot eChestBreakSpeedSnapshot;
+    private boolean eChestBreakSpeedSnapshotOwned;
     private ReconnectBaselineLease reconnectBaselineLease;
     private boolean reconnectBaselineRestoreInProgress;
     private boolean reconnectFailureDeactivateArmed;
@@ -872,6 +930,9 @@ public class HighwayBuilderTHM extends Module {
     private Field timerOverrideField;
     private boolean timerOverrideFieldInitialized;
     private boolean timerOverrideReflectionFailureLogged;
+    private Field eChestMemoryKnownField;
+    private boolean eChestMemoryKnownFieldInitialized;
+    private boolean eChestMemoryReflectionFailureLogged;
     private String activeStatsSessionId;
     private long activeStatsGeneration;
     private StatsArtifactSnapshot statsCacheSnapshot;
@@ -894,6 +955,7 @@ public class HighwayBuilderTHM extends Module {
     private boolean pauseOnLostFocusForcedOff;
     private boolean executionPausedByServerState;
     private boolean offMainEpisodeCheckpointed;
+    private int forwardSchedulerLastDebugAge = -1;
     private ServerState lastCommittedServerState = ServerState.UNKNOWN;
     private Perspective previousPerspective;
     private boolean perspectiveChanged;
@@ -902,7 +964,6 @@ public class HighwayBuilderTHM extends Module {
     public DoubleMineBlock normalMining, packetMining;
     private final MBlockPos posRender2 = new MBlockPos();
     private final MBlockPos posRender3 = new MBlockPos();
-
 
     private int debugStateLastAge = -1;
     private List<Pattern> signBreakPatterns = Collections.emptyList();
@@ -934,12 +995,11 @@ public class HighwayBuilderTHM extends Module {
         boolean timerWasActive
     ) {}
 
-    private record SpeedMineSettingsSnapshot(
-        SpeedMine.Mode mode,
-        SpeedMine.ListMode blocksFilter,
-        List<Block> blocks,
-        boolean instamine,
-        boolean grimBypass
+    private record EChestBreakSpeedSnapshot(
+        boolean timerWasActive,
+        double timerOverrideValue,
+        boolean speedWasActive,
+        double speedTimerValue
     ) {}
 
     private enum ReconnectBaselineLeaseState {
@@ -949,6 +1009,7 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private record ReconnectBaselinePayload(
+        String workingDirectionName,
         String speedModeName,
         double vanillaSpeed,
         double ncpSpeed,
@@ -975,6 +1036,14 @@ public class HighwayBuilderTHM extends Module {
         long generation
     ) {}
 
+    private record SpeedMineSettingsSnapshot(
+        SpeedMine.Mode mode,
+        SpeedMine.ListMode blocksFilter,
+        List<Block> blocks,
+        boolean instamine,
+        boolean grimBypass
+    ) {}
+
     private enum StatsArtifactKind {
         CANONICAL,
         FINALIZATION,
@@ -987,6 +1056,7 @@ public class HighwayBuilderTHM extends Module {
         long generation,
         StatsSessionState state,
         boolean resumeAllowed,
+        String workingDirectionName,
         double startX,
         double startY,
         double startZ,
@@ -1260,6 +1330,7 @@ public class HighwayBuilderTHM extends Module {
             restockDebug("Center/Speed stale monitor recovery baseline cleared on activate (lastReason=%s).", centerSpeedLastReason);
             clearCenterSpeedOwnership("activate-stale-monitor-baseline");
         }
+        clearEChestBreakSpeedOwnership();
 
         if (!suppressThmHwyMonitorSync) syncThmHwyMonitorOnActivate();
         loadStatsCacheFromDisk();
@@ -1281,6 +1352,10 @@ public class HighwayBuilderTHM extends Module {
         rightDir = leftDir.opposite();
 
         blockPosProvider = dir.diagonal ? new DiagonalBlockPosProvider() : new StraightBlockPosProvider();
+        countedBrokenForwardPositions.clear();
+        countedPlacedForwardPositions.clear();
+        resetForwardSchedulerRuntime();
+        seedForwardSchedulerWindow();
         state = State.Forward;
         lastBreakingPos.set(0, 0, 0);
         if (isPendingPrintStatsSession(statsCacheSnapshot)) {
@@ -1306,11 +1381,18 @@ public class HighwayBuilderTHM extends Module {
         sentLagMessage = false;
         suspended = reconnectActivation;
         statusLogTimer = 6000;
+        forwardSchedulerDebugFileErrorLogged = false;
+        mineActionsThisTick = Math.max(1, (int) Math.floor(blocksPerTick.get()));
+        mineFractionCarry = 0.0;
+        placeActionsThisTick = Math.max(1, (int) Math.floor(placementsPerTick.get()));
+        placeFractionCarry = 0.0;
 
         restockTask.complete();
 
         if (blocksPerTick.get() > 1 && rotation.get().mine)
             warning("With rotations enabled, you can break at most 1 block per tick.");
+        if (effectiveInstamineOverrideBlocksPerTick() > 1 && rotation.get().mine)
+            warning("With rotations enabled, instamine override blocks can break at most 1 block per tick.");
         if (placementsPerTick.get() > 1 && rotation.get().place)
             warning("With rotations enabled, you can place at most 1 block per tick.");
         //all modules that may cause error now print errors/warnings
@@ -1345,9 +1427,10 @@ public class HighwayBuilderTHM extends Module {
         }
         if (!Modules.get().get(HotbarManager.class).isActive() && hotbarmanager.get()) { Modules.get().get(HotbarManager.class).toggle();}
         if (!Modules.get().get(AntiDrop.class).isActive() && antidrop.get()) { Modules.get().get(AntiDrop.class).toggle();}
-        if (!Modules.get().get(SpeedMine.class).isActive() && speedmine.get()) { Modules.get().get(SpeedMine.class).toggle();
-            SpeedMine spedmine = Modules.get().get(SpeedMine.class);
-            applySpeedMineHighwayBuilderOverrides(spedmine);
+        if (speedmine.get()) {
+            SpeedMine speedMineModule = Modules.get().get(SpeedMine.class);
+            if (!speedMineModule.isActive()) speedMineModule.toggle();
+            applySpeedMineHighwayBuilderOverrides(speedMineModule);
         }
 
         THMSystem thmSystem = THMSystem.get();
@@ -1374,6 +1457,14 @@ public class HighwayBuilderTHM extends Module {
     @Override
     public void onDeactivate() {
         if (input != null) input.stop();
+        countedBrokenForwardPositions.clear();
+        countedPlacedForwardPositions.clear();
+        resetForwardSchedulerRuntime();
+        forwardSchedulerDebugFileErrorLogged = false;
+        mineActionsThisTick = 0;
+        mineFractionCarry = 0.0;
+        placeActionsThisTick = 0;
+        placeFractionCarry = 0.0;
         boolean isMonitorPauseDeactivate = monitorPauseDeactivateArmed;
         boolean isReconnectFailureDeactivate = reconnectFailureDeactivateArmed;
         monitorPauseDeactivateArmed = false;
@@ -1403,6 +1494,8 @@ public class HighwayBuilderTHM extends Module {
         }
         pauseOnLostFocusChanged = false;
         pauseOnLostFocusForcedOff = false;
+
+        restoreEChestBreakSpeedIfOwned("module-deactivate");
 
         restoreSpeedMineSettingsIfNeeded();
 
@@ -1497,8 +1590,22 @@ public class HighwayBuilderTHM extends Module {
         return dir;
     }
 
+    public HorizontalDirection getCachedWorkingDirectionForMonitorReconnect(long generation) {
+        HorizontalDirection baselineDirection = parseWorkingDirectionName(
+            hasUsableReconnectBaselineLease(generation) ? reconnectBaselineLease.payload().workingDirectionName() : null
+        );
+        if (baselineDirection != null) return baselineDirection;
+
+        if (!isResumableStatsSession(statsCacheSnapshot)) return null;
+        return parseWorkingDirectionName(statsCacheSnapshot.workingDirectionName());
+    }
+
     public boolean isInForwardState() {
         return state == State.Forward;
+    }
+
+    public boolean isInCenterState() {
+        return state == State.Center;
     }
 
     public void hardFailForMonitorRecovery(String message, Object... args) {
@@ -1725,6 +1832,11 @@ public class HighwayBuilderTHM extends Module {
         }
 
         count = 0;
+        forwardMineCount = 0;
+        forwardPlaceCount = 0;
+        mineActionsThisTick = computeMineActionsThisTick();
+        placeActionsThisTick = computePlaceActionsThisTick();
+        refreshCountedForwardStatPositions();
 
         if (mc.player.getY() < start.y - 0.5) setState(State.ReLevel); // don't let the current state keep ticking, switch to re-levelling straight away
         tickDoubleMine();
@@ -1880,7 +1992,11 @@ public class HighwayBuilderTHM extends Module {
         mc.player.input = input = new CustomPlayerInput();
 
         placeTimer = breakTimer = count = syncId = 0;
+        forwardMineCount = forwardPlaceCount = 0;
+        countedBrokenForwardPositions.clear();
+        countedPlacedForwardPositions.clear();
         ignoreCrystals.clear();
+        resetForwardSchedulerRuntime();
 
         normalMining = null;
         packetMining = null;
@@ -2066,6 +2182,9 @@ public class HighwayBuilderTHM extends Module {
 
         if (previousState == State.Center && state != State.Center) {
             restoreCenterSpeedIfOwned("center-exit:" + stateName(state));
+        }
+        if (previousState == State.MineEnderChests && state != State.MineEnderChests) {
+            restoreEChestBreakSpeedIfOwned("echest-exit:" + stateName(state));
         }
 
         if (state == State.Forward && restockTask.isSequenceActive()) {
@@ -2406,12 +2525,97 @@ public class HighwayBuilderTHM extends Module {
     private boolean canMine(MBlockPos pos, boolean mineBlocksToPlace) {
         BlockState state = pos.getState();
         if (shouldSkipSignBreak(pos.getBlockPos(), state)) return false;
-        return safeCanBreak(pos.getBlockPos(), state) && (mineBlocksToPlace || !blocksToPlace.get().contains(state.getBlock()));
+        return isWithinConfiguredForwardRange(pos.getBlockPos()) && safeCanBreak(pos.getBlockPos(), state) && (mineBlocksToPlace || !blocksToPlace.get().contains(state.getBlock()));
     }
 
     private boolean canPlace(MBlockPos pos, boolean liquids) {
-        if (pos.getBlockPos().getSquaredDistance(mc.player.getEyePos()) > placeRange.get() * placeRange.get()) return false;
+        if (!isWithinConfiguredForwardRange(pos.getBlockPos())) return false;
         return liquids ? !pos.getState().getFluidState().isEmpty() : BlockUtils.canPlace(pos.getBlockPos());
+    }
+
+    private int computeMineActionsThisTick() {
+        double configured = Math.max(1.0, blocksPerTick.get());
+        int whole = (int) Math.floor(configured);
+        double fractional = configured - whole;
+
+        mineFractionCarry += fractional;
+        if (mineFractionCarry >= 1.0) {
+            whole += 1;
+            mineFractionCarry -= 1.0;
+        }
+
+        return Math.max(1, whole);
+    }
+
+    private int computePlaceActionsThisTick() {
+        double configured = Math.max(1.0, placementsPerTick.get());
+        int whole = (int) Math.floor(configured);
+        double fractional = configured - whole;
+
+        placeFractionCarry += fractional;
+        if (placeFractionCarry >= 1.0) {
+            whole += 1;
+            placeFractionCarry -= 1.0;
+        }
+
+        return Math.max(1, whole);
+    }
+
+    private int currentMineActionsThisTick() {
+        return Math.max(1, mineActionsThisTick);
+    }
+
+    private int currentPlaceActionsThisTick() {
+        return Math.max(1, placeActionsThisTick);
+    }
+
+    private boolean useForwardRowSchedulerMode() {
+        return !legacyMode.get();
+    }
+
+    private double roundToNearestHundredth(double value) {
+        return Math.round(value * 100.0) / 100.0;
+    }
+
+    private double effectiveInstamineOverrideBlocksPerTick() {
+        return Math.max(0.25, roundToNearestHundredth(Math.max(1.0, blocksPerTick.get()) / 2.0));
+    }
+
+    private boolean isWithinConfiguredForwardRange(BlockPos pos) {
+        return pos.getSquaredDistance(mc.player.getEyePos()) <= placeRange.get() * placeRange.get();
+    }
+
+    private boolean tryMineBlock(BlockPos pos, BlockState state, boolean rotate) {
+        if (!isWithinConfiguredForwardRange(pos)) return false;
+        if (!safeCanBreak(pos, state)) return false;
+
+        if (rotate) Rotations.rotate(Rotations.getYaw(pos), Rotations.getPitch(pos), () -> BlockUtils.breakBlock(pos, true));
+        else BlockUtils.breakBlock(pos, true);
+
+        breakTimer = breakDelay.get();
+
+        if (!lastBreakingPos.equals(pos)) {
+            lastBreakingPos.set(pos.getX(), pos.getY(), pos.getZ());
+        }
+
+        count++;
+        return true;
+    }
+
+    private boolean tryPlaceBlock(BlockPos pos, int slot, boolean rotate) {
+        if (!isWithinConfiguredForwardRange(pos)) return false;
+        boolean placed = BlockUtils.place(pos, Hand.MAIN_HAND, slot, rotate, 0, true, true, true);
+        if (!placed) return false;
+
+        recordPlacedBlockForStats(pos);
+        placeTimer = placeDelay.get();
+        count++;
+
+        if (renderPlace.get()) {
+            RenderUtils.renderTickingBlock(pos.toImmutable(), renderPlaceSideColor.get(), renderPlaceLineColor.get(), renderPlaceShape.get(), 0, 5, true, false);
+        }
+
+        return true;
     }
 
     private void debugStateTransition(State nextState, String reason) {
@@ -2438,6 +2642,95 @@ public class HighwayBuilderTHM extends Module {
         );
     }
 
+    private void logForwardSchedulerStatus(String phase, ForwardRowSchedule row, String note, boolean force) {
+        if (!forwardSchedulerDebugLog.get() || mc.player == null) return;
+        int age = mc.player.age;
+        if (!force) {
+            if (age == forwardSchedulerLastDebugAge) return;
+            if (age % 10 != 0) return;
+        }
+        forwardSchedulerLastDebugAge = age;
+
+        double playerProjection = currentForwardProjection();
+        double boundary = row == null ? Double.NaN : row.frontBoundaryProjection;
+        double gap = row == null ? Double.NaN : boundary - playerProjection;
+        ForwardTask mineTask = row == null ? null : firstForwardTask(row.mineQueue);
+        double mineProjection = mineTask == null ? Double.NaN : projectedForwardCoordinate(mineTask.pos);
+        String mineHead = describeForwardTask(mineTask);
+        String placeHead = describeForwardTask(row == null ? null : firstForwardTask(row.placeQueue));
+       String conflictHead = describeForwardTask(row == null ? null : firstForwardTask(row.conflictQueue));
+        String line = String.format(
+            Locale.ROOT,
+            "[%s] HB scheduler[%s] row=%s playerProj=%.3f boundary=%.3f gap=%.3f mineProj=%.3f mine=%s place=%s conflict=%s breakTimer=%d placeTimer=%d mineCount=%d/%.2f placeCount=%d/%.2f backstep=%s retries=%d note=%s%n",
+            Instant.now(),
+            phase,
+            row == null ? "none" : row.rowId,
+            playerProjection,
+            boundary,
+            gap,
+            mineProjection,
+            mineHead,
+            placeHead,
+            conflictHead,
+            breakTimer,
+            placeTimer,
+            forwardMineCount,
+            (double) currentMineActionsThisTick(),
+            forwardPlaceCount,
+            (double) currentPlaceActionsThisTick(),
+            forwardSchedulerRuntime.backstepping,
+            forwardSchedulerRuntime.recoveryRetries,
+            note
+        );
+
+        writeForwardSchedulerDebugLine(line);
+    }
+
+    private Path getForwardSchedulerDebugPath() {
+        if (mc == null || mc.runDirectory == null) return null;
+        return mc.runDirectory.toPath().resolve("logs").resolve(FORWARD_SCHEDULER_DEBUG_FILE_NAME);
+    }
+
+    private void writeForwardSchedulerDebugLine(String line) {
+        Path path = getForwardSchedulerDebugPath();
+        if (path == null) return;
+
+        try {
+            Path parent = path.getParent();
+            if (parent != null) Files.createDirectories(parent);
+            Files.writeString(path, line, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            if (!forwardSchedulerDebugFileErrorLogged) {
+                THMAddon.LOG.warn("Failed to write forward scheduler debug log: {}", e.getMessage());
+                forwardSchedulerDebugFileErrorLogged = true;
+            }
+        }
+    }
+
+    private ForwardTask firstForwardTask(LinkedHashMap<BlockPos, ForwardTask> queue) {
+        if (queue == null || queue.isEmpty()) return null;
+        return queue.values().iterator().next();
+    }
+
+    private String describeForwardTask(ForwardTask task) {
+        if (task == null) return "none";
+
+        BlockState state = mc.world == null ? null : mc.world.getBlockState(task.pos);
+        boolean inRange = isWithinConfiguredForwardRange(task.pos);
+        boolean canMineTask = task.type.mine && state != null && safeCanBreak(task.pos, state) && (task.type.mineBlocksToPlace() || !blocksToPlace.get().contains(state.getBlock()));
+        boolean canPlaceTask = !task.type.mine && state != null && (task.type.liquids() ? !state.getFluidState().isEmpty() : BlockUtils.canPlace(task.pos));
+        return String.format(
+            "%s@%s inRange=%s canMine=%s canPlace=%s owned=%s block=%s",
+            task.type,
+            formatBlockPos(task.pos),
+            inRange,
+            canMineTask,
+            canPlaceTask,
+            hasActiveMineOwnership(task.pos),
+            state == null ? "null" : state.getBlock()
+        );
+    }
+
     private boolean safeCanBreak(BlockPos pos, BlockState state) {
         try {
             return BlockUtils.canBreak(pos, state);
@@ -2450,10 +2743,33 @@ public class HighwayBuilderTHM extends Module {
 
     private boolean safeCanInstaBreak(BlockPos pos) {
         try {
-            return BlockUtils.canInstaBreak(pos);
+            return BlockUtils.canInstaBreak(pos) || isForwardMultiBreakInstamineOverride(pos);
         } catch (StackOverflowError ignored) {
             return false;
         }
+    }
+
+    private boolean isForwardMultiBreakInstamineOverride(BlockPos pos) {
+        if (mc.world == null || pos == null) return false;
+
+        Block block = mc.world.getBlockState(pos).getBlock();
+        return isHalvedInstamineBudgetBlock(block);
+    }
+
+    private boolean isHalvedInstamineBudgetBlock(Block block) {
+        return block == Blocks.BASALT
+            || block == Blocks.SMOOTH_BASALT
+            || block == Blocks.POLISHED_BASALT
+            || block == Blocks.BLACKSTONE
+            || block == Blocks.GILDED_BLACKSTONE;
+    }
+
+    private int mineBudgetCost(BlockState state) {
+        if (!isHalvedInstamineBudgetBlock(state.getBlock())) return 1;
+
+        double overrideBlocksPerTick = effectiveInstamineOverrideBlocksPerTick();
+        double normalBlocksPerTick = Math.max(1.0, blocksPerTick.get());
+        return Math.max(1, (int) Math.ceil(normalBlocksPerTick / overrideBlocksPerTick));
     }
 
     private MBPIterator floorWithBehind(boolean includeBehind) {
@@ -2753,6 +3069,7 @@ public class HighwayBuilderTHM extends Module {
         boolean timerOverrideActive = timer != null && Double.compare(timerOverrideValue, Timer.OFF) != 0;
 
         return new ReconnectBaselinePayload(
+            dir == null ? "" : dir.name(),
             speed.speedMode.get().name(),
             speed.vanillaSpeed.get(),
             speed.ncpSpeed.get(),
@@ -2891,6 +3208,44 @@ public class HighwayBuilderTHM extends Module {
         warning("Reconnect Timer baseline unavailable: unable to read Timer override state during %s.", phase);
     }
 
+    private Field getEChestMemoryKnownField() {
+        if (eChestMemoryKnownFieldInitialized) return eChestMemoryKnownField;
+
+        eChestMemoryKnownFieldInitialized = true;
+        try {
+            eChestMemoryKnownField = EChestMemory.class.getDeclaredField("isKnown");
+            eChestMemoryKnownField.setAccessible(true);
+        } catch (Throwable ignored) {
+            eChestMemoryKnownField = null;
+            noteEChestMemoryReflectionFailure("field-access");
+        }
+
+        return eChestMemoryKnownField;
+    }
+
+    private void noteEChestMemoryReflectionFailure(String phase) {
+        if (eChestMemoryReflectionFailureLogged) return;
+        eChestMemoryReflectionFailureLogged = true;
+        warning("Unable to invalidate cached ender chest memory during %s.", phase);
+    }
+
+    private void invalidateEChestMemorySnapshot(String reason) {
+        EChestMemory.ITEMS.clear();
+
+        Field knownField = getEChestMemoryKnownField();
+        if (knownField != null) {
+            try {
+                knownField.setBoolean(null, false);
+            } catch (Throwable ignored) {
+                noteEChestMemoryReflectionFailure("field-write");
+            }
+        }
+
+        if (restockDebugLog.get()) {
+            restockDebug("Invalidated cached ender chest memory after %s.", reason);
+        }
+    }
+
     private boolean isCenterSpeedStateRestored(Speed speed, Timer timer) {
         if (speed == null || centerSpeedSnapshot == null) return false;
 
@@ -2926,6 +3281,86 @@ public class HighwayBuilderTHM extends Module {
         centerSpeedRestorePending = false;
         centerSpeedRestoreRetryTicks = 0;
         centerSpeedLastReason = reason == null ? "" : reason;
+    }
+
+    private void clearEChestBreakSpeedOwnership() {
+        eChestBreakSpeedSnapshotOwned = false;
+        eChestBreakSpeedSnapshot = null;
+    }
+
+    private boolean ensureEChestBreakSpeedSnapshotCaptured(String reason) {
+        if (eChestBreakSpeedSnapshotOwned && eChestBreakSpeedSnapshot != null) return true;
+        if (eChestBreakSpeedSnapshotOwned) clearEChestBreakSpeedOwnership();
+
+        Timer timer = Modules.get().get(Timer.class);
+        Speed speed = Modules.get().get(Speed.class);
+        Double timerOverrideValue = timer == null ? Timer.OFF : readRawTimerOverrideValue(timer);
+
+        eChestBreakSpeedSnapshot = new EChestBreakSpeedSnapshot(
+            timer != null && timer.isActive(),
+            timerOverrideValue == null ? Timer.OFF : timerOverrideValue,
+            speed != null && speed.isActive(),
+            speed == null ? 1.0 : speed.timer.get()
+        );
+        eChestBreakSpeedSnapshotOwned = true;
+
+        restockDebug(
+            "MineEnderChests break-speed baseline captured (reason=%s, timerActive=%s, timerOverride=%.2f, speedActive=%s, speedTimer=%.2f).",
+            reason,
+            eChestBreakSpeedSnapshot.timerWasActive(),
+            eChestBreakSpeedSnapshot.timerOverrideValue(),
+            eChestBreakSpeedSnapshot.speedWasActive(),
+            eChestBreakSpeedSnapshot.speedTimerValue()
+        );
+        return true;
+    }
+
+    private void applyEChestBreakSpeedOverrideIfPossible(String reason) {
+        if (!useBreakSpeedMultiplier.get()) return;
+        if (!ensureEChestBreakSpeedSnapshotCaptured(reason)) return;
+
+        Timer timer = Modules.get().get(Timer.class);
+        Speed speed = Modules.get().get(Speed.class);
+
+        if (speed != null) speed.timer.set(1.0);
+        if (timer != null) {
+            if (!timer.isActive()) timer.toggle();
+            timer.setOverride(breakSpeedMultiplier.get());
+        }
+
+        restockDebug(
+            "MineEnderChests break-speed override applied (reason=%s, multiplier=%.2f, timerPresent=%s, speedPresent=%s).",
+            reason,
+            breakSpeedMultiplier.get(),
+            timer != null,
+            speed != null
+        );
+    }
+
+    private void restoreEChestBreakSpeedIfOwned(String reason) {
+        if (!eChestBreakSpeedSnapshotOwned || eChestBreakSpeedSnapshot == null) return;
+
+        Timer timer = Modules.get().get(Timer.class);
+        Speed speed = Modules.get().get(Speed.class);
+
+        if (speed != null) speed.timer.set(eChestBreakSpeedSnapshot.speedTimerValue());
+        if (timer != null) {
+            timer.setOverride(eChestBreakSpeedSnapshot.timerOverrideValue());
+            boolean timerActive = timer.isActive();
+            if (eChestBreakSpeedSnapshot.timerWasActive() && !timerActive) timer.toggle();
+            else if (!eChestBreakSpeedSnapshot.timerWasActive() && timerActive) timer.toggle();
+        }
+
+        restockDebug(
+            "MineEnderChests break-speed baseline restored (reason=%s, timerActive=%s, timerOverride=%.2f, speedActive=%s, speedTimer=%.2f).",
+            reason,
+            eChestBreakSpeedSnapshot.timerWasActive(),
+            eChestBreakSpeedSnapshot.timerOverrideValue(),
+            eChestBreakSpeedSnapshot.speedWasActive(),
+            eChestBreakSpeedSnapshot.speedTimerValue()
+        );
+
+        clearEChestBreakSpeedOwnership();
     }
 
     private boolean hasActiveInMemoryStatsSession() {
@@ -3100,6 +3535,7 @@ public class HighwayBuilderTHM extends Module {
             nextStatsGeneration(),
             state,
             resumeAllowed,
+            dir == null ? "" : dir.name(),
             start.x,
             start.y,
             start.z,
@@ -3144,6 +3580,7 @@ public class HighwayBuilderTHM extends Module {
             generation,
             state,
             resumeAllowed,
+            snapshot.workingDirectionName(),
             snapshot.startX(),
             snapshot.startY(),
             snapshot.startZ(),
@@ -3381,6 +3818,7 @@ public class HighwayBuilderTHM extends Module {
         out.append("meta|generation|").append(snapshot.generation()).append('\n');
         out.append("meta|state|").append(snapshot.state().name()).append('\n');
         out.append("meta|resumeAllowed|").append(snapshot.resumeAllowed()).append('\n');
+        out.append("meta|workingDirection|").append(snapshot.workingDirectionName() == null ? "" : snapshot.workingDirectionName()).append('\n');
         out.append("meta|startX|").append(snapshot.startX()).append('\n');
         out.append("meta|startY|").append(snapshot.startY()).append('\n');
         out.append("meta|startZ|").append(snapshot.startZ()).append('\n');
@@ -3436,6 +3874,7 @@ public class HighwayBuilderTHM extends Module {
             parseLongSafe(meta.get("generation"), 0L),
             state,
             Boolean.parseBoolean(meta.getOrDefault("resumeAllowed", "false")),
+            meta.getOrDefault("workingDirection", ""),
             parseDoubleSafe(meta.get("startX"), 0.0),
             parseDoubleSafe(meta.get("startY"), 0.0),
             parseDoubleSafe(meta.get("startZ"), 0.0),
@@ -3489,6 +3928,7 @@ public class HighwayBuilderTHM extends Module {
             nextStatsGeneration(),
             StatsSessionState.PENDING_PRINT,
             false,
+            dir == null ? "" : dir.name(),
             start.x,
             start.y,
             start.z,
@@ -3502,6 +3942,15 @@ public class HighwayBuilderTHM extends Module {
             false,
             reason == null ? "" : reason
         );
+    }
+
+    private HorizontalDirection parseWorkingDirectionName(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return HorizontalDirection.valueOf(value.trim());
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     private StatsArtifactSnapshot persistFinalizationRecord(StatsArtifactSnapshot snapshot, String reason) {
@@ -3806,9 +4255,19 @@ public class HighwayBuilderTHM extends Module {
         statsSessionDirty = true;
     }
 
-    private void recordBlockPlaced() {
-        blocksPlaced++;
-        statsSessionDirty = true;
+    private void recordConfirmedBrokenBlockForStats(BlockPos pos) {
+        if (!shouldCountForwardStatPosition(pos)) return;
+
+        if (countedBrokenForwardPositions.add(pos.toImmutable())) recordBlockBroken();
+    }
+
+    private void recordPlacedBlockForStats(BlockPos pos) {
+        if (!shouldCountForwardStatPosition(pos)) return;
+
+        if (countedPlacedForwardPositions.add(pos.toImmutable())) {
+            blocksPlaced++;
+            statsSessionDirty = true;
+        }
     }
 
     private int parseIntSafe(String value, int fallback) {
@@ -3905,6 +4364,10 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private boolean clearCursorStackToEmptySlot(String reason) {
+        return clearCursorStackToEmptySlot(reason, false);
+    }
+
+    private boolean clearCursorStackToEmptySlot(String reason, boolean avoidReservedHotbarSlots) {
         if (mc.player == null || mc.player.currentScreenHandler == null) return false;
         if (mc.player.currentScreenHandler.getCursorStack().isEmpty()) return true;
 
@@ -3919,6 +4382,7 @@ public class HighwayBuilderTHM extends Module {
 
         if (emptySlot == -1) {
             for (int i = 0; i < 9; i++) {
+                if (avoidReservedHotbarSlots && isHotbarSlotReservedByManager(i)) continue;
                 if (mc.player.getInventory().getStack(i).isEmpty()) {
                     emptySlot = i;
                     break;
@@ -4079,39 +4543,64 @@ public class HighwayBuilderTHM extends Module {
         return count;
     }
 
-    private int countLooseConfiguredFoodItems(Item item) {
-        if (mc.player == null || item == null) return 0;
+    private int getConfiguredFoodMaxStackSize() {
+        if (!hasConfiguredFoodTypes()) return 0;
+        Item foodItem = foodTypes.get().get(0);
+        return foodItem != null ? foodItem.getMaxCount() : 0;
+    }
+
+    private int countEmptyInventorySlotsInMainInventory() {
+        if (mc.player == null) return 0;
 
         int count = 0;
         for (int i = 0; i < mc.player.getInventory().getMainStacks().size(); i++) {
             ItemStack stack = mc.player.getInventory().getStack(i);
-            if (stack.isOf(item)) count += stack.getCount();
+            if (stack.isEmpty()) count++;
         }
 
         return count;
     }
 
+    private int countConfiguredFoodMergeCapacityInInventory() {
+        if (mc.player == null) return 0;
+
+        int capacity = 0;
+        for (int i = 0; i < mc.player.getInventory().getMainStacks().size(); i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (!isConfiguredFoodStack(stack)) continue;
+
+            capacity += Math.max(stack.getMaxCount() - stack.getCount(), 0);
+        }
+
+        return capacity;
+    }
+
+    private int countConfiguredFoodAdditionalCapacityInInventory() {
+        int maxStackSize = getConfiguredFoodMaxStackSize();
+        if (maxStackSize <= 0) return countConfiguredFoodMergeCapacityInInventory();
+
+        return countConfiguredFoodMergeCapacityInInventory() + (countEmptyInventorySlotsInMainInventory() * maxStackSize);
+    }
+
+    private int getConfiguredFoodTargetIncrease(int currentLooseFoodCount) {
+        return Math.max((saveFood.get() + 1) - currentLooseFoodCount, 0);
+    }
+
     private int findPreferredConfiguredFoodSlot(Inventory inventory) {
-        int firstMatch = -1;
-        int bestMergeMatch = -1;
-        int bestMergeCount = -1;
+        int fullestMatch = -1;
+        int fullestCount = -1;
 
         for (int i = 0; i < inventory.size(); i++) {
             ItemStack stack = inventory.getStack(i);
             if (!isConfiguredFoodStack(stack)) continue;
 
-            if (firstMatch == -1) firstMatch = i;
-
-            int looseCount = countLooseConfiguredFoodItems(stack.getItem());
-            if (looseCount <= 0) continue;
-
-            if (looseCount > bestMergeCount) {
-                bestMergeCount = looseCount;
-                bestMergeMatch = i;
+            if (stack.getCount() > fullestCount) {
+                fullestCount = stack.getCount();
+                fullestMatch = i;
             }
         }
 
-        return bestMergeMatch != -1 ? bestMergeMatch : firstMatch;
+        return fullestMatch;
     }
 
     private int findPreferredLooseEnderChestSlot(Inventory inventory) {
@@ -4299,9 +4788,14 @@ public class HighwayBuilderTHM extends Module {
                 DoubleMineBlock.rateLimited = true;
             }
             else if (mc.world.getBlockState(normalMining.blockPos).getBlock() != normalMining.block) {
+                BlockPos brokenPos = normalMining.blockPos.toImmutable();
                 normalMining = null;
-                recordBlockBroken();
+                recordConfirmedBrokenBlockForStats(brokenPos);
                 count++;
+                if (isForwardSchedulerTick()) {
+                    forwardMineCount++;
+                    markForwardSchedulerProgress();
+                }
                 DoubleMineBlock.rateLimited = false;
             }
             else if (normalMining.isReady()) {
@@ -4317,10 +4811,703 @@ public class HighwayBuilderTHM extends Module {
                 packetMining = null;
             }
             else if (mc.world.getBlockState(packetMining.blockPos).getBlock() != packetMining.block) {
+                BlockPos brokenPos = packetMining.blockPos.toImmutable();
                 packetMining = null;
-                recordBlockBroken();
+                recordConfirmedBrokenBlockForStats(brokenPos);
                 count++;
+                if (isForwardSchedulerTick()) {
+                    forwardMineCount++;
+                    markForwardSchedulerProgress();
+                }
             }
+        }
+    }
+
+    private boolean isForwardSchedulerTick() {
+        return useForwardRowSchedulerMode() && state == State.Forward;
+    }
+
+    private boolean shouldUseForwardStatsGuard() {
+        return state == State.Forward && mc.player != null && mc.world != null && blockPosProvider != null;
+    }
+
+    private boolean shouldCountForwardStatPosition(BlockPos pos) {
+        if (pos == null || !shouldUseForwardStatsGuard()) return false;
+
+        Set<BlockPos> liveForwardPositions = new HashSet<>();
+        collectLiveForwardStatPositions(liveForwardPositions);
+        return liveForwardPositions.contains(pos.toImmutable());
+    }
+
+    private void refreshCountedForwardStatPositions() {
+        if (countedBrokenForwardPositions.isEmpty() && countedPlacedForwardPositions.isEmpty()) return;
+        if (!shouldUseForwardStatsGuard()) return;
+
+        Set<BlockPos> retainedPositions = new HashSet<>();
+        collectLiveForwardStatPositions(retainedPositions);
+
+        countedBrokenForwardPositions.retainAll(retainedPositions);
+        countedPlacedForwardPositions.retainAll(retainedPositions);
+    }
+
+    private void collectLiveForwardStatPositions(Set<BlockPos> positions) {
+        if (!shouldUseForwardStatsGuard()) return;
+
+        addOwnedBrokenPositions(positions, blockPosProvider.getFront());
+
+        if (floor.get() == Floor.Replace) addOwnedBrokenPositions(positions, blockPosProvider.getFloor());
+
+        if (railings.get()) {
+            addOwnedBrokenPositions(positions, blockPosProvider.getRailings(0));
+            addOwnedBrokenPositions(positions, blockPosProvider.getRailings(0, false));
+            if (cornerBlock.get()) addOwnedBrokenPositions(positions, blockPosProvider.getRailings(-1, false));
+        }
+
+        if (mineAboveRailings.get()) addOwnedBrokenPositions(positions, blockPosProvider.getRailings(1));
+
+        addOwnedBrokenPositions(positions, blockPosProvider.getLiquids());
+        addOwnedBrokenPositions(positions, blockPosProvider.getFloor(false));
+    }
+
+    private void addOwnedBrokenPositions(Set<BlockPos> positions, MBPIterator iterator) {
+        if (iterator == null) return;
+        for (MBlockPos pos : iterator) positions.add(pos.getBlockPos().toImmutable());
+    }
+
+    private void resetForwardSchedulerRuntime() {
+        forwardSchedulerRuntime.reset();
+    }
+
+    private void seedForwardSchedulerWindow() {
+        resetForwardSchedulerRuntime();
+        if (!useForwardRowSchedulerMode() || mc.player == null || mc.world == null || blockPosProvider == null) return;
+
+        ForwardRowSchedule firstRow = buildForwardSeedRow(0);
+        forwardSchedulerRuntime.rows.add(firstRow);
+
+        ForwardRowSchedule previous = firstRow;
+        for (int i = 1; i < ForwardSchedulerRuntime.LOOKAHEAD_ROWS; i++) {
+            ForwardRowSchedule row = shiftForwardRow(previous, i);
+            forwardSchedulerRuntime.rows.add(row);
+            previous = row;
+        }
+
+        forwardSchedulerRuntime.nextRowId = ForwardSchedulerRuntime.LOOKAHEAD_ROWS;
+        forwardSchedulerRuntime.lastProgressAtMs = System.currentTimeMillis();
+    }
+
+    private void ensureForwardSchedulerWindow() {
+        if (!useForwardRowSchedulerMode()) return;
+        if (forwardSchedulerRuntime.rows.isEmpty()) {
+            seedForwardSchedulerWindow();
+            return;
+        }
+
+        while (forwardSchedulerRuntime.rows.size() < ForwardSchedulerRuntime.LOOKAHEAD_ROWS) {
+            appendForwardSchedulerRow();
+        }
+    }
+
+    private void appendForwardSchedulerRow() {
+        ForwardRowSchedule last = forwardSchedulerRuntime.rows.peekLast();
+        if (last == null) {
+            seedForwardSchedulerWindow();
+            return;
+        }
+
+        forwardSchedulerRuntime.rows.addLast(shiftForwardRow(last, forwardSchedulerRuntime.nextRowId++));
+    }
+
+    private ForwardRowSchedule buildForwardSeedRow(int rowId) {
+        List<ForwardTask> mineTasks = new ArrayList<>();
+        List<ForwardTask> placeTasks = new ArrayList<>();
+        collectForwardSeedTasks(mineTasks, placeTasks);
+        return createForwardRowSchedule(rowId, mineTasks, placeTasks);
+    }
+
+    private void collectForwardSeedTasks(List<ForwardTask> mineTasks, List<ForwardTask> placeTasks) {
+        addForwardLaneTasks(mineTasks, blockPosProvider.getFront(), ForwardTaskType.FRONT_MINE, 0);
+        if (checkBehind.get()) addForwardLaneTasks(mineTasks, blockPosProvider.getBehindFront(), ForwardTaskType.BEHIND_FRONT_MINE, 0);
+
+        if (floor.get() == Floor.Replace) {
+            addForwardLaneTasks(mineTasks, blockPosProvider.getFloor(), ForwardTaskType.FLOOR_MINE, 0);
+            if (checkBehind.get()) addForwardLaneTasks(mineTasks, blockPosProvider.getBehindFloor(), ForwardTaskType.BEHIND_FLOOR_MINE, 0);
+        }
+
+        if (railings.get()) {
+            addForwardLaneTasks(mineTasks, blockPosProvider.getRailings(0), ForwardTaskType.RAILINGS_MINE, 0);
+            if (checkBehind.get()) addForwardLaneTasks(mineTasks, blockPosProvider.getBehindRailings(0), ForwardTaskType.BEHIND_RAILINGS_MINE, 0);
+        }
+
+        if (mineAboveRailings.get()) {
+            addForwardLaneTasks(mineTasks, blockPosProvider.getRailings(1), ForwardTaskType.ABOVE_RAILINGS_MINE, 0);
+            if (checkBehind.get()) addForwardLaneTasks(mineTasks, blockPosProvider.getBehindRailings(1), ForwardTaskType.BEHIND_ABOVE_RAILINGS_MINE, 0);
+        }
+
+        addForwardLaneTasks(placeTasks, blockPosProvider.getLiquids(), ForwardTaskType.LIQUID_PLACE, 0);
+        if (railings.get() && cornerBlock.get()) addForwardLaneTasks(placeTasks, blockPosProvider.getRailings(-1, checkBehind.get()), ForwardTaskType.CORNER_PLACE, 0);
+        if (railings.get()) addForwardLaneTasks(placeTasks, blockPosProvider.getRailings(0, checkBehind.get()), ForwardTaskType.RAILINGS_PLACE, 0);
+        addForwardLaneTasks(placeTasks, blockPosProvider.getFloor(checkBehind.get()), ForwardTaskType.FLOOR_PLACE, 0);
+    }
+
+    private ForwardRowSchedule shiftForwardRow(ForwardRowSchedule previous, int rowId) {
+        List<ForwardTask> mineTasks = new ArrayList<>(previous.mineTemplate.size());
+        for (ForwardTask task : previous.mineTemplate) mineTasks.add(task.shifted(dir.offsetX, dir.offsetZ));
+
+        List<ForwardTask> placeTasks = new ArrayList<>(previous.placeTemplate.size());
+        for (ForwardTask task : previous.placeTemplate) placeTasks.add(task.shifted(dir.offsetX, dir.offsetZ));
+
+        return createForwardRowSchedule(rowId, mineTasks, placeTasks);
+    }
+
+    private ForwardRowSchedule createForwardRowSchedule(int rowId, List<ForwardTask> mineTasks, List<ForwardTask> placeTasks) {
+        LinkedHashMap<BlockPos, ForwardTask> mineQueue = buildForwardOrderedQueue(mineTasks);
+        LinkedHashMap<BlockPos, ForwardTask> placeQueue = buildForwardOrderedQueue(placeTasks);
+        ForwardRowSchedule row = new ForwardRowSchedule(rowId, mineTasks, placeTasks, mineQueue, placeQueue, new LinkedHashMap<>(), computeForwardBoundaryProjection(mineTasks, placeTasks));
+        refreshForwardActiveRow(row);
+        return row;
+    }
+
+    private void addForwardLaneTasks(List<ForwardTask> tasks, MBPIterator iterator, ForwardTaskType type, int rowId) {
+        if (iterator == null) return;
+        for (MBlockPos pos : iterator) {
+            BlockPos rowPos = pos.getBlockPos().toImmutable();
+            if (rowId > 0) rowPos = rowPos.add(dir.offsetX * rowId, 0, dir.offsetZ * rowId).toImmutable();
+            tasks.add(new ForwardTask(rowPos, type));
+        }
+    }
+
+    private LinkedHashMap<BlockPos, ForwardTask> buildForwardOrderedQueue(List<ForwardTask> tasks) {
+        LinkedHashMap<BlockPos, ForwardTask> queue = new LinkedHashMap<>();
+        if (tasks.isEmpty()) return queue;
+
+        double minLateral = Double.POSITIVE_INFINITY;
+        double maxLateral = Double.NEGATIVE_INFINITY;
+        for (ForwardTask task : tasks) {
+            double lateral = projectedLateralCoordinate(task.pos);
+            minLateral = Math.min(minLateral, lateral);
+            maxLateral = Math.max(maxLateral, lateral);
+        }
+
+        double center = Double.isFinite(minLateral) && Double.isFinite(maxLateral) ? (minLateral + maxLateral) / 2.0 : 0.0;
+
+        List<ForwardTask> orderedTasks = new ArrayList<>(tasks);
+        orderedTasks.sort(Comparator
+            .comparingDouble((ForwardTask task) -> Math.abs(projectedLateralCoordinate(task.pos) - center))
+            .thenComparingDouble(task -> projectedLateralCoordinate(task.pos))
+            .thenComparingInt(task -> task.type.ordinal())
+            .thenComparingInt(task -> task.pos.getY())
+            .thenComparingInt(task -> task.pos.getX())
+            .thenComparingInt(task -> task.pos.getZ()));
+
+        for (ForwardTask task : orderedTasks) queue.putIfAbsent(task.pos, task);
+        return queue;
+    }
+
+    private double computeForwardBoundaryProjection(List<ForwardTask> mineTasks, List<ForwardTask> placeTasks) {
+        double minProjection = Double.POSITIVE_INFINITY;
+        double maxProjection = Double.NEGATIVE_INFINITY;
+
+        for (ForwardTask task : mineTasks) {
+            if (task.type.isBehind()) continue;
+            double projection = projectedForwardCoordinate(task.pos);
+            minProjection = Math.min(minProjection, projection);
+            maxProjection = Math.max(maxProjection, projection);
+        }
+
+        for (ForwardTask task : placeTasks) {
+            if (task.type.isBehind()) continue;
+            double projection = projectedForwardCoordinate(task.pos);
+            minProjection = Math.min(minProjection, projection);
+            maxProjection = Math.max(maxProjection, projection);
+        }
+
+        if (!Double.isFinite(minProjection) || !Double.isFinite(maxProjection)) {
+            return currentForwardProjection() + 1.0;
+        }
+
+        double rowCenterProjection = (minProjection + maxProjection) / 2.0;
+        return rowCenterProjection - 1.5;
+    }
+
+    private double projectedForwardCoordinate(BlockPos pos) {
+        return projectedForwardCoordinate(pos.getX() + 0.5, pos.getZ() + 0.5);
+    }
+
+    private double projectedForwardCoordinate(double x, double z) {
+        double magnitude = directionStepLength();
+        if (magnitude <= 0.0) return 0.0;
+        return (x * dir.offsetX + z * dir.offsetZ) / magnitude;
+    }
+
+    private double projectedLateralCoordinate(BlockPos pos) {
+        double magnitude = Math.hypot(rightDir.offsetX, rightDir.offsetZ);
+        if (magnitude <= 0.0) return 0.0;
+        return ((pos.getX() + 0.5) * rightDir.offsetX + (pos.getZ() + 0.5) * rightDir.offsetZ) / magnitude;
+    }
+
+    private double currentForwardProjection() {
+        return projectedForwardCoordinate(mc.player.getX(), mc.player.getZ());
+    }
+
+    private double directionStepLength() {
+        return Math.hypot(dir.offsetX, dir.offsetZ);
+    }
+
+    private ForwardRowSchedule getActiveForwardRow() {
+        int promotionsThisTick = 0;
+        while (!forwardSchedulerRuntime.rows.isEmpty() && promotionsThisTick < ForwardSchedulerRuntime.LOOKAHEAD_ROWS) {
+            ForwardRowSchedule row = forwardSchedulerRuntime.rows.peekFirst();
+            refreshForwardActiveRow(row);
+            if (!row.isComplete()) return row;
+
+            forwardSchedulerRuntime.rows.removeFirst();
+            markForwardSchedulerProgress();
+            appendForwardSchedulerRow();
+            promotionsThisTick++;
+        }
+
+        return null;
+    }
+
+    private void refreshForwardActiveRow(ForwardRowSchedule row) {
+        if (row == null) return;
+
+        List<ForwardTask> liveMineTasks = new ArrayList<>();
+        List<ForwardTask> livePlaceTasks = new ArrayList<>();
+        collectForwardSeedTasks(liveMineTasks, livePlaceTasks);
+        prependForwardTasks(row.mineQueue, liveMineTasks, this::shouldKeepForwardMineTask);
+        prependForwardTasks(row.placeQueue, livePlaceTasks, this::shouldKeepForwardPlaceTask);
+
+        Iterator<Map.Entry<BlockPos, ForwardTask>> mineIt = row.mineQueue.entrySet().iterator();
+        while (mineIt.hasNext()) {
+            Map.Entry<BlockPos, ForwardTask> entry = mineIt.next();
+            if (!shouldKeepForwardMineTask(entry.getValue())) mineIt.remove();
+        }
+
+        LinkedHashMap<BlockPos, ForwardTask> deferredConflicts = new LinkedHashMap<>();
+        Iterator<Map.Entry<BlockPos, ForwardTask>> placeIt = row.placeQueue.entrySet().iterator();
+        while (placeIt.hasNext()) {
+            Map.Entry<BlockPos, ForwardTask> entry = placeIt.next();
+            ForwardTask task = entry.getValue();
+            if (!shouldKeepForwardPlaceTask(task)) {
+                placeIt.remove();
+                continue;
+            }
+
+            if (row.mineQueue.containsKey(task.pos) || hasActiveMineOwnership(task.pos)) {
+                placeIt.remove();
+                deferredConflicts.putIfAbsent(task.pos, task);
+            }
+        }
+
+        for (ForwardTask task : deferredConflicts.values()) {
+            row.conflictQueue.putIfAbsent(task.pos, task);
+        }
+
+        Iterator<Map.Entry<BlockPos, ForwardTask>> conflictIt = row.conflictQueue.entrySet().iterator();
+        while (conflictIt.hasNext()) {
+            Map.Entry<BlockPos, ForwardTask> entry = conflictIt.next();
+            ForwardTask task = entry.getValue();
+            if (!shouldKeepForwardPlaceTask(task)) {
+                conflictIt.remove();
+                continue;
+            }
+
+            if (row.placeQueue.containsKey(task.pos)) {
+                conflictIt.remove();
+            }
+        }
+
+        row.frontBoundaryProjection = computeForwardBoundaryProjection(new ArrayList<>(row.mineQueue.values()), combineForwardPlaceTasks(row));
+    }
+
+    private void prependForwardTasks(LinkedHashMap<BlockPos, ForwardTask> queue, List<ForwardTask> liveTasks, Predicate<ForwardTask> keepPredicate) {
+        if (queue == null || liveTasks.isEmpty()) return;
+
+        LinkedHashMap<BlockPos, ForwardTask> orderedLiveTasks = buildForwardOrderedQueue(liveTasks);
+        LinkedHashMap<BlockPos, ForwardTask> merged = new LinkedHashMap<>();
+
+        for (ForwardTask task : orderedLiveTasks.values()) {
+            if (!keepPredicate.test(task)) continue;
+            if (queue.containsKey(task.pos)) {
+                merged.put(task.pos, queue.get(task.pos));
+            } else {
+                merged.put(task.pos, task);
+            }
+        }
+
+        for (Map.Entry<BlockPos, ForwardTask> entry : queue.entrySet()) {
+            merged.putIfAbsent(entry.getKey(), entry.getValue());
+        }
+
+        queue.clear();
+        queue.putAll(merged);
+    }
+
+    private List<ForwardTask> combineForwardPlaceTasks(ForwardRowSchedule row) {
+        List<ForwardTask> tasks = new ArrayList<>(row.placeQueue.size() + row.conflictQueue.size());
+        tasks.addAll(row.placeQueue.values());
+        tasks.addAll(row.conflictQueue.values());
+        return tasks;
+    }
+
+    private boolean shouldKeepForwardMineTask(ForwardTask task) {
+        if (mc.world == null) return false;
+        BlockState state = mc.world.getBlockState(task.pos);
+        if (shouldSkipSignBreak(task.pos, state)) return false;
+        return safeCanBreak(task.pos, state) && (task.type.mineBlocksToPlace() || !blocksToPlace.get().contains(state.getBlock()));
+    }
+
+    private boolean shouldKeepForwardPlaceTask(ForwardTask task) {
+        if (mc.world == null) return false;
+        BlockState state = mc.world.getBlockState(task.pos);
+
+        if (task.type.liquids()) return !state.getFluidState().isEmpty();
+
+        if (task.type == ForwardTaskType.CORNER_PLACE && !mc.world.getBlockState(task.pos.up()).isReplaceable()) return false;
+        return BlockUtils.canPlace(task.pos);
+    }
+
+    private boolean hasActiveMineOwnership(BlockPos pos) {
+        return (normalMining != null && pos.equals(normalMining.blockPos)) || (packetMining != null && pos.equals(packetMining.blockPos));
+    }
+
+    private void markForwardSchedulerProgress() {
+        forwardSchedulerRuntime.lastProgressAtMs = System.currentTimeMillis();
+        forwardSchedulerRuntime.recoveryRetries = 0;
+    }
+
+    private void startForwardSchedulerRecovery() {
+        forwardSchedulerRuntime.recoveryRetries++;
+        forwardSchedulerRuntime.backstepping = true;
+        forwardSchedulerRuntime.backstepStartProjection = currentForwardProjection();
+        input.stop();
+        logForwardSchedulerStatus("recovery-start", forwardSchedulerRuntime.rows.peekFirst(), "stuck watchdog fired", true);
+    }
+
+    private void handleForwardSchedulerRecovery() {
+        mc.player.setPitch(20);
+        mc.player.setYaw(dir.opposite().yaw);
+        input.stop();
+        input.forward(true);
+
+        logForwardSchedulerStatus("recovery", forwardSchedulerRuntime.rows.peekFirst(), "backstepping toward center", false);
+
+        double progress = forwardSchedulerRuntime.backstepStartProjection - currentForwardProjection();
+        if (progress >= 2.0) {
+            input.stop();
+            forwardSchedulerRuntime.backstepping = false;
+            seedForwardSchedulerWindow();
+            logForwardSchedulerStatus("recovery-finish", forwardSchedulerRuntime.rows.peekFirst(), "backstep complete, recentering", true);
+            setState(State.Center, State.Forward);
+        }
+    }
+
+    private void applyForwardSchedulerMovement(ForwardRowSchedule activeRow) {
+        mc.player.setPitch(20);
+        mc.player.setYaw(dir.yaw);
+        input.stop();
+
+        if (activeRow == null || activeRow.isComplete() || currentForwardProjection() < activeRow.frontBoundaryProjection) {
+            input.forward(true);
+            logForwardSchedulerStatus("move", activeRow, activeRow == null ? "no active row" : "moving toward boundary", false);
+        } else {
+            logForwardSchedulerStatus("hold", activeRow, "holding at boundary waiting for row completion", false);
+        }
+    }
+
+    private void tickForwardScheduler() {
+        if (destroyCrystalTraps.get() && isForwardCrystalTrap()) {
+            debugStateTransition(State.DefuseCrystalTraps, "crystal-trap");
+            setState(State.DefuseCrystalTraps);
+            return;
+        }
+
+        ensureForwardSchedulerWindow();
+
+        if (forwardSchedulerRuntime.backstepping) {
+            handleForwardSchedulerRecovery();
+            return;
+        }
+
+        ForwardRowSchedule activeRow = getActiveForwardRow();
+        refreshCountedForwardStatPositions();
+        logForwardSchedulerStatus("tick", activeRow, "pre-work", false);
+
+        boolean minedChangedWorld = runForwardMineWork(activeRow);
+        if (minedChangedWorld) logForwardSchedulerStatus("mine", activeRow, "mine changed world", true);
+        if (state != State.Forward) return;
+        boolean placedChangedWorld = runForwardPlaceWork(activeRow);
+        if (placedChangedWorld) logForwardSchedulerStatus("place", activeRow, "place changed world", true);
+        if (state != State.Forward) return;
+        boolean conflictChangedWorld = runForwardConflictWork(activeRow);
+        if (conflictChangedWorld) logForwardSchedulerStatus("conflict", activeRow, "conflict changed world", true);
+        if (state != State.Forward) return;
+
+        if (minedChangedWorld || placedChangedWorld || conflictChangedWorld) {
+            markForwardSchedulerProgress();
+            activeRow = getActiveForwardRow();
+        }
+
+        if (activeRow != null && !activeRow.isComplete()) {
+            long now = System.currentTimeMillis();
+            if (forwardSchedulerRuntime.lastProgressAtMs == 0L) forwardSchedulerRuntime.lastProgressAtMs = now;
+            if (now - forwardSchedulerRuntime.lastProgressAtMs >= ForwardSchedulerRuntime.STUCK_TIMEOUT_MS) {
+                if (forwardSchedulerRuntime.recoveryRetries >= ForwardSchedulerRuntime.MAX_RECOVERY_RETRIES) {
+                    logForwardSchedulerStatus("hard-fail", activeRow, "scheduler stalled past retry limit", true);
+                    error("forward scheduler stalled");
+                    return;
+                }
+
+                startForwardSchedulerRecovery();
+                handleForwardSchedulerRecovery();
+                return;
+            }
+        }
+
+        applyForwardSchedulerMovement(activeRow);
+    }
+
+    private boolean runForwardMineWork(ForwardRowSchedule row) {
+        if (row == null || row.mineQueue.isEmpty()) return false;
+        if (forwardMineCount >= currentMineActionsThisTick()) return false;
+
+        if (doubleMine.get()) {
+            ArrayDeque<BlockPos> toDoubleMine = new ArrayDeque<>();
+            for (ForwardTask task : row.mineQueue.values()) {
+                if (forwardMineCount >= currentMineActionsThisTick()) break;
+                if (!shouldKeepForwardMineTask(task)) continue;
+
+                BlockState state = mc.world.getBlockState(task.pos);
+                if (
+                    safeCanBreak(task.pos, state)
+                        && (task.type.mineBlocksToPlace() || !blocksToPlace.get().contains(state.getBlock()))
+                        && !safeCanInstaBreak(task.pos)
+                        && (!Modules.get().get(SpeedMine.class).instamine() || state.calcBlockBreakingDelta(mc.player, mc.world, task.pos) <= 0.5)
+                        && (normalMining == null || !task.pos.equals(normalMining.blockPos))
+                        && (packetMining == null || !task.pos.equals(packetMining.blockPos))
+                ) {
+                    toDoubleMine.add(task.pos);
+                }
+            }
+
+            if (!toDoubleMine.isEmpty()) {
+                int slot = State.Forward.findAndMoveBestToolToHotbar(this, mc.world.getBlockState(toDoubleMine.peek()), false);
+                if (slot == -1) return false;
+                if (state != State.Forward) return false;
+                if (slot != mc.player.getInventory().getSelectedSlot()) InvUtils.swap(slot, false);
+                State.Forward.doubleMine(this, toDoubleMine);
+            }
+
+            if (normalMining != null || packetMining != null) {
+                int slot = State.Forward.findAndMoveBestToolToHotbar(this, normalMining != null ? normalMining.blockState : packetMining.blockState, false);
+                if (slot == -1) return false;
+                if (state != State.Forward) return false;
+                if (slot != mc.player.getInventory().getSelectedSlot()) InvUtils.swap(slot, false);
+                return false;
+            }
+        }
+
+        boolean changedWorld = false;
+        List<ForwardTask> snapshot = new ArrayList<>(row.mineQueue.values());
+        for (ForwardTask task : snapshot) {
+            if (forwardMineCount >= currentMineActionsThisTick() || breakTimer > 0) break;
+            if (!shouldKeepForwardMineTask(task)) {
+                row.mineQueue.remove(task.pos);
+                continue;
+            }
+
+            BlockState state = mc.world.getBlockState(task.pos);
+            int mineCost = mineBudgetCost(state);
+            if (forwardMineCount + mineCost > currentMineActionsThisTick()) break;
+            int slot = State.Forward.findAndMoveBestToolToHotbar(this, state, false);
+            if (slot == -1) return changedWorld;
+            if (this.state != State.Forward) return changedWorld;
+
+            if (slot != mc.player.getInventory().getSelectedSlot()) InvUtils.swap(slot, false);
+
+            boolean multiBreak = currentMineActionsThisTick() > 1 && safeCanInstaBreak(task.pos);
+            if (safeCanBreak(task.pos, state)) {
+                Block blockBefore = state.getBlock();
+                if (!tryMineBlock(task.pos, state, false)) continue;
+                forwardMineCount += mineCost;
+
+                if (mc.world.getBlockState(task.pos).getBlock() != blockBefore) {
+                    recordConfirmedBrokenBlockForStats(task.pos);
+                    row.mineQueue.remove(task.pos);
+                    changedWorld = true;
+                }
+
+                if (!multiBreak) break;
+            }
+        }
+
+        return changedWorld;
+    }
+
+    private boolean isForwardCrystalTrap() {
+        for (Entity entity : mc.world.getEntities()) {
+            if (!(entity instanceof EndCrystalEntity endCrystal)) continue;
+            if (PlayerUtils.isWithin(endCrystal, 12) || !PlayerUtils.isWithin(endCrystal, 24)) continue;
+            if (ignoreCrystals.contains(endCrystal)) continue;
+
+            Vec3d vec1 = new Vec3d(0, 0, 0);
+            Vec3d vec2 = new Vec3d(0, 0, 0);
+
+            ((IVec3d) vec1).meteor$set(mc.player.getX(), mc.player.getY() + mc.player.getStandingEyeHeight(), mc.player.getZ());
+            ((IVec3d) vec2).meteor$set(entity.getX(), entity.getY() + 0.5, entity.getZ());
+            return mc.world.raycast(new RaycastContext(vec1, vec2, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, mc.player)).getType() == HitResult.Type.MISS;
+        }
+
+        return false;
+    }
+
+    private boolean runForwardPlaceWork(ForwardRowSchedule row) {
+        return runForwardPlaceQueue(row, row == null ? null : row.placeQueue, false);
+    }
+
+    private boolean runForwardConflictWork(ForwardRowSchedule row) {
+        return runForwardPlaceQueue(row, row == null ? null : row.conflictQueue, true);
+    }
+
+    private boolean runForwardPlaceQueue(ForwardRowSchedule row, LinkedHashMap<BlockPos, ForwardTask> queue, boolean conflictQueue) {
+        if (row == null || queue == null || queue.isEmpty()) return false;
+
+        boolean changedWorld = false;
+        List<ForwardTask> snapshot = new ArrayList<>(queue.values());
+        for (ForwardTask task : snapshot) {
+            if (forwardPlaceCount >= currentPlaceActionsThisTick() || placeTimer > 0) break;
+            if (!shouldKeepForwardPlaceTask(task)) {
+                queue.remove(task.pos);
+                continue;
+            }
+
+            if (row.mineQueue.containsKey(task.pos) || hasActiveMineOwnership(task.pos)) continue;
+            if (task.pos.getSquaredDistance(mc.player.getEyePos()) > placeRange.get() * placeRange.get()) continue;
+
+            int slot = task.type.prioritizesTrash() ? State.Forward.findBlocksToPlacePrioritizeTrash(this) : State.Forward.findBlocksToPlace(this);
+            if (slot == -1) return changedWorld;
+            if (this.state != State.Forward) return changedWorld;
+
+            BlockState stateBefore = mc.world.getBlockState(task.pos);
+            boolean placedThisTick = tryPlaceBlock(task.pos, slot, false);
+            if (!placedThisTick) continue;
+
+            forwardPlaceCount++;
+
+            if (!shouldKeepForwardPlaceTask(task) || mc.world.getBlockState(task.pos) != stateBefore) {
+                queue.remove(task.pos);
+                changedWorld = true;
+            }
+
+            if (currentPlaceActionsThisTick() == 1) break;
+            if (conflictQueue) break;
+        }
+
+        return changedWorld;
+    }
+
+    private enum ForwardTaskType {
+        FRONT_MINE(true, true, false, false),
+        BEHIND_FRONT_MINE(true, true, false, true),
+        FLOOR_MINE(true, false, false, false),
+        BEHIND_FLOOR_MINE(true, false, false, true),
+        RAILINGS_MINE(true, false, false, false),
+        BEHIND_RAILINGS_MINE(true, false, false, true),
+        ABOVE_RAILINGS_MINE(true, true, false, false),
+        BEHIND_ABOVE_RAILINGS_MINE(true, true, false, true),
+        LIQUID_PLACE(false, false, true, false),
+        CORNER_PLACE(false, false, true, false),
+        RAILINGS_PLACE(false, false, false, false),
+        FLOOR_PLACE(false, false, false, false);
+
+        private final boolean mine;
+        private final boolean mineBlocksToPlace;
+        private final boolean prioritizesTrash;
+        private final boolean behind;
+
+        ForwardTaskType(boolean mine, boolean mineBlocksToPlace, boolean prioritizesTrash, boolean behind) {
+            this.mine = mine;
+            this.mineBlocksToPlace = mineBlocksToPlace;
+            this.prioritizesTrash = prioritizesTrash;
+            this.behind = behind;
+        }
+
+        public boolean mineBlocksToPlace() {
+            return mineBlocksToPlace;
+        }
+
+        public boolean liquids() {
+            return this == LIQUID_PLACE;
+        }
+
+        public boolean prioritizesTrash() {
+            return prioritizesTrash;
+        }
+
+        public boolean isBehind() {
+            return behind;
+        }
+    }
+
+    private static final class ForwardTask {
+        private final BlockPos pos;
+        private final ForwardTaskType type;
+
+        private ForwardTask(BlockPos pos, ForwardTaskType type) {
+            this.pos = pos;
+            this.type = type;
+        }
+
+        private ForwardTask shifted(int offsetX, int offsetZ) {
+            return new ForwardTask(pos.add(offsetX, 0, offsetZ).toImmutable(), type);
+        }
+    }
+
+    private static final class ForwardRowSchedule {
+        private final int rowId;
+        private final List<ForwardTask> mineTemplate;
+        private final List<ForwardTask> placeTemplate;
+        private final LinkedHashMap<BlockPos, ForwardTask> mineQueue;
+        private final LinkedHashMap<BlockPos, ForwardTask> placeQueue;
+        private final LinkedHashMap<BlockPos, ForwardTask> conflictQueue;
+        private double frontBoundaryProjection;
+
+        private ForwardRowSchedule(int rowId, List<ForwardTask> mineTemplate, List<ForwardTask> placeTemplate, LinkedHashMap<BlockPos, ForwardTask> mineQueue, LinkedHashMap<BlockPos, ForwardTask> placeQueue, LinkedHashMap<BlockPos, ForwardTask> conflictQueue, double frontBoundaryProjection) {
+            this.rowId = rowId;
+            this.mineTemplate = Collections.unmodifiableList(new ArrayList<>(mineTemplate));
+            this.placeTemplate = Collections.unmodifiableList(new ArrayList<>(placeTemplate));
+            this.mineQueue = mineQueue;
+            this.placeQueue = placeQueue;
+            this.conflictQueue = conflictQueue;
+            this.frontBoundaryProjection = frontBoundaryProjection;
+        }
+
+        private boolean isComplete() {
+            return mineQueue.isEmpty() && placeQueue.isEmpty() && conflictQueue.isEmpty();
+        }
+    }
+
+    private static final class ForwardSchedulerRuntime {
+        private static final int LOOKAHEAD_ROWS = 5;
+        private static final long STUCK_TIMEOUT_MS = 30_000L;
+        private static final int MAX_RECOVERY_RETRIES = 2;
+
+        private final ArrayDeque<ForwardRowSchedule> rows = new ArrayDeque<>();
+        private int nextRowId;
+        private long lastProgressAtMs;
+        private int recoveryRetries;
+        private boolean backstepping;
+        private double backstepStartProjection;
+
+        private void reset() {
+            rows.clear();
+            nextRowId = 0;
+            lastProgressAtMs = 0L;
+            recoveryRetries = 0;
+            backstepping = false;
+            backstepStartProjection = 0.0;
         }
     }
 
@@ -4405,13 +5592,20 @@ public class HighwayBuilderTHM extends Module {
         Forward {
             @Override
             protected void start(HighwayBuilderTHM b) {
-                checkTasks(b);
                 b.mc.player.setPitch(20);
                 if (b.state == Forward) b.mc.player.setYaw(b.dir.yaw);
+                if (b.useForwardRowSchedulerMode()) {
+                    b.seedForwardSchedulerWindow();
+                }
             }
 
             @Override
             protected void tick(HighwayBuilderTHM b) {
+                if (b.useForwardRowSchedulerMode()) {
+                    b.tickForwardScheduler();
+                    return;
+                }
+
                 checkTasks(b);
                 b.mc.player.setPitch(20);
                 if (b.state == Forward) b.input.forward(true); // Move
@@ -4781,16 +5975,36 @@ public class HighwayBuilderTHM extends Module {
         },
 
         ThrowOutTrash {
+            private static final int MAX_STUCK_DROP_RETRIES = 5;
+            private static final int POST_PURGE_DELAY_TICKS = 20;
+            private static final int MAX_ROTATION_RETRIES = 2;
+            private static final int MAX_DIRECT_TRASH_DROPS_PER_PASS = 2;
+            private static final float TARGET_PITCH = -25.0f;
+            private static final float ROTATION_TOLERANCE = 0.5f;
             private final Set<Integer> keepSlots = new HashSet<>();
+            private final Map<Integer, ItemStack> skippedDropSlots = new HashMap<>();
             private boolean firstTick;
+            private boolean completionDelayStarted;
             private int timer;
+            private int failedDropSlot;
+            private ItemStack failedDropStack = ItemStack.EMPTY;
+            private int failedDropRetries;
+            private int failedRotationRetries;
+            private float cachedPreRotateYaw;
+            private float cachedPreRotatePitch;
             private static final ItemStack[] ITEMS = new ItemStack[27];
 
             @Override
             protected void start(HighwayBuilderTHM b) {
                 keepSlots.clear();
+                skippedDropSlots.clear();
                 firstTick = true;
+                completionDelayStarted = false;
                 timer = 0;
+                clearFailedDropState();
+                failedRotationRetries = 0;
+                cachedPreRotateYaw = b.mc.player.getYaw();
+                cachedPreRotatePitch = b.mc.player.getPitch();
             }
 
             @Override
@@ -4800,54 +6014,81 @@ public class HighwayBuilderTHM extends Module {
                     return;
                 }
 
-                b.mc.player.setYaw(b.dir.opposite().yaw);
-                b.mc.player.setPitch(-25);
+                if (!alignForTrashRoutine(b)) return;
 
                 if (firstTick) {
                     firstTick = false;
                     return;
                 }
 
-                refreshProtectedTrashSlots(b);
-
                 if (!b.mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
-                    if (handleCursorStack(b)) timer = 1;
+                    completionDelayStarted = false;
+                    if (handleCursorStack(b)) timer = b.inventoryDelay.get();
                     return;
                 }
 
-                for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
-                    ItemStack itemStack = b.mc.player.getInventory().getStack(i);
-                    if (keepSlots.contains(i) && isEligibleTrashReserveStack(b, itemStack)) continue;
-                    if (itemStack.getItem() == Items.OBSIDIAN && !b.trashItems.get().contains(Items.OBSIDIAN)) continue;
+                if (dropDirectTrashBatch(b)) {
+                    completionDelayStarted = false;
+                    return;
+                }
 
-                    if (Utils.isShulker(itemStack.getItem()) && b.ejectUselessShulkers.get()) {
-                        if (!isUsefulShulker(b, itemStack)) {
-                            if (b.restockDebugLog.get()) {
-                                b.restockDebug("ThrowOutTrash dropping useless shulker from slot %d (%s).", i, itemStack.getItem());
-                            }
-                            InvUtils.drop().slot(i);
-                            timer = 10;
-                            return;
-                        }
-                        continue;
-                    }
-
-                    if (b.trashItems.get().contains(itemStack.getItem())) {
-                        if (b.restockDebugLog.get()) {
-                            b.restockDebug("ThrowOutTrash dropping trash item from slot %d (%s).", i, itemStack.getItem());
-                        }
-                        InvUtils.drop().slot(i);
-                        timer = 10;
-                        return;
-                    }
+                if (!completionDelayStarted) {
+                    completionDelayStarted = true;
+                    timer = POST_PURGE_DELAY_TICKS;
+                    return;
                 }
 
                 b.setState(b.lastState);
             }
 
+            private boolean alignForTrashRoutine(HighwayBuilderTHM b) {
+                float targetYaw = b.dir.opposite().yaw;
+                float targetPitch = TARGET_PITCH;
+
+                if (isRotationAligned(b.mc.player.getYaw(), b.mc.player.getPitch(), targetYaw, targetPitch)) {
+                    failedRotationRetries = 0;
+                    return true;
+                }
+
+                cachedPreRotateYaw = b.mc.player.getYaw();
+                cachedPreRotatePitch = b.mc.player.getPitch();
+                b.mc.player.setYaw(targetYaw);
+                b.mc.player.setPitch(targetPitch);
+
+                if (isRotationAligned(b.mc.player.getYaw(), b.mc.player.getPitch(), targetYaw, targetPitch)) {
+                    failedRotationRetries = 0;
+                    return true;
+                }
+
+                failedRotationRetries++;
+                if (b.restockDebugLog.get()) {
+                    b.restockDebug("ThrowOutTrash rotation align failed retry=%d/%d before=(yaw=%.2f,pitch=%.2f) after=(yaw=%.2f,pitch=%.2f) target=(yaw=%.2f,pitch=%.2f).",
+                        failedRotationRetries,
+                        MAX_ROTATION_RETRIES,
+                        cachedPreRotateYaw,
+                        cachedPreRotatePitch,
+                        b.mc.player.getYaw(),
+                        b.mc.player.getPitch(),
+                        targetYaw,
+                        targetPitch
+                    );
+                }
+
+                if (failedRotationRetries > MAX_ROTATION_RETRIES) {
+                    b.error("trash routine failed");
+                }
+
+                return false;
+            }
+
+            private boolean isRotationAligned(float yaw, float pitch, float targetYaw, float targetPitch) {
+                return Math.abs(MathHelper.wrapDegrees(yaw - targetYaw)) <= ROTATION_TOLERANCE
+                    && Math.abs(pitch - targetPitch) <= ROTATION_TOLERANCE;
+            }
+
             private boolean handleCursorStack(HighwayBuilderTHM b) {
                 ItemStack cursorStack = b.mc.player.currentScreenHandler.getCursorStack();
-                if (b.clearCursorStackToEmptySlot("ThrowOutTrash")) return true;
+                if (b.clearCursorStackToEmptySlot("ThrowOutTrash", true)) return true;
 
                 if (resolveUsefulCursorStack(b)) return true;
                 if (resolveTrashCursorStack(b, cursorStack)) return true;
@@ -4898,8 +6139,9 @@ public class HighwayBuilderTHM extends Module {
                 if (b.restockDebugLog.get() && usedProtectedTrash) {
                     b.restockDebug("ThrowOutTrash spent a protected trash block as a last resort to clear a useful cursor stack.");
                 }
-                b.dropCursorStackIfSafe(usedProtectedTrash ? "ThrowOutTrash-protected-trash-cursor-swap" : "ThrowOutTrash-trash-cursor-swap");
-                return true;
+                return b.dropCursorStackIfSafe(
+                    usedProtectedTrash ? "ThrowOutTrash-protected-trash-cursor-swap" : "ThrowOutTrash-trash-cursor-swap"
+                );
             }
 
             private boolean resolveTrashCursorStack(HighwayBuilderTHM b, ItemStack cursorStack) {
@@ -4916,13 +6158,13 @@ public class HighwayBuilderTHM extends Module {
                     b.mc.player
                 );
 
-                b.dropCursorStackIfSafe("ThrowOutTrash-reserved-trash-cursor-swap");
-                return true;
+                return b.dropCursorStackIfSafe("ThrowOutTrash-reserved-trash-cursor-swap");
             }
 
             private int findTrashSwapSlot(HighwayBuilderTHM b, boolean allowProtectedTrash) {
                 refreshProtectedTrashSlots(b);
                 for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
+                    if (isReservedHotbarSlot(b, i)) continue;
                     ItemStack itemStack = b.mc.player.getInventory().getStack(i);
                     if (!isEligibleTrashReserveStack(b, itemStack)) continue;
                     if (!allowProtectedTrash && keepSlots.contains(i)) continue;
@@ -4935,10 +6177,16 @@ public class HighwayBuilderTHM extends Module {
             private void refreshProtectedTrashSlots(HighwayBuilderTHM b) {
                 keepSlots.clear();
 
+                int reservedMatchingCount = 0;
                 List<Integer> trashBlockSlots = new ArrayList<>();
                 for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
                     ItemStack itemStack = b.mc.player.getInventory().getStack(i);
-                    if (isEligibleTrashReserveStack(b, itemStack)) trashBlockSlots.add(i);
+                    if (!isEligibleTrashReserveStack(b, itemStack)) continue;
+                    if (isReservedHotbarSlot(b, i)) {
+                        reservedMatchingCount++;
+                        continue;
+                    }
+                    trashBlockSlots.add(i);
                 }
 
                 trashBlockSlots.sort((a, c) -> {
@@ -4950,8 +6198,134 @@ public class HighwayBuilderTHM extends Module {
                     return Integer.compare(a, c);
                 });
 
-                int keepCount = Math.min(b.keepTrashBlockStacks.get(), trashBlockSlots.size());
+                int keepBudget = Math.max(b.keepTrashBlockStacks.get() - reservedMatchingCount, 0);
+                int keepCount = Math.min(keepBudget, trashBlockSlots.size());
                 for (int i = 0; i < keepCount; i++) keepSlots.add(trashBlockSlots.get(i));
+            }
+
+            private boolean dropDirectTrashBatch(HighwayBuilderTHM b) {
+                int maxActions = Math.min(MAX_DIRECT_TRASH_DROPS_PER_PASS, b.mc.player.getInventory().getMainStacks().size());
+                boolean onlyReservedOrSkippedTrashRemains = false;
+
+                for (int actions = 0; actions < maxActions; ) {
+                    refreshProtectedTrashSlots(b);
+
+                    boolean droppedThisPass = false;
+                    boolean blockedThisPass = false;
+
+                    for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
+                        ItemStack itemStack = b.mc.player.getInventory().getStack(i);
+                        if (itemStack.getItem() == Items.OBSIDIAN && !b.trashItems.get().contains(Items.OBSIDIAN)) continue;
+
+                        boolean droppableShulker = Utils.isShulker(itemStack.getItem())
+                            && b.ejectUselessShulkers.get()
+                            && !isUsefulShulker(b, itemStack);
+                        boolean droppableTrashItem = b.trashItems.get().contains(itemStack.getItem());
+                        if (!droppableShulker && !droppableTrashItem) continue;
+
+                        if (isReservedHotbarSlot(b, i)) {
+                            blockedThisPass = true;
+                            continue;
+                        }
+
+                        if (isSkippedDropSlot(i, itemStack)) {
+                            blockedThisPass = true;
+                            continue;
+                        }
+
+                        if (keepSlots.contains(i) && isEligibleTrashReserveStack(b, itemStack)) continue;
+
+                        ItemStack beforeDrop = itemStack.copy();
+                        if (droppableShulker) {
+                            if (b.restockDebugLog.get()) {
+                                b.restockDebug("ThrowOutTrash dropping useless shulker from slot %d (%s).", i, itemStack.getItem());
+                            }
+                        } else if (b.restockDebugLog.get()) {
+                            b.restockDebug("ThrowOutTrash dropping trash item from slot %d (%s).", i, itemStack.getItem());
+                        }
+
+                        InvUtils.drop().slot(i);
+
+                        ItemStack afterDrop = b.mc.player.getInventory().getStack(i);
+                        if (matchesSkippedDropStack(beforeDrop, afterDrop)) {
+                            noteFailedDrop(b, i, beforeDrop);
+                            timer = b.inventoryDelay.get();
+                            return true;
+                        }
+
+                        skippedDropSlots.remove(i);
+                        clearFailedDropState();
+                        completionDelayStarted = false;
+                        actions++;
+                        droppedThisPass = true;
+                        if (actions >= maxActions) {
+                            timer = b.inventoryDelay.get();
+                            return true;
+                        }
+                        break;
+                    }
+
+                    if (!droppedThisPass) {
+                        onlyReservedOrSkippedTrashRemains = blockedThisPass;
+                        break;
+                    }
+                }
+
+                if (onlyReservedOrSkippedTrashRemains && b.restockDebugLog.get()) {
+                    b.restockDebug("ThrowOutTrash leaving with only reserved or temporarily skipped trash remaining.");
+                }
+
+                return false;
+            }
+
+            private boolean isReservedHotbarSlot(HighwayBuilderTHM b, int slot) {
+                return slot >= 0 && slot < 9 && b.isHotbarSlotReservedByManager(slot);
+            }
+
+            private boolean isSkippedDropSlot(int slot, ItemStack itemStack) {
+                ItemStack skippedStack = skippedDropSlots.get(slot);
+                if (skippedStack == null) return false;
+                if (matchesSkippedDropStack(skippedStack, itemStack)) return true;
+
+                skippedDropSlots.remove(slot);
+                return false;
+            }
+
+            private boolean matchesSkippedDropStack(ItemStack expected, ItemStack actual) {
+                if (expected == null || actual == null) return false;
+                if (expected.isEmpty() || actual.isEmpty()) return expected.isEmpty() && actual.isEmpty();
+
+                return expected.getCount() == actual.getCount()
+                    && ItemStack.areItemsAndComponentsEqual(expected, actual);
+            }
+
+            private void noteFailedDrop(HighwayBuilderTHM b, int slot, ItemStack attemptedStack) {
+                if (failedDropSlot == slot && matchesSkippedDropStack(failedDropStack, attemptedStack)) {
+                    failedDropRetries++;
+                } else {
+                    failedDropSlot = slot;
+                    failedDropStack = attemptedStack.copy();
+                    failedDropRetries = 1;
+                }
+
+                if (failedDropRetries < MAX_STUCK_DROP_RETRIES) return;
+
+                skippedDropSlots.put(slot, attemptedStack.copy());
+                clearFailedDropState();
+
+                if (b.restockDebugLog.get()) {
+                    b.restockDebug("ThrowOutTrash skipping slot %d for the rest of this visit after repeated failed drops (%s x%d).",
+                        slot,
+                        attemptedStack.getItem(),
+                        attemptedStack.getCount()
+                    );
+                }
+            }
+
+            private void clearFailedDropState() {
+                failedDropSlot = -1;
+                failedDropStack = ItemStack.EMPTY;
+                failedDropRetries = 0;
             }
 
             private boolean isEligibleTrashReserveStack(HighwayBuilderTHM b, ItemStack itemStack) {
@@ -5060,6 +6434,7 @@ public class HighwayBuilderTHM extends Module {
 
                 stopTimerEnabled = false;
                 primed = false;
+                b.applyEChestBreakSpeedOverrideIfPossible("mine-echests-start");
             }
 
             @Override
@@ -5077,7 +6452,7 @@ public class HighwayBuilderTHM extends Module {
                 // Move
                 if (moveTimer > 0) {
                     b.mc.player.setYaw(dir.yaw);
-                    b.input.forward(moveTimer > 2);
+                    b.input.stop();
 
                     moveTimer--;
                     return;
@@ -5514,7 +6889,7 @@ public class HighwayBuilderTHM extends Module {
 
                     if (BlockUtils.place(pos, Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, true)) {
                         b.placeTimer = b.placeDelay.get();
-                        b.recordBlockPlaced();
+                        b.recordPlacedBlockForStats(pos);
                         if (b.restockDebugLog.get()) {
                             b.restockDebug("KitbotOrder placed %s block at %s while reconciling the %s.",
                                 type.name().toLowerCase(Locale.ROOT),
@@ -5549,7 +6924,7 @@ public class HighwayBuilderTHM extends Module {
 
                 if (!b.lastBreakingPos.equals(pos)) {
                     b.lastBreakingPos.set(pos.getX(), pos.getY(), pos.getZ());
-                    b.recordBlockBroken();
+                    b.recordConfirmedBrokenBlockForStats(pos);
                 }
 
                 if (b.restockDebugLog.get()) {
@@ -5623,8 +6998,8 @@ public class HighwayBuilderTHM extends Module {
                 b.returnPlayerToKitbotAnchorIfSaved();
                 b.invalidateKitbotBlockadeState("kitbot-order-failed");
                 b.clearKitbotRuntimeState("kitbot-order-failed");
-                if (failureMode == FailureMode.POST_DELIVERY_RESTORE && b.restockTask.failActiveTaskHard()) return;
-                b.errorEarly(message);
+                if (b.restockTask.failActiveTaskHard(message)) return;
+                b.error(message);
             }
         },
 
@@ -5728,13 +7103,22 @@ public class HighwayBuilderTHM extends Module {
                     return;
                 }
 
-                if (!b.restockTask.isBlockadeReady()) {
-                    if (b.lastState != Center && b.lastState != ThrowOutTrash && b.lastState != PlaceShulkerBlockade && b.lastState != this) {
-                        b.restockDebug("Restock.start requesting Center before blockade placement.");
-                        b.setState(Center);
+                if (b.restockTask.food) {
+                    int looseFoodCount = b.countConfiguredFoodItemsInInventory();
+                    if (looseFoodCount > b.saveFood.get()) {
+                        if (b.restockDebugLog.get()) {
+                            b.restockDebug("Restock.start skipping stale food restock because loose food count has recovered to %d (threshold=%d).",
+                                looseFoodCount,
+                                b.saveFood.get()
+                            );
+                        }
+                        b.completeRestockTaskAndContinue();
                         return;
                     }
-                    else if (b.lastState == Center) {
+                }
+
+                if (!b.restockTask.isBlockadeReady()) {
+                    if (b.lastState == Center) {
                         b.restockDebug("Restock.start requesting ThrowOutTrash before blockade placement.");
                         b.setState(ThrowOutTrash);
                         return;
@@ -5744,6 +7128,17 @@ public class HighwayBuilderTHM extends Module {
                         b.setState(PlaceShulkerBlockade);
                         return;
                     }
+
+                    if (b.lastState == this || b.lastState == PlaceShulkerBlockade) {
+                        b.restockDebug("Restock.start restarting blockade setup from Center because blockadeReady=false after %s.",
+                            b.stateName(b.lastState)
+                        );
+                    } else {
+                        b.restockDebug("Restock.start requesting Center before blockade placement.");
+                    }
+
+                    b.setState(Center);
+                    return;
                 }
 
                 if (!b.restockTask.freezeSessionTargetForSourceSelection()) {
@@ -6084,16 +7479,24 @@ public class HighwayBuilderTHM extends Module {
                 int slotsPulled = b.restockTask.getSession() != null ? b.restockTask.getSession().getProgressTowardsTarget() : 0;
                 // whether we have pulled the minimum amount of items we want
                 if (slotsPulled >= minimumSlots && !indicateStopping) {
-                    if (b.restockTask.food
-                        && b.mc.currentScreen instanceof ShulkerBoxScreen screen
-                        && screen.getScreenHandler().syncId == b.syncId) {
-                        Inventory inv = ((ShulkerBoxScreenHandlerAccessor) screen.getScreenHandler()).meteor$getInventory();
-                        if (returnSmallestExtraFoodStackToContainer(b)) {
-                            delayTimer = b.inventoryDelay.get();
-                            return;
+                    if (b.restockTask.food) {
+                        Inventory foodContainerInventory = null;
+                        boolean directEnderChestFoodContainer = false;
+
+                        if (b.mc.currentScreen instanceof ShulkerBoxScreen screen
+                            && screen.getScreenHandler().syncId == b.syncId) {
+                            foodContainerInventory = ((ShulkerBoxScreenHandlerAccessor) screen.getScreenHandler()).meteor$getInventory();
                         }
-                        if (extractedFoodShulkerFromEnderChest) {
-                            prepareFoodShulkerReturn(b, inv);
+                        else if (b.mc.currentScreen instanceof GenericContainerScreen screen
+                            && screen.getScreenHandler().syncId == b.syncId) {
+                            foodContainerInventory = screen.getScreenHandler().getInventory();
+                            directEnderChestFoodContainer = true;
+                        }
+
+                        if (!directEnderChestFoodContainer
+                            && foodContainerInventory != null
+                            && extractedFoodShulkerFromEnderChest) {
+                            prepareFoodShulkerReturn(b, foodContainerInventory);
                         }
                     }
                     if (b.restockTask.enderChests
@@ -6307,6 +7710,9 @@ public class HighwayBuilderTHM extends Module {
                 int beforeProgress = session != null ? session.getProgressTowardsTarget() : 0;
                 int beforeUsablePulledEchests = session != null ? session.getUsablePulledEchests() : 0;
                 if (!grabFromInventory(b, inv, filterItem)) return false;
+                if (b.restockTask.food && sourcePhase == RestockTask.SourcePhase.EnderChest && b.mc.currentScreen instanceof GenericContainerScreen) {
+                    b.invalidateEChestMemorySnapshot("direct-food-pull");
+                }
                 b.restockTask.noteSourceForwardProgress(sourcePhase, beforeProgress, beforeUsablePulledEchests);
                 return true;
             }
@@ -7179,50 +8585,6 @@ public class HighwayBuilderTHM extends Module {
                     && countRestockUnitsInShulker(b, stack, ECHEST_RESERVE_MATCHING) > 0;
             }
 
-            private boolean returnSmallestExtraFoodStackToContainer(HighwayBuilderTHM b) {
-                int matchingFoodStacks = 0;
-                int smallestSlot = -1;
-                int smallestCount = Integer.MAX_VALUE;
-
-                for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
-                    ItemStack stack = b.mc.player.getInventory().getStack(i);
-                    if (!b.isConfiguredFoodStack(stack)) continue;
-
-                    matchingFoodStacks++;
-                    if (stack.getCount() < smallestCount
-                        || (stack.getCount() == smallestCount && preferRestockReturnSlot(i, smallestSlot))) {
-                        smallestSlot = i;
-                        smallestCount = stack.getCount();
-                    }
-                }
-
-                if (matchingFoodStacks <= 1 || smallestSlot == -1) return false;
-
-                ItemStack before = b.mc.player.getInventory().getStack(smallestSlot).copy();
-                b.mc.interactionManager.clickSlot(
-                    b.mc.player.currentScreenHandler.syncId,
-                    SlotUtils.indexToId(smallestSlot),
-                    0,
-                    SlotActionType.QUICK_MOVE,
-                    b.mc.player
-                );
-
-                ItemStack after = b.mc.player.getInventory().getStack(smallestSlot);
-                boolean moved = after.isEmpty()
-                    || after.getCount() < before.getCount()
-                    || !ItemStack.areItemsAndComponentsEqual(before, after);
-
-                if (moved && b.restockDebugLog.get()) {
-                    b.restockDebug("Returned smallest matching food stack from inventory slot %d to the open food container (count=%d, totalStacksBefore=%d).",
-                        smallestSlot,
-                        before.getCount(),
-                        matchingFoodStacks
-                    );
-                }
-
-                return moved;
-            }
-
             private boolean returnSmallestExtraEnderChestStackToContainer(HighwayBuilderTHM b) {
                 int matchingEnderChestStacks = 0;
                 int smallestSlot = -1;
@@ -7424,11 +8786,6 @@ public class HighwayBuilderTHM extends Module {
              */
             @Override
             protected void tick(HighwayBuilderTHM b) {
-                if (b.mc.player == null || b.mc.world == null || b.mc.interactionManager == null) {
-                    b.drawingBow = false;
-                    return;
-                }
-
                 if (cooldown > 0) {
                     cooldown--;
                     return;
@@ -7574,12 +8931,14 @@ public class HighwayBuilderTHM extends Module {
             }
 
             for (MBlockPos pos : it) {
-                if (b.count >= b.blocksPerTick.get()) return;
+                if (b.count >= b.currentMineActionsThisTick()) return;
                 if (b.breakTimer > 0) return;
 
                 BlockState state = pos.getState();
                 if (state.isAir() || (!mineBlocksToPlace && b.blocksToPlace.get().contains(state.getBlock()))) continue;
                 if (b.shouldSkipSignBreak(pos.getBlockPos(), state)) continue;
+                int mineCost = b.mineBudgetCost(state);
+                if (b.count + mineCost > b.currentMineActionsThisTick()) return;
 
                 int slot = findAndMoveBestToolToHotbar(b, state, false);
                 if (slot == -1) return;
@@ -7587,20 +8946,15 @@ public class HighwayBuilderTHM extends Module {
                 if (slot != b.mc.player.getInventory().getSelectedSlot()) InvUtils.swap(slot, false);
 
                 BlockPos mcPos = pos.getBlockPos();
-                boolean multiBreak = b.blocksPerTick.get() > 1 && b.safeCanInstaBreak(mcPos) && !b.rotation.get().mine;
+                boolean multiBreak = b.currentMineActionsThisTick() > 1 && b.safeCanInstaBreak(mcPos) && !b.rotation.get().mine;
                 if (b.safeCanBreak(mcPos, state)) {
-                    if (b.rotation.get().mine) Rotations.rotate(Rotations.getYaw(mcPos), Rotations.getPitch(mcPos), () -> BlockUtils.breakBlock(mcPos, true));
-                    else BlockUtils.breakBlock(mcPos, true);
-                    breaking = true;
-
-                    b.breakTimer = b.breakDelay.get();
-
-                    if (!b.lastBreakingPos.equals(pos)) {
-                        b.lastBreakingPos.set(pos);
-                        b.recordBlockBroken();
+                    Block blockBefore = state.getBlock();
+                    if (!b.tryMineBlock(mcPos, state, b.rotation.get().mine)) continue;
+                    if (b.mc.world.getBlockState(mcPos).getBlock() != blockBefore) {
+                        b.recordConfirmedBrokenBlockForStats(mcPos);
                     }
-
-                    b.count++;
+                    b.count += mineCost - 1;
+                    breaking = true;
 
                     // can only multi break if we aren't rotating and the block can be insta-mined
                     if (!multiBreak) break;
@@ -7689,7 +9043,7 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 // CheckEntities & SwapBack are disabled for waiting for better accuracy and speed of the builder
-                boolean placedThisTick = BlockUtils.place(pos.getBlockPos(), Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, true);
+                boolean placedThisTick = b.tryPlaceBlock(pos.getBlockPos(), slot, b.rotation.get().place);
 
                 if (b.restockDebugLog.get() && (this == PlaceShulkerBlockade || this == PlaceEChestBlockade)) {
                     BlockState stateAfterAttempt = b.mc.world.getBlockState(pos.getBlockPos());
@@ -7705,11 +9059,7 @@ public class HighwayBuilderTHM extends Module {
 
                 if (placedThisTick) {
                     placed = true;
-                    b.recordBlockPlaced();
-                    b.placeTimer = b.placeDelay.get();
-
-                    b.count++;
-                    if (b.placementsPerTick.get() == 1) break;
+                    if (b.currentPlaceActionsThisTick() == 1) break;
                 }
 
                 if (!it.hasNext()) finishedPlacing = true;
@@ -8039,7 +9389,7 @@ public class HighwayBuilderTHM extends Module {
         }
 
         default int placementsPerTick(HighwayBuilderTHM b) {
-            return b.placementsPerTick.get();
+            return b.currentPlaceActionsThisTick();
         }
     }
 
@@ -9449,7 +10799,7 @@ public class HighwayBuilderTHM extends Module {
             private void refreshBaselines() {
                 pickaxesStartCount = countInventoryItems(itemStack -> itemStack.isIn(ItemTags.PICKAXES));
                 materialStartStacks = countInventorySlots(this::isTrackedMaterialStack);
-                foodStartItems = countInventoryItems(this::isTrackedFoodStack);
+                foodStartItems = b.countConfiguredFoodItemsInInventory();
                 enderChestStartItems = countInventoryItems(itemStack -> itemStack.getItem() == Items.ENDER_CHEST);
                 obsidianStartItems = countInventoryItems(itemStack -> itemStack.getItem() == Items.OBSIDIAN);
             }
@@ -9460,14 +10810,33 @@ public class HighwayBuilderTHM extends Module {
 
                 int freeSlots = countEmptyInventorySlots();
                 int usableFreeSlots = Math.max(freeSlots - b.minEmpty.get(), 0);
-                workingStageCapacity = usableFreeSlots;
+                int looseFoodCount = b.countConfiguredFoodItemsInInventory();
+                int foodTargetIncrease = b.getConfiguredFoodTargetIncrease(looseFoodCount);
+                int foodAdditionalCapacity = b.countConfiguredFoodAdditionalCapacityInInventory();
+                workingStageCapacity = taskType == Type.Food ? foodAdditionalCapacity : usableFreeSlots;
 
                 targetFinal = switch (taskType) {
                     case Pickaxes -> Math.min(usableFreeSlots, b.restockPickaxesAmount.get());
                     case Materials -> isObsidianTask() ? usableFreeSlots * 64 : usableFreeSlots;
-                    case Food -> 1;
+                    case Food -> foodTargetIncrease;
                     case EnderChests -> 1;
                 };
+
+                if (taskType == Type.Food && (targetFinal <= 0 || foodAdditionalCapacity < targetFinal)) {
+                    targetFrozen = true;
+                    remainingTarget = Math.max(targetFinal, 0);
+                    targetInitialized = false;
+                    refreshProgress();
+                    if (b.restockDebugLog.get()) {
+                        b.restockDebug("RestockSession found no usable food target (looseFood=%d, targetFinal=%d, additionalCapacity=%d, threshold=%d).",
+                            looseFoodCount,
+                            targetFinal,
+                            foodAdditionalCapacity,
+                            b.saveFood.get()
+                        );
+                    }
+                    return false;
+                }
 
                 targetFrozen = true;
                 remainingTarget = Math.max(targetFinal, 0);
@@ -9487,10 +10856,12 @@ public class HighwayBuilderTHM extends Module {
             private void refreshProgress() {
                 if (b.mc.player == null) return;
 
-                workingStageCapacity = Math.max(countEmptyInventorySlots() - b.minEmpty.get(), 0);
+                workingStageCapacity = taskType == Type.Food
+                    ? b.countConfiguredFoodAdditionalCapacityInInventory()
+                    : Math.max(countEmptyInventorySlots() - b.minEmpty.get(), 0);
                 pickaxesAcquiredCount = Math.max(countInventoryItems(itemStack -> itemStack.isIn(ItemTags.PICKAXES)) - pickaxesStartCount, 0);
                 materialStacksAcquired = Math.max(countInventorySlots(this::isTrackedMaterialStack) - materialStartStacks, 0);
-                foodItemsAcquired = Math.max(countInventoryItems(this::isTrackedFoodStack) - foodStartItems, 0);
+                foodItemsAcquired = Math.max(b.countConfiguredFoodItemsInInventory() - foodStartItems, 0);
                 enderChestItemsAcquired = Math.max(countInventoryItems(itemStack -> itemStack.getItem() == Items.ENDER_CHEST) - enderChestStartItems, 0);
                 obsidianItemsAcquired = Math.max(countInventoryItems(itemStack -> itemStack.getItem() == Items.OBSIDIAN) - obsidianStartItems, 0);
 
@@ -9513,10 +10884,32 @@ public class HighwayBuilderTHM extends Module {
                 int currentAdditionalCapacity = switch (taskType) {
                     case Pickaxes -> usableFreeSlots;
                     case Materials -> isObsidianTask() ? usableFreeSlots * 64 : usableFreeSlots;
-                    case Food, EnderChests -> usableFreeSlots > 0 ? 1 : 0;
+                    case Food -> b.countConfiguredFoodAdditionalCapacityInInventory();
+                    case EnderChests -> usableFreeSlots > 0 ? 1 : 0;
                 };
 
-                workingStageCapacity = usableFreeSlots;
+                workingStageCapacity = taskType == Type.Food ? currentAdditionalCapacity : usableFreeSlots;
+                if (taskType == Type.Food) {
+                    boolean usable = oldTargetFinal > 0 && currentProgress + currentAdditionalCapacity >= oldTargetFinal;
+                    targetFinal = oldTargetFinal;
+                    targetInitialized = targetFinal > 0;
+                    remainingTarget = Math.max(targetFinal - currentProgress, 0);
+
+                    if (b.restockDebugLog.get()) {
+                        b.restockDebug("RestockSession recalculated frozen target after Kitbot delivery for task=%s (oldTarget=%d, newTarget=%d, progress=%d, usableFreeSlots=%d, additionalCapacity=%d, usable=%s).",
+                            item(taskType),
+                            oldTargetFinal,
+                            targetFinal,
+                            currentProgress,
+                            usableFreeSlots,
+                            currentAdditionalCapacity,
+                            usable
+                        );
+                    }
+
+                    return usable;
+                }
+
                 targetFinal = Math.max(Math.min(oldTargetFinal, currentProgress + currentAdditionalCapacity), 0);
                 targetInitialized = targetFinal > 0;
                 remainingTarget = Math.max(targetFinal - currentProgress, 0);
@@ -10043,6 +11436,14 @@ public class HighwayBuilderTHM extends Module {
                 return;
             }
 
+            if (food) {
+                if (b.restockDebugLog.get()) {
+                    b.restockDebug("Food restock target was unusable because inventory capacity could not exceed the configured threshold.");
+                }
+                failActiveTaskHard();
+                return;
+            }
+
             b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", "No empty slots available for restocking items.");
             b.error("No empty slots for restocking items.");
         }
@@ -10050,10 +11451,16 @@ public class HighwayBuilderTHM extends Module {
         public boolean failActiveTaskHard() {
             if (tasksInactive()) return false;
 
-            if (session != null) session.fail();
             String activeItem = item();
-            b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", "Unable to perform restock for '" + activeItem + "'.");
-            b.error("Unable to perform restock for '" + activeItem + "'.");
+            return failActiveTaskHard("Unable to perform restock for '" + activeItem + "'.");
+        }
+
+        public boolean failActiveTaskHard(String message) {
+            if (tasksInactive()) return false;
+
+            if (session != null) session.fail();
+            b.notifyDesktop(b.notifyRestockIssues, "THM Highway Builder", message);
+            b.error(message);
             return true;
         }
 
