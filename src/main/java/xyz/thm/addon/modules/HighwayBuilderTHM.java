@@ -4235,35 +4235,39 @@ public class HighwayBuilderTHM extends Module {
             double distance = PlayerUtils.distanceTo(report.startPos());
             if (distance > 1) {
                 if (distance < 50000) {
-                    if (isNot6B6T()) warning("API not sent. You are not on 6B6T");
-                    else if (THMSystem.get().getHash() == null || Objects.equals(THMSystem.get().getHash(), "SetYourHash") || Objects.equals(THMSystem.get().getHash(), "")) {
-                        warning("API not sent. No Hash set.");
-                    } else {
-                        StatsArtifactSnapshot committed = updateFinalizationRecord(
-                            working,
-                            working.printedAt(),
-                            working.printedToChat(),
-                            working.webhookSendCommitted(),
-                            true,
-                            reason + "-api-commit"
-                        );
-                        if (committed != null) {
-                            String server = mc.getCurrentServerEntry() != null ? mc.getCurrentServerEntry().address : "singleplayer";
-                            String playerName = mc.player.getName().getLiteralString();
-                            String statsMessageapi = String.format("%s:%s:%s:%.0f:%s:%s:%s:%s:%s",
-                                THMSystem.get().getHash(),
-                                playerName,
-                                server,
-                                distance,
-                                report.blocksBroken(),
-                                report.blocksPlaced(),
-                                dir,
-                                generateTimestamp(),
-                                isOnMainHighway()
+                    if (blocksPlaced < 300 && blocksBroken < 1000) {
+                        if (isNot6B6T()) warning("API not sent. You are not on 6B6T");
+                        else if (THMSystem.get().getHash() == null || Objects.equals(THMSystem.get().getHash(), "SetYourHash") || Objects.equals(THMSystem.get().getHash(), "")) {
+                            warning("API not sent. No Hash set.");
+                        } else {
+                            StatsArtifactSnapshot committed = updateFinalizationRecord(
+                                working,
+                                working.printedAt(),
+                                working.printedToChat(),
+                                working.webhookSendCommitted(),
+                                true,
+                                reason + "-api-commit"
                             );
-                            sendToAPI(statsMessageapi, getPassword(), getAPIHighway(), "statistics");
-                            working = committed;
+                            if (committed != null) {
+                                String server = mc.getCurrentServerEntry() != null ? mc.getCurrentServerEntry().address : "singleplayer";
+                                String playerName = mc.player.getName().getLiteralString();
+                                String statsMessageapi = String.format("%s:%s:%s:%.0f:%s:%s:%s:%s:%s",
+                                    THMSystem.get().getHash(),
+                                    playerName,
+                                    server,
+                                    distance,
+                                    report.blocksBroken(),
+                                    report.blocksPlaced(),
+                                    dir,
+                                    generateTimestamp(),
+                                    isOnMainHighway()
+                                );
+                                sendToAPI(statsMessageapi, getPassword(), getAPIHighway(), "statistics");
+                                working = committed;
+                            }
                         }
+                    } else {
+                        warning("Repair detected. Use the /calculate repair command to calculate the distance.");
                     }
                 } else warning("Statistics NOT sent to Api! Please Calculate the real Distance using the /calculate command in proof-of-work");
             } else warning("Statistics NOT sent to Api! Distance too small: (highlight)%.0f", distance);
