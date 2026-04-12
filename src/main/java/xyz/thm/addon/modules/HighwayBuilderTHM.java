@@ -391,7 +391,7 @@ public class HighwayBuilderTHM extends Module {
     private final Setting<Boolean> speedmine = sgDigging.add(new BoolSetting.Builder()
         .name("speedmine")
         .description("Wether to use the Speedmine module to speed up basalt breaking")
-        .defaultValue(true)
+        .defaultValue(false)
         .visible(doubleMine::get)
         .build()
     );
