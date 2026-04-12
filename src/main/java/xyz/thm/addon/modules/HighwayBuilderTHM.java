@@ -1009,6 +1009,7 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private record ReconnectBaselinePayload(
+        String workingDirectionName,
         String speedModeName,
         double vanillaSpeed,
         double ncpSpeed,
@@ -1055,6 +1056,7 @@ public class HighwayBuilderTHM extends Module {
         long generation,
         StatsSessionState state,
         boolean resumeAllowed,
+        String workingDirectionName,
         double startX,
         double startY,
         double startZ,
@@ -1588,8 +1590,22 @@ public class HighwayBuilderTHM extends Module {
         return dir;
     }
 
+    public HorizontalDirection getCachedWorkingDirectionForMonitorReconnect(long generation) {
+        HorizontalDirection baselineDirection = parseWorkingDirectionName(
+            hasUsableReconnectBaselineLease(generation) ? reconnectBaselineLease.payload().workingDirectionName() : null
+        );
+        if (baselineDirection != null) return baselineDirection;
+
+        if (!isResumableStatsSession(statsCacheSnapshot)) return null;
+        return parseWorkingDirectionName(statsCacheSnapshot.workingDirectionName());
+    }
+
     public boolean isInForwardState() {
         return state == State.Forward;
+    }
+
+    public boolean isInCenterState() {
+        return state == State.Center;
     }
 
     public void hardFailForMonitorRecovery(String message, Object... args) {
@@ -3053,6 +3069,7 @@ public class HighwayBuilderTHM extends Module {
         boolean timerOverrideActive = timer != null && Double.compare(timerOverrideValue, Timer.OFF) != 0;
 
         return new ReconnectBaselinePayload(
+            dir == null ? "" : dir.name(),
             speed.speedMode.get().name(),
             speed.vanillaSpeed.get(),
             speed.ncpSpeed.get(),
@@ -3518,6 +3535,7 @@ public class HighwayBuilderTHM extends Module {
             nextStatsGeneration(),
             state,
             resumeAllowed,
+            dir == null ? "" : dir.name(),
             start.x,
             start.y,
             start.z,
@@ -3562,6 +3580,7 @@ public class HighwayBuilderTHM extends Module {
             generation,
             state,
             resumeAllowed,
+            snapshot.workingDirectionName(),
             snapshot.startX(),
             snapshot.startY(),
             snapshot.startZ(),
@@ -3799,6 +3818,7 @@ public class HighwayBuilderTHM extends Module {
         out.append("meta|generation|").append(snapshot.generation()).append('\n');
         out.append("meta|state|").append(snapshot.state().name()).append('\n');
         out.append("meta|resumeAllowed|").append(snapshot.resumeAllowed()).append('\n');
+        out.append("meta|workingDirection|").append(snapshot.workingDirectionName() == null ? "" : snapshot.workingDirectionName()).append('\n');
         out.append("meta|startX|").append(snapshot.startX()).append('\n');
         out.append("meta|startY|").append(snapshot.startY()).append('\n');
         out.append("meta|startZ|").append(snapshot.startZ()).append('\n');
@@ -3854,6 +3874,7 @@ public class HighwayBuilderTHM extends Module {
             parseLongSafe(meta.get("generation"), 0L),
             state,
             Boolean.parseBoolean(meta.getOrDefault("resumeAllowed", "false")),
+            meta.getOrDefault("workingDirection", ""),
             parseDoubleSafe(meta.get("startX"), 0.0),
             parseDoubleSafe(meta.get("startY"), 0.0),
             parseDoubleSafe(meta.get("startZ"), 0.0),
@@ -3907,6 +3928,7 @@ public class HighwayBuilderTHM extends Module {
             nextStatsGeneration(),
             StatsSessionState.PENDING_PRINT,
             false,
+            dir == null ? "" : dir.name(),
             start.x,
             start.y,
             start.z,
@@ -3920,6 +3942,15 @@ public class HighwayBuilderTHM extends Module {
             false,
             reason == null ? "" : reason
         );
+    }
+
+    private HorizontalDirection parseWorkingDirectionName(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return HorizontalDirection.valueOf(value.trim());
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     private StatsArtifactSnapshot persistFinalizationRecord(StatsArtifactSnapshot snapshot, String reason) {
@@ -5947,6 +5978,7 @@ public class HighwayBuilderTHM extends Module {
             private static final int MAX_STUCK_DROP_RETRIES = 5;
             private static final int POST_PURGE_DELAY_TICKS = 20;
             private static final int MAX_ROTATION_RETRIES = 2;
+            private static final int MAX_DIRECT_TRASH_DROPS_PER_PASS = 2;
             private static final float TARGET_PITCH = -25.0f;
             private static final float ROTATION_TOLERANCE = 0.5f;
             private final Set<Integer> keepSlots = new HashSet<>();
@@ -6172,7 +6204,7 @@ public class HighwayBuilderTHM extends Module {
             }
 
             private boolean dropDirectTrashBatch(HighwayBuilderTHM b) {
-                int maxActions = b.mc.player.getInventory().getMainStacks().size();
+                int maxActions = Math.min(MAX_DIRECT_TRASH_DROPS_PER_PASS, b.mc.player.getInventory().getMainStacks().size());
                 boolean onlyReservedOrSkippedTrashRemains = false;
 
                 for (int actions = 0; actions < maxActions; ) {
@@ -6226,6 +6258,10 @@ public class HighwayBuilderTHM extends Module {
                         completionDelayStarted = false;
                         actions++;
                         droppedThisPass = true;
+                        if (actions >= maxActions) {
+                            timer = b.inventoryDelay.get();
+                            return true;
+                        }
                         break;
                     }
 

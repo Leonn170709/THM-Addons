@@ -214,10 +214,10 @@ public class THMHwyMonitor extends Module {
     private float lastReliableRecoveryYaw = Float.NaN;
     private float preTickYawSnapshot = Float.NaN;
     private long preTickYawSnapshotAtMs;
-    private boolean forwardProgressWatchActive;
-    private HorizontalDirection forwardProgressWatchDirection;
+    private StallWatchMode stallWatchMode = StallWatchMode.None;
+    private HorizontalDirection stallWatchDirection;
     private double bestForwardProgressCoordinate;
-    private int forwardStallTicks;
+    private int stallWatchTicks;
     private boolean internalTimerSpeedToggleInProgress;
     private static Field disconnectedScreenReasonField;
     private static boolean disconnectedScreenReasonFieldResolved;
@@ -465,6 +465,10 @@ public class THMHwyMonitor extends Module {
 
     private ServerReconnectService reconnectService() {
         return ServerReconnectService.getInstance();
+    }
+
+    public boolean ownsIntegratedFreelookControl() {
+        return isActive() && (recoveryModulesPaused || recoveryPhase != RecoveryPhase.None || postRejoinDirectionGateActive);
     }
 
     private void registerReconnectServiceListeners() {
@@ -995,13 +999,18 @@ public class THMHwyMonitor extends Module {
             return;
         }
 
-        boolean forwardStallArmed = updateForwardProgressWatch(builder);
-        RecoveryCause recoveryCause = forwardStallArmed ? RecoveryCause.ForwardStall : RecoveryCause.Misalignment;
+        RecoveryCause recoveryCause = updateStallWatch(builder);
+        boolean stallRecoveryArmed = recoveryCause != RecoveryCause.None;
+
+        if (!stallRecoveryArmed && builder.shouldSuppressThmHwyMonitorMisalignmentRecovery()) {
+            clearPendingAlignmentGateRequest();
+            return;
+        }
 
         int recoveryGoalY = isPavingMode(builder) ? 120 : 119;
         float recoveryDirectionYaw = resolveRecoveryDirectionYawForInference(builder);
         RecoveryTarget target = computeCurrentRecoveryTarget(recoveryDirectionYaw, recoveryGoalY);
-        if (target == null && recoveryCause != RecoveryCause.ForwardStall) {
+        if (target == null && !isStallRecoveryCause(recoveryCause)) {
             resetForwardProgressWatch();
             clearPendingAlignmentGateRequest();
             return;
@@ -1010,7 +1019,7 @@ public class THMHwyMonitor extends Module {
         double yDelta = recoveryYDelta(mc.player.getY(), recoveryGoalY);
         boolean yAligned = Math.abs(yDelta) <= Y_ALIGNMENT_TOLERANCE;
         boolean aligned = target != null && target.distance() <= WORKING_LINE_TOLERANCE && yAligned;
-        if (aligned && !forwardStallArmed) {
+        if (aligned && !stallRecoveryArmed) {
             clearPendingAlignmentGateRequest();
             return;
         }
@@ -1194,11 +1203,11 @@ public class THMHwyMonitor extends Module {
             return;
         }
 
-        RecoveryTarget localStallEscapeTarget = recoveryCause == RecoveryCause.ForwardStall
+        RecoveryTarget localStallEscapeTarget = isStallRecoveryCause(recoveryCause)
             ? createLocalStallEscapeTarget(builder, target)
             : null;
-        if (recoveryCause == RecoveryCause.ForwardStall && localStallEscapeTarget == null) {
-            triggerMonitorSafeBuilderHardFail(builder, "Forward stall recovery could not compute a local 2-block escape target.");
+        if (isStallRecoveryCause(recoveryCause) && localStallEscapeTarget == null) {
+            triggerMonitorSafeBuilderHardFail(builder, stallRecoveryLabel(recoveryCause) + " recovery could not compute a local 2-block escape target.");
             return;
         }
 
@@ -1211,7 +1220,7 @@ public class THMHwyMonitor extends Module {
         RecoveryTarget correctionTarget;
         boolean updateTracking = target != null;
         boolean localEscapeOnly = false;
-        if (recoveryCause == RecoveryCause.ForwardStall) {
+        if (isStallRecoveryCause(recoveryCause)) {
             if (target == null || target.distance() > maxCorrectionDistance.get()) {
                 correctionTarget = localStallEscapeTarget;
                 localEscapeOnly = true;
@@ -1233,69 +1242,97 @@ public class THMHwyMonitor extends Module {
         recoveryYawBeforeMove = recoveryDirectionYaw;
         recoveryTicks = RECOVERY_DELAY_TICKS;
         recoveryPhase = RecoveryPhase.WaitBeforeCorrection;
-        int stalledTicksSnapshot = forwardStallTicks;
+        int stalledTicksSnapshot = stallWatchTicks;
         resetForwardProgressWatch();
-        if (recoveryCause == RecoveryCause.ForwardStall) {
+        if (isStallRecoveryCause(recoveryCause)) {
             double stalledSeconds = stalledTicksSnapshot / 20.0;
             String recoveryLabel = target != null ? target.highway() + " " + target.direction() : "working direction";
             String escapeLabel = localEscapeOnly ? "local 2-block stall escape" : "stall correction";
-            info("Paused recovery modules (THM HighwayBuilder / Timer / Speed) on %s after %.1fs without forward progress. Starting %s in 2.0s.",
-                recoveryLabel, stalledSeconds, escapeLabel);
+            info("Paused recovery modules (THM HighwayBuilder / Timer / Speed) on %s after %.1fs stalled in %s. Starting %s in 2.0s.",
+                recoveryLabel, stalledSeconds, stallRecoveryLabel(recoveryCause), escapeLabel);
         } else {
             info("Paused recovery modules (THM HighwayBuilder / Timer / Speed) on %s %s (off by %.2f%s). Starting Baritone correction in 2.0s.",
                 target.highway(), target.direction(), target.distance(), yOffset);
         }
     }
 
-    private boolean updateForwardProgressWatch(HighwayBuilderTHM builder) {
-        if (!recoverForwardStalls.get() || mc.player == null || builder == null || !builder.isActive() || !builder.isInForwardState()) {
+    private RecoveryCause updateStallWatch(HighwayBuilderTHM builder) {
+        if (!recoverForwardStalls.get() || mc.player == null || builder == null || !builder.isActive()) {
             resetForwardProgressWatch();
-            return false;
+            return RecoveryCause.None;
         }
 
         HorizontalDirection direction = builder.getWorkingDirection();
         if (direction == null) {
             resetForwardProgressWatch();
-            return false;
+            return RecoveryCause.None;
+        }
+
+        if (builder.isInCenterState()) {
+            if (stallWatchMode != StallWatchMode.Center || stallWatchDirection != direction) {
+                stallWatchMode = StallWatchMode.Center;
+                stallWatchDirection = direction;
+                stallWatchTicks = 0;
+                bestForwardProgressCoordinate = 0.0;
+                return RecoveryCause.None;
+            }
+
+            int increment = Math.max(checkInterval.get(), 1);
+            if (stallWatchTicks <= Integer.MAX_VALUE - increment) stallWatchTicks += increment;
+            else stallWatchTicks = Integer.MAX_VALUE;
+            return stallWatchTicks >= forwardStallTimeoutSeconds.get() * 20 ? RecoveryCause.CenterStall : RecoveryCause.None;
+        }
+
+        if (!builder.isInForwardState()) {
+            resetForwardProgressWatch();
+            return RecoveryCause.None;
         }
 
         double currentProgressCoordinate = projectedForwardCoordinate(mc.player.getX(), mc.player.getZ(), direction);
-        if (!forwardProgressWatchActive || forwardProgressWatchDirection != direction) {
-            forwardProgressWatchActive = true;
-            forwardProgressWatchDirection = direction;
+        if (stallWatchMode != StallWatchMode.Forward || stallWatchDirection != direction) {
+            stallWatchMode = StallWatchMode.Forward;
+            stallWatchDirection = direction;
             bestForwardProgressCoordinate = currentProgressCoordinate;
-            forwardStallTicks = 0;
-            return false;
+            stallWatchTicks = 0;
+            return RecoveryCause.None;
         }
 
         if (currentProgressCoordinate > bestForwardProgressCoordinate + FORWARD_PROGRESS_RESET_EPSILON) {
             bestForwardProgressCoordinate = currentProgressCoordinate;
-            forwardStallTicks = 0;
-            return false;
+            stallWatchTicks = 0;
+            return RecoveryCause.None;
         }
 
         int increment = Math.max(checkInterval.get(), 1);
-        if (forwardStallTicks <= Integer.MAX_VALUE - increment) forwardStallTicks += increment;
-        else forwardStallTicks = Integer.MAX_VALUE;
-        return forwardStallTicks >= forwardStallTimeoutSeconds.get() * 20;
+        if (stallWatchTicks <= Integer.MAX_VALUE - increment) stallWatchTicks += increment;
+        else stallWatchTicks = Integer.MAX_VALUE;
+        return stallWatchTicks >= forwardStallTimeoutSeconds.get() * 20 ? RecoveryCause.ForwardStall : RecoveryCause.None;
     }
 
     private boolean isForwardProgressWatchArmed(HighwayBuilderTHM builder) {
-        if (!forwardProgressWatchActive || !recoverForwardStalls.get() || builder == null || !builder.isActive() || !builder.isInForwardState()) {
+        if (stallWatchMode != StallWatchMode.Forward || !recoverForwardStalls.get() || builder == null || !builder.isActive() || !builder.isInForwardState()) {
             return false;
         }
 
         HorizontalDirection direction = builder.getWorkingDirection();
         return direction != null
-            && direction == forwardProgressWatchDirection
-            && forwardStallTicks >= forwardStallTimeoutSeconds.get() * 20;
+            && direction == stallWatchDirection
+            && stallWatchTicks >= forwardStallTimeoutSeconds.get() * 20;
     }
 
     private void resetForwardProgressWatch() {
-        forwardProgressWatchActive = false;
-        forwardProgressWatchDirection = null;
+        stallWatchMode = StallWatchMode.None;
+        stallWatchDirection = null;
         bestForwardProgressCoordinate = 0.0;
-        forwardStallTicks = 0;
+        stallWatchTicks = 0;
+    }
+
+    private boolean isStallRecoveryCause(RecoveryCause recoveryCause) {
+        return recoveryCause == RecoveryCause.ForwardStall || recoveryCause == RecoveryCause.CenterStall;
+    }
+
+    private String stallRecoveryLabel(RecoveryCause recoveryCause) {
+        return recoveryCause == RecoveryCause.CenterStall ? "Center" : "Forward";
     }
 
     private static double projectedForwardCoordinate(double x, double z, HorizontalDirection direction) {
@@ -1899,15 +1936,15 @@ public class THMHwyMonitor extends Module {
     }
 
     private boolean tryPerformLocalStallEscape(String reason) {
-        if (recoveryCause != RecoveryCause.ForwardStall) return false;
+        if (!isStallRecoveryCause(recoveryCause)) return false;
 
         if (pendingLocalStallEscapeTarget == null) {
-            triggerMonitorSafeBuilderHardFail(recoveryBuilder, "Forward stall recovery lost its local 2-block escape target.");
+            triggerMonitorSafeBuilderHardFail(recoveryBuilder, stallRecoveryLabel(recoveryCause) + " stall recovery lost its local 2-block escape target.");
             return true;
         }
 
         if (!isSafeLocalStallEscapeTarget(pendingLocalStallEscapeTarget)) {
-            triggerMonitorSafeBuilderHardFail(recoveryBuilder, "Forward stall recovery could not perform the 2-block backstep because the destination was blocked or unsafe.");
+            triggerMonitorSafeBuilderHardFail(recoveryBuilder, stallRecoveryLabel(recoveryCause) + " stall recovery could not perform the 2-block backstep because the destination was blocked or unsafe.");
             return true;
         }
 
@@ -2039,6 +2076,13 @@ public class THMHwyMonitor extends Module {
     private PostRejoinDirectionResult determineConclusivePostRejoinWorkingDirection() {
         if (mc.player == null || mc.world == null) return PostRejoinDirectionResult.blocked("player-or-world-missing", "");
 
+        HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
+        HorizontalDirection cachedDirection = builder == null ? null : builder.getCachedWorkingDirectionForMonitorReconnect(activeReconnectCycleId);
+        if (cachedDirection != null) {
+            postRejoinLastCompleteProbeWinner = cachedDirection;
+            return PostRejoinDirectionResult.success(cachedDirection, "cached-direction=" + cachedDirection.name);
+        }
+
         HorizontalDirection[] axisDirections = resolvePostRejoinAxisDirections();
         if (axisDirections == null) {
             postRejoinLastCompleteProbeWinner = null;
@@ -2047,7 +2091,6 @@ public class THMHwyMonitor extends Module {
 
         HorizontalDirection dirA = axisDirections[0];
         HorizontalDirection dirB = axisDirections[1];
-        HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
         boolean pavingSelected = builder != null && isPavingMode(builder);
         AxisProbeResult probe = pavingSelected
             ? probeAxis(dirA, dirB, 119, true)
@@ -2649,7 +2692,14 @@ public class THMHwyMonitor extends Module {
     private enum RecoveryCause {
         None,
         Misalignment,
-        ForwardStall
+        ForwardStall,
+        CenterStall
+    }
+
+    private enum StallWatchMode {
+        None,
+        Forward,
+        Center
     }
 
     private enum WorkLine {
