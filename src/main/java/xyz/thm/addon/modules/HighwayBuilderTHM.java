@@ -4235,7 +4235,7 @@ public class HighwayBuilderTHM extends Module {
             double distance = PlayerUtils.distanceTo(report.startPos());
             if (distance > 1) {
                 if (distance < 50000) {
-                    if (blocksPlaced < 300 && blocksBroken < 1000) {
+                    if (!(blocksPlaced < 300 && blocksBroken < 1000)) {
                         if (isNot6B6T()) warning("API not sent. You are not on 6B6T");
                         else if (THMSystem.get().getHash() == null || Objects.equals(THMSystem.get().getHash(), "SetYourHash") || Objects.equals(THMSystem.get().getHash(), "")) {
                             warning("API not sent. No Hash set.");
