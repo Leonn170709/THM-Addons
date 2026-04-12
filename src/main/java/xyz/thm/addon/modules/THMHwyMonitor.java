@@ -427,6 +427,20 @@ public class THMHwyMonitor extends Module {
         }
     }
 
+    public boolean usesTrueCenterMode() {
+        return trueCenterMode.get();
+    }
+
+    public static HorizontalDirection inferClosestWorkingDirection(double playerX, double playerZ, float yaw, boolean trueCenterMode) {
+        if (Float.isNaN(yaw)) return null;
+
+        double centerOffset = trueCenterMode ? 0.5 : 0.0;
+        WorkLine line = nearestWorkLine(playerX, playerZ, centerOffset, trueCenterMode);
+        if (line == null) return null;
+
+        return parseDirectionCode(inferDirectionForLine(line, yaw));
+    }
+
     @Override
     public void onDeactivate() {
         lastReliableRecoveryYaw = Float.NaN;
@@ -1102,7 +1116,8 @@ public class THMHwyMonitor extends Module {
     private RecoveryTarget computeCurrentRecoveryTarget(float recoveryDirectionYaw, int recoveryGoalY) {
         if (mc == null || mc.player == null) return null;
         HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
-        String preferredDirection = normalizeDirection(directionCode(builder != null ? builder.getWorkingDirection() : null));
+        HorizontalDirection resolvedDirection = resolveWorkingDirectionForAlignment(builder, recoveryDirectionYaw);
+        String preferredDirection = normalizeDirection(directionCode(resolvedDirection));
         if (preferredDirection.isEmpty() || Float.isNaN(recoveryDirectionYaw)) return null;
 
         RecoveryTarget target = determineRecoveryTarget(
@@ -1437,9 +1452,18 @@ public class THMHwyMonitor extends Module {
     }
 
     private float resolveRecoveryDirectionYawForInference(HighwayBuilderTHM builder) {
-        if (builder == null) return Float.NaN;
-        HorizontalDirection direction = builder.getWorkingDirection();
+        HorizontalDirection direction = resolveWorkingDirectionForAlignment(
+            builder,
+            mc != null && mc.player != null ? mc.player.getYaw() : Float.NaN
+        );
         return direction == null ? Float.NaN : direction.yaw;
+    }
+
+    private HorizontalDirection resolveWorkingDirectionForAlignment(HighwayBuilderTHM builder, float fallbackYaw) {
+        HorizontalDirection direction = builder == null ? null : builder.getWorkingDirection();
+        if (direction != null) return direction;
+        if (mc == null || mc.player == null) return null;
+        return inferClosestWorkingDirection(mc.player.getX(), mc.player.getZ(), fallbackYaw, trueCenterMode.get());
     }
 
     private boolean isLikelyCenterYawOverride(HighwayBuilderTHM builder, float yaw) {
@@ -1708,7 +1732,7 @@ public class THMHwyMonitor extends Module {
             if (dXAxis < bestDistance) {
                 bestDistance = dXAxis;
                 bestHighway = "Cardinal";
-                bestDirection = resolveWorkingDirection(playerX, playerZ, centerOffset);
+                bestDirection = resolveDirectionForAlignmentResult(WorkLine.CardinalEW, playerX, playerZ, playerYaw, centerOffset);
             }
 
             // x = offset (north-south highway), portion is N/S relative to origin.
@@ -1716,7 +1740,7 @@ public class THMHwyMonitor extends Module {
             if (dZAxis < bestDistance) {
                 bestDistance = dZAxis;
                 bestHighway = "Cardinal";
-                bestDirection = resolveWorkingDirection(playerX, playerZ, centerOffset);
+                bestDirection = resolveDirectionForAlignmentResult(WorkLine.CardinalNS, playerX, playerZ, playerYaw, centerOffset);
             }
         }
 
@@ -1726,7 +1750,7 @@ public class THMHwyMonitor extends Module {
             if (d1 < bestDistance) {
                 bestDistance = d1;
                 bestHighway = "Diagonal";
-                bestDirection = resolveWorkingDirection(playerX, playerZ, centerOffset);
+                bestDirection = resolveDirectionForAlignmentResult(WorkLine.DiagonalNWSE, playerX, playerZ, playerYaw, centerOffset);
             }
 
             // AxisViewer diagonal 2: x + z = 0 (or 1 in true-center mode), corresponds to NE <-> SW.
@@ -1735,7 +1759,7 @@ public class THMHwyMonitor extends Module {
             if (d2 < bestDistance) {
                 bestDistance = d2;
                 bestHighway = "Diagonal";
-                bestDirection = resolveWorkingDirection(playerX, playerZ, centerOffset);
+                bestDirection = resolveDirectionForAlignmentResult(WorkLine.DiagonalNESW, playerX, playerZ, playerYaw, centerOffset);
             }
         }
 
@@ -2083,6 +2107,17 @@ public class THMHwyMonitor extends Module {
             return PostRejoinDirectionResult.success(cachedDirection, "cached-direction=" + cachedDirection.name);
         }
 
+        HorizontalDirection inferredDirection = inferClosestWorkingDirection(
+            mc.player.getX(),
+            mc.player.getZ(),
+            mc.player.getYaw(),
+            trueCenterMode.get()
+        );
+        if (inferredDirection != null) {
+            postRejoinLastCompleteProbeWinner = inferredDirection;
+            return PostRejoinDirectionResult.success(inferredDirection, "line-yaw-inference=" + inferredDirection.name);
+        }
+
         HorizontalDirection[] axisDirections = resolvePostRejoinAxisDirections();
         if (axisDirections == null) {
             postRejoinLastCompleteProbeWinner = null;
@@ -2402,6 +2437,20 @@ public class THMHwyMonitor extends Module {
         };
     }
 
+    private static HorizontalDirection parseDirectionCode(String direction) {
+        return switch (normalizeDirection(direction)) {
+            case "N" -> HorizontalDirection.North;
+            case "NE" -> HorizontalDirection.NorthEast;
+            case "E" -> HorizontalDirection.East;
+            case "SE" -> HorizontalDirection.SouthEast;
+            case "S" -> HorizontalDirection.South;
+            case "SW" -> HorizontalDirection.SouthWest;
+            case "W" -> HorizontalDirection.West;
+            case "NW" -> HorizontalDirection.NorthWest;
+            default -> null;
+        };
+    }
+
     private static String directionCode(HorizontalDirection direction) {
         if (direction == null) return "";
         return switch (direction) {
@@ -2512,6 +2561,11 @@ public class THMHwyMonitor extends Module {
         if (!eastWest.isEmpty()) return eastWest;
 
         return "Center";
+    }
+
+    private static String resolveDirectionForAlignmentResult(WorkLine line, double playerX, double playerZ, float playerYaw, double centerOffset) {
+        if (!Float.isNaN(playerYaw)) return inferDirectionForLine(line, playerYaw);
+        return resolveWorkingDirection(playerX, playerZ, centerOffset);
     }
 
     private static String northSouthDirection(double playerZ, double centerOffset) {
