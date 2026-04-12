@@ -1,13 +1,13 @@
 package xyz.thm.addon.commands;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.commands.Command;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
 import net.minecraft.command.CommandSource;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
-import meteordevelopment.meteorclient.MeteorClient;
 
 public class DesyncCommand extends Command {
     private boolean desynced = false;
