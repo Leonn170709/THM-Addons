@@ -34,11 +34,12 @@ import org.joml.Vector3d;
 import org.lwjgl.glfw.GLFW;
 import xyz.thm.addon.THMAddon;
 
-import java.util.*;
 import java.lang.reflect.Field;
+import java.util.*;
 
 import static meteordevelopment.meteorclient.utils.Utils.getItemsInContainerItem;
 import static meteordevelopment.meteorclient.utils.Utils.hasItems;
+
 public class ChestTrackerModule extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgAutoOpen = settings.createGroup("Auto-Open");
