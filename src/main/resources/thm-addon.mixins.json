@@ -16,6 +16,7 @@
     "accessor.PlayerInventoryAccessor",
     "accessor.UpdateSelectedSlotS2CPacketAccessor",
     "meteor.AnchorAuraMixin",
+    "meteor.AutoGapMixin",
     "meteor.AutoEatMixin",
     "meteor.BetterTabMixin",
     "meteor.BetterTooltipsMixin",

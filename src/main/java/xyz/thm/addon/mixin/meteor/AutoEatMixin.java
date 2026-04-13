@@ -14,17 +14,21 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import xyz.thm.addon.accessor.StuckEatingRetryBridge;
+import xyz.thm.addon.accessor.StuckEatingRetryResult;
 import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
 import xyz.thm.addon.utils.InventoryManager;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 @Mixin(value = AutoEat.class, remap = false)
-public abstract class AutoEatMixin {
+public abstract class AutoEatMixin implements StuckEatingRetryBridge {
     @Shadow public boolean eating;
     @Shadow private int slot;
     @Shadow private int prevSlot;
     @Shadow @Final private Setting<Boolean> pauseBaritone;
     @Shadow protected abstract void stopEating();
+    @Shadow protected abstract void startEating();
+    @Shadow public abstract boolean shouldEat();
     @Unique private boolean bephax$wasBaritone = false;
     @Inject(method = "eat", at = @At("HEAD"), cancellable = true)
     private void onEat(CallbackInfo ci) {
@@ -113,5 +117,39 @@ public abstract class AutoEatMixin {
             return false;
         }
         return !stack.isEmpty() && stack.get(DataComponentTypes.FOOD) != null;
+    }
+
+    @Override
+    public boolean thm$isActivelyEating() {
+        return ((AutoEat) (Object) this).isActive() && eating;
+    }
+
+    @Override
+    public boolean thm$stillNeedsToEat() {
+        return ((AutoEat) (Object) this).isActive() && shouldEat();
+    }
+
+    @Override
+    public boolean thm$hasValidCurrentEatingItem() {
+        return ((AutoEat) (Object) this).isActive() && isSlotValid();
+    }
+
+    @Override
+    public void thm$forceStopEating() {
+        if (eating) stopEating();
+        else {
+            InventoryManager.getInstance().setEating(false);
+            if (mc.options != null) mc.options.useKey.setPressed(false);
+        }
+    }
+
+    @Override
+    public StuckEatingRetryResult thm$forceRestartEating() {
+        AutoEat autoEat = (AutoEat) (Object) this;
+        if (!autoEat.isActive()) return StuckEatingRetryResult.CLEARED;
+        if (!shouldEat()) return StuckEatingRetryResult.CLEARED;
+
+        startEating();
+        return eating ? StuckEatingRetryResult.RESTARTED : StuckEatingRetryResult.IMPOSSIBLE;
     }
 }
