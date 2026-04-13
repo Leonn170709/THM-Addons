@@ -2001,13 +2001,16 @@ public class HighwayBuilderTHM extends Module {
             return;
         }
 
-        if (
+        boolean shouldPauseForEatingOrCombat =
             shouldPauseForAutoEat()
                 || shouldPauseForAutoGap()
                 || shouldPauseForActiveFoodUse()
                 || (Modules.get().get(KillAura.class) != null && Modules.get().get(KillAura.class).attacking)
-                || (Modules.get().get(OffhandManager.class) != null && Modules.get().get(OffhandManager.class).isEating())
-        ) {
+                || (Modules.get().get(OffhandManager.class) != null && Modules.get().get(OffhandManager.class).isEating());
+        if (shouldPauseForEatingOrCombat) {
+            if (mc.player.currentScreenHandler != null && !mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
+                dropCursorStackIfSafe("AutoEat-pause");
+            }
             input.stop();
             return;
         }
