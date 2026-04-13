@@ -639,6 +639,7 @@ public class THMHwyMonitor extends Module {
         wasConnectedLastTick = false;
         pendingDisconnectScreenEvidenceCheck = false;
         pendingDisconnectScreenEvidenceUntilMs = 0L;
+        abortActiveRecoveryForNonMainServer("game-left");
 
         if (intentionalSafetyDisconnectArmed) {
             intentionalSafetyDisconnectArmed = false;
@@ -972,6 +973,11 @@ public class THMHwyMonitor extends Module {
 
         if (mc.player == null || mc.world == null) {
             clearPendingAlignmentGateRequest();
+            return;
+        }
+
+        if (!isHighwayRecoveryAllowedOnCurrentServer()) {
+            abortActiveRecoveryForNonMainServer("server-state-" + getCommittedServerState().name());
             return;
         }
 
@@ -1388,6 +1394,30 @@ public class THMHwyMonitor extends Module {
             && mc.getNetworkHandler().getConnection().isOpen();
     }
 
+    private ServerState getCommittedServerState() {
+        return ServerStatusHandler.getInstance().getCommittedState();
+    }
+
+    private boolean isHighwayRecoveryAllowedOnCurrentServer() {
+        return getCommittedServerState() == ServerState.MAIN_SERVER;
+    }
+
+    private void abortActiveRecoveryForNonMainServer(String source) {
+        resetForwardProgressWatch();
+        clearPendingAlignmentGateRequest();
+
+        if (recoveryPhase == RecoveryPhase.None && !recoveryModulesPaused) return;
+
+        preserveHighwayBuilderDisabledAcrossRecoveryResume();
+        resetRecoveryState();
+        cooldownTicks = recoveryCooldown.get();
+        info(
+            "Cleared THMHwyMonitor recovery state outside MAIN_SERVER (%s, committedState=%s).",
+            source,
+            getCommittedServerState().name()
+        );
+    }
+
     private boolean reconnectRecoveryInFlight() {
         if (activeReconnectCycleId == 0L) return false;
 
@@ -1438,6 +1468,7 @@ public class THMHwyMonitor extends Module {
         long now = System.currentTimeMillis();
         if (now < delayedMainServerResumeAtMs) return;
         if (mc == null || mc.player == null || mc.world == null) return;
+        if (!isHighwayRecoveryAllowedOnCurrentServer()) return;
 
         long cycleId = delayedMainServerResumeCycleId;
         String contextTag = delayedMainServerResumeContext;
@@ -2051,6 +2082,12 @@ public class THMHwyMonitor extends Module {
         }
         if (activeReconnectCycleId <= 0L || mc == null || mc.player == null || mc.world == null) return;
         if (postRejoinDirectionNextAttemptAtMs > System.currentTimeMillis()) return;
+        if (!isHighwayRecoveryAllowedOnCurrentServer()) {
+            postRejoinDirectionBlockReason = "waiting-main-server";
+            postRejoinDirectionBlockSummary = "committedState=" + getCommittedServerState().name();
+            postRejoinDirectionNextAttemptAtMs = System.currentTimeMillis() + POST_REJOIN_DIRECTION_RETRY_DELAY_MS;
+            return;
+        }
 
         PostRejoinDirectionResult result = determineConclusivePostRejoinWorkingDirection();
         if (result.conclusive()) {
@@ -2074,6 +2111,8 @@ public class THMHwyMonitor extends Module {
     }
 
     private boolean applyDirectionAndEnableHighwayBuilder(HorizontalDirection workingDirection) {
+        if (!isHighwayRecoveryAllowedOnCurrentServer()) return false;
+
         applyPostRejoinYaw(workingDirection);
         info("Post-rejoin direction selected: %s.", workingDirection.name);
 
@@ -2279,7 +2318,7 @@ public class THMHwyMonitor extends Module {
     }
 
     private void applyPostRejoinYaw(HorizontalDirection direction) {
-        if (mc.player == null) return;
+        if (mc.player == null || !isHighwayRecoveryAllowedOnCurrentServer()) return;
 
         float pitch = mc.player.getPitch();
         mc.player.setYaw(direction.yaw);
@@ -2493,7 +2532,7 @@ public class THMHwyMonitor extends Module {
     }
 
     private void applyWorkingYaw() {
-        if (pendingCorrectionTarget == null || mc.player == null || recoveryBuilder == null) return;
+        if (pendingCorrectionTarget == null || mc.player == null || recoveryBuilder == null || !isHighwayRecoveryAllowedOnCurrentServer()) return;
 
         HorizontalDirection direction = recoveryBuilder.getWorkingDirection();
         if (direction == null) return;
