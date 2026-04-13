@@ -53,6 +53,7 @@ import net.minecraft.client.network.ClientPlayerInteractionManager;
 import net.minecraft.client.option.GameOptions;
 import net.minecraft.client.option.Perspective;
 import net.minecraft.client.util.ScreenshotRecorder;
+import net.minecraft.component.DataComponentTypes;
 import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
@@ -82,6 +83,7 @@ import org.jetbrains.annotations.NotNull;
 import org.joml.Vector3d;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.system.THMSystem;
+import xyz.thm.addon.utils.InventoryManager;
 import xyz.thm.addon.utils.ServerStatusHandler;
 import xyz.thm.addon.utils.ServerStatusHandler.ServerState;
 import xyz.thm.addon.utils.THMUtils;
@@ -1708,6 +1710,14 @@ public class HighwayBuilderTHM extends Module {
         return autoEat.eating || autoEat.shouldEat();
     }
 
+    private boolean shouldPauseForActiveFoodUse() {
+        if (mc.player == null) return false;
+
+        if (InventoryManager.getInstance().isEating()) return true;
+
+        return mc.player.isUsingItem() && mc.player.getActiveItem().contains(DataComponentTypes.FOOD);
+    }
+
     @SuppressWarnings("unchecked")
     private boolean shouldPauseForAutoGap() {
         AutoGap autoGap = Modules.get().get(AutoGap.class);
@@ -1994,6 +2004,7 @@ public class HighwayBuilderTHM extends Module {
         if (
             shouldPauseForAutoEat()
                 || shouldPauseForAutoGap()
+                || shouldPauseForActiveFoodUse()
                 || (Modules.get().get(KillAura.class) != null && Modules.get().get(KillAura.class).attacking)
                 || (Modules.get().get(OffhandManager.class) != null && Modules.get().get(OffhandManager.class).isEating())
         ) {
