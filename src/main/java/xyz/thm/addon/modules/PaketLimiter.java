@@ -33,6 +33,12 @@ public class PaketLimiter extends Module {
         .filter(aClass -> PacketUtils.getC2SPackets().contains(aClass))
         .build()
     );
+    private final Setting<Set<Class<? extends Packet<?>>>> alwaysBlock = sgGeneral.add(new PacketListSetting.Builder()
+        .name("always-block")
+        .description("C2S packets that are always cancelled, even if in bypass.")
+        .filter(aClass -> PacketUtils.getC2SPackets().contains(aClass))
+        .build()
+    );
 
     private int sentThisTick = 0;
 
@@ -55,6 +61,9 @@ public class PaketLimiter extends Module {
             bypass.get().add(net.minecraft.network.packet.c2s.common.CommonPongC2SPacket.class);
             bypass.get().add(net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket.class);
         }
+        if (alwaysBlock.get().isEmpty()) {
+            alwaysBlock.get().add(net.minecraft.network.packet.c2s.play.HandSwingC2SPacket.class);
+        }
     }
 
     @EventHandler
@@ -66,6 +75,10 @@ public class PaketLimiter extends Module {
     private void onSendPacket(PacketEvent.Send event) {
         int max = limit.get();
         if (max == 0) return;
+        if (alwaysBlock.get().contains(event.packet.getClass())) {
+            event.cancel();
+            return;
+        }
         if (bypass.get().contains(event.packet.getClass())) return;
 
         if (sentThisTick >= max) {
