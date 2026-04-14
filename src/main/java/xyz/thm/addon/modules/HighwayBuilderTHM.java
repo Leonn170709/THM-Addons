@@ -11604,12 +11604,21 @@ public class HighwayBuilderTHM extends Module {
                 obsidianStartItems = countInventoryItems(itemStack -> itemStack.getItem() == Items.OBSIDIAN);
             }
 
+            private int getLooseInventoryPickaxeReserveSlots() {
+                return Math.max((b.savePickaxes.get() + 1) - countInventoryItems(itemStack -> itemStack.isIn(ItemTags.PICKAXES)), 0);
+            }
+
+            private int getUsableFreeSlotsForCurrentTask() {
+                int usableFreeSlots = Math.max(countEmptyInventorySlots() - b.minEmpty.get(), 0);
+                if (!isObsidianTask()) return usableFreeSlots;
+                return Math.max(usableFreeSlots - getLooseInventoryPickaxeReserveSlots(), 0);
+            }
+
             private boolean freezeTargetForSourceSelection() {
                 if (targetFrozen) return targetFinal > 0;
                 if (b.mc.player == null) return false;
 
-                int freeSlots = countEmptyInventorySlots();
-                int usableFreeSlots = Math.max(freeSlots - b.minEmpty.get(), 0);
+                int usableFreeSlots = getUsableFreeSlotsForCurrentTask();
                 int looseFoodCount = b.countConfiguredFoodItemsInInventory();
                 int foodTargetIncrease = b.getConfiguredFoodTargetIncrease(looseFoodCount);
                 int foodAdditionalCapacity = b.countConfiguredFoodAdditionalCapacityInInventory();
@@ -11658,7 +11667,7 @@ public class HighwayBuilderTHM extends Module {
 
                 workingStageCapacity = taskType == Type.Food
                     ? b.countConfiguredFoodAdditionalCapacityInInventory()
-                    : Math.max(countEmptyInventorySlots() - b.minEmpty.get(), 0);
+                    : getUsableFreeSlotsForCurrentTask();
                 pickaxesAcquiredCount = Math.max(countInventoryItems(itemStack -> itemStack.isIn(ItemTags.PICKAXES)) - pickaxesStartCount, 0);
                 materialStacksAcquired = Math.max(countInventorySlots(this::isTrackedMaterialStack) - materialStartStacks, 0);
                 foodItemsAcquired = Math.max(b.countConfiguredFoodItemsInInventory() - foodStartItems, 0);
@@ -11680,7 +11689,7 @@ public class HighwayBuilderTHM extends Module {
 
                 int oldTargetFinal = targetFinal;
                 int currentProgress = getProgressTowardsTarget();
-                int usableFreeSlots = Math.max(countEmptyInventorySlots() - b.minEmpty.get(), 0);
+                int usableFreeSlots = getUsableFreeSlotsForCurrentTask();
                 int currentAdditionalCapacity = switch (taskType) {
                     case Pickaxes -> usableFreeSlots;
                     case Materials -> isObsidianTask() ? usableFreeSlots * 64 : usableFreeSlots;
