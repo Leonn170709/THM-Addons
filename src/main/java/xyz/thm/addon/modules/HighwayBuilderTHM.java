@@ -328,6 +328,13 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+    private final Setting<Boolean> kitbotUpdateOnFinish = sgKitBotIntegration.add(new BoolSetting.Builder()
+        .name("kitbot-update-on-finish")
+        .description("Sends $update to KitBot1 with the current highway direction when the module finishes, waits for KitBot to teleport, then disconnects.")
+        .defaultValue(false)
+        .build()
+    );
+    
     private final Setting<Boolean> disconnectOnToggle = sgGeneral.add(new BoolSetting.Builder()
         .name("disconnect-on-toggle")
         .description("Automatically disconnects when the module is turned off, for example for not having enough blocks.")
@@ -907,6 +914,12 @@ public class HighwayBuilderTHM extends Module {
     private int invalidRestockRecoveryRetries;
     private boolean invalidRestockRecoveryPending;
     private boolean kitbotTpHandled;
+    private boolean kitbotUpdateOnFinishActive = false;
+    private long kitbotUpdateOnFinishStartTick = 0;
+    private boolean kitbotUpdateOnFinishTpAccepted = false;
+    private boolean kitbotUpdateOnFinishActive = false;
+    private long kitbotUpdateOnFinishStartTick = 0;
+    private boolean kitbotUpdateOnFinishTpAccepted = false;
     private boolean kitbotOrderInFlight;
     private boolean kitbotEnclosureActive;
     private boolean kitbotEnclosureRestorePending;
@@ -1540,6 +1553,22 @@ public class HighwayBuilderTHM extends Module {
             return;
         }
 
+        // KitBot $update on finish - intercept before disconnect
+        if (kitbotUpdateOnFinish.get() && !isMonitorPauseDeactivate && !isReconnectFailureDeactivate) {
+            if (isAtHighwayEnd()) {
+                String kitbotDir = directionToKitbotCommand(dir);
+                if (kitbotDir != null && mc.player != null && mc.world != null) {
+                    ChatUtils.sendPlayerMsg("/msg KitBot1 $update " + kitbotDir);
+                    info("Sent $update %s to KitBot1. Waiting up to 60s for teleport...", kitbotDir);
+                    kitbotUpdateOnFinishActive = true;
+                    kitbotUpdateOnFinishStartTick = mc.world.getTime();
+                    kitbotUpdateOnFinishTpAccepted = false;
+                }
+            } else {
+                info("Not at highway end — skipping KitBot $update.");
+            }
+        }
+
         StatsArtifactSnapshot finalizationRecord = persistFinalizationRecord(createFinalizationRecord("deactivate"), "deactivate-finalization-record");
         if (finalizationRecord == null) {
             warning("Unable to persist final HighwayBuilder statistics safely before deactivate.");
@@ -1644,6 +1673,66 @@ public class HighwayBuilderTHM extends Module {
         if (consumedStatsArtifactKeys.contains(identityOf(statsCacheSnapshot).key())) return null;
         return parseWorkingDirectionName(statsCacheSnapshot.workingDirectionName());
     }
+
+    private boolean isAtHighwayEnd() {
+        if (mc.player == null || mc.world == null || dir == null) return false;
+
+        THMSystem thmSystem = THMSystem.get();
+        if (thmSystem == null) return true; // can't determine mode, assume end
+
+        boolean digging = thmSystem.mode.get() == THMSystem.Mode.HighwayDigging;
+        BlockPos playerPos = mc.player.getBlockPos();
+        int builtCount = 0;
+        int totalChecked = 0;
+
+        for (int i = 1; i <= 24; i++) {
+            BlockPos checkPos = playerPos.add(dir.offsetX * i, 0, dir.offsetZ * i);
+
+            if (digging) {
+                // For digging: check if the block at player head level is air (already dug)
+                BlockState stateAtHead = mc.world.getBlockState(checkPos);
+                if (stateAtHead.isAir() || stateAtHead.isReplaceable()) {
+                    builtCount++;
+                }
+            } else {
+                // For paving: check the floor block (one below player level)
+                BlockPos floorPos = checkPos.add(0, -1, 0);
+                BlockState floorState = mc.world.getBlockState(floorPos);
+                if (blocksToPlace.get().contains(floorState.getBlock())) {
+                    builtCount++;
+                }
+            }
+            totalChecked++;
+        }
+
+        // If more than half the blocks ahead are already "done", we're repairing
+        // not at the end — don't send update
+        return builtCount < (totalChecked / 2);
+    }
+
+    private String directionToKitbotCommand(HorizontalDirection dir) {
+        if (dir == null) return null;
+
+        boolean digging = false;
+        THMSystem thmSystem = THMSystem.get();
+        if (thmSystem != null && thmSystem.mode.get() == THMSystem.Mode.HighwayDigging) {
+            digging = true;
+        }
+
+        String base = switch (dir) {
+            case North -> "N";
+            case South -> "S";
+            case East -> "E";
+            case West -> "W";
+            case NorthEast -> "NE";
+            case NorthWest -> "NW";
+            case SouthEast -> "SE";
+            case SouthWest -> "SW";
+        };
+
+        return digging ? "dug" + base : base;
+    }
+
 
     private StatsArtifactSnapshot peekAuthoritativeStatsArtifact() {
         StatsArtifactSnapshot canonical = peekStatsArtifact(resolveCanonicalStatsArtifactPath(), StatsArtifactKind.CANONICAL);
@@ -1960,6 +2049,21 @@ public class HighwayBuilderTHM extends Module {
 
         maybeCheckpointStatsSession();
 
+        // KitBot update-on-finish 60s timeout
+        if (kitbotUpdateOnFinishActive) {
+            long elapsed = mc.world.getTime() - kitbotUpdateOnFinishStartTick;
+            if (elapsed >= 1200) {
+                if (kitbotUpdateOnFinishTpAccepted) {
+                    info("KitBot1 TPA accepted but 60s elapsed without arrival. Disconnecting.");
+                } else {
+                    info("No response from KitBot1 after 60 seconds. Disconnecting.");
+                }
+                kitbotUpdateOnFinishActive = false;
+                disconnect("KitBot update timeout");
+            }
+            return;
+        }
+
         if (!isNot6B6T()) {
             ServerState committedState = getCommittedServerState();
             trackServerExecutionState(committedState);
@@ -2062,9 +2166,28 @@ public class HighwayBuilderTHM extends Module {
     @EventHandler
     private void onMessageReceive(ReceiveMessageEvent event) {
         if (!isExecutionAllowedOnCurrentServer(getCommittedServerState())) return;
-        if (state != State.KitbotOrder || kitbotTpHandled) return;
 
         String msg = event.getMessage().getString();
+
+        // Handle KitBot update-on-finish TPA flow
+        if (kitbotUpdateOnFinishActive) {
+            if (msg.contains(KITBOT_NAME + " wants to teleport to you")) {
+                ChatUtils.sendPlayerMsg("/tpy " + KITBOT_NAME);
+                kitbotUpdateOnFinishTpAccepted = true;
+                info("Accepted " + KITBOT_NAME + " teleport request.");
+            }
+            if (msg.contains(KITBOT_NAME + " whispers: Bot has arrived at highway")
+                || msg.contains("you may teleport")) {
+                info("KitBot1 has arrived. Disconnecting.");
+                kitbotUpdateOnFinishActive = false;
+                disconnect("KitBot update complete");
+            }
+            return;
+        }
+
+        // Existing KitBot restock TPA handling
+        if (state != State.KitbotOrder || kitbotTpHandled) return;
+
         if (msg.contains(KITBOT_NAME + " wants to teleport to you")) {
             ChatUtils.sendPlayerMsg("/tpy " + KITBOT_NAME);
             info("Accepted " + KITBOT_NAME + " teleport request.");
@@ -2465,6 +2588,9 @@ public class HighwayBuilderTHM extends Module {
     private void clearKitbotRuntimeState(String reason) {
         clearKitbotOrderTracking(reason);
         clearKitbotEnclosureState(reason);
+        kitbotUpdateOnFinishActive = false;
+        kitbotUpdateOnFinishStartTick = 0;
+        kitbotUpdateOnFinishTpAccepted = false;
     }
 
     private void clearKitbotOrderTracking(String reason) {
