@@ -334,7 +334,7 @@ public class HighwayBuilderTHM extends Module {
         .defaultValue(false)
         .build()
     );
-    
+
     private final Setting<Boolean> disconnectOnToggle = sgGeneral.add(new BoolSetting.Builder()
         .name("disconnect-on-toggle")
         .description("Automatically disconnects when the module is turned off, for example for not having enough blocks.")
@@ -914,9 +914,6 @@ public class HighwayBuilderTHM extends Module {
     private int invalidRestockRecoveryRetries;
     private boolean invalidRestockRecoveryPending;
     private boolean kitbotTpHandled;
-    private boolean kitbotUpdateOnFinishActive = false;
-    private long kitbotUpdateOnFinishStartTick = 0;
-    private boolean kitbotUpdateOnFinishTpAccepted = false;
     private boolean kitbotUpdateOnFinishActive = false;
     private long kitbotUpdateOnFinishStartTick = 0;
     private boolean kitbotUpdateOnFinishTpAccepted = false;
@@ -1556,7 +1553,7 @@ public class HighwayBuilderTHM extends Module {
         // KitBot $update on finish - intercept before disconnect
         if (kitbotUpdateOnFinish.get() && !isMonitorPauseDeactivate && !isReconnectFailureDeactivate) {
             if (isAtHighwayEnd()) {
-                String kitbotDir = directionToKitbotCommand(dir);
+                String kitbotDir = directionToKitbotCommand(dir); //Could also be done via getHighwayDirectionString()
                 if (kitbotDir != null && mc.player != null && mc.world != null) {
                     ChatUtils.sendPlayerMsg("/msg KitBot1 $update " + kitbotDir);
                     info("Sent $update %s to KitBot1. Waiting up to 60s for teleport...", kitbotDir);
