@@ -1,60 +1,44 @@
-# THM Addons (for Meteor Client)
+# THM Addons for Meteor Client
 
-## Features
+THM Addons is a Meteor Client addon focused on highway automation, travel utilities, PvP tooling, and quality-of-life HUD widgets for Minecraft 1.21.11.
 
-- **OnlineFriendsList**
-  > Displays a live list of your friends who are currently online.
+## Highlights
+- Highway automation and monitoring with dedicated HUD support.
+- Utility modules for inventory management, rendering, AFK safety, and performance control.
+- PvP-focused modules grouped under a dedicated THM PVP category.
+- Optional integrations for Discord webhooks and Rich Presence.
 
-- **AxisViewer**
-  > Visualizes the center lines of all major highways, including Ring Roads and Diamond Highways.
+## Requirements
+- Minecraft `1.21.11`
+- Fabric Loader `0.18.2`
+- Meteor Client `1.21.11-SNAPSHOT`
+- Java `21`
 
-- **BlockCounter**
-  > Counts all selected block types within the current render distance.
-
-- **DiscordNotifier**
-  > Sends selected in-game data such as chat messages or events to a Discord webhook.
-
-- **HighwayBuilderTHM**
-  > Automatically builds highways with API integration.
-
-- **OffhandManager**
-  > Automatically manages offhand items based on configurable conditions.
-
-- **ScaffoldTHM**
-  > Advanced scaffolding module optimized for digging tunnels.
-
-- **HighwaySearcher** *(requires Baritone)*
-  > Automatically navigates to the nearest highway using Baritone pathfinding.
-
-- **HotbarManager**
-  > Automatically organizes and switches hotbar items based on configured rules.
-
-  **TunnelMiner**
-  > Automatically mines Tunnels to your specified cords by [NexLordMax](https://github.com/JoniBicaku/tunnelminer)
-
-- **DubCounter**
-  > Counts all chests being rendered.
-
-- **HighwayHud**
-  > Displays live HighwayBuilder statistics such as progress, distance, and direction.
-- **PVP Tab**
-  > A pvp tab with extensive and good hvh features
-- **Enhancements**
-  >Enhancements to existing Meteor Modules like Killaura
-
+## Installation
+1. Build the addon (see below) or obtain a prebuilt jar.
+2. Place the jar in your Minecraft `mods` folder alongside Meteor Client.
+3. Launch the game with Fabric.
 
 ## Building
-### Local Build
 1. Clone the repository.
-2. Open the terminal and navigate to the cloned repository.
-3. Run the following command to build the project:
+2. In the repository root, run:
    ```bash
    ./gradlew build
    ```
-4. The built jar will be located in the `build/libs` directory.
+3. The jar is created in `build/libs`.
+
+## Features
+A full module-by-module overview is available in `FEATURES.md`.
+
+## Documentation
+- `docs/highwaybuilder-stats-screenshot-simulation.md`
+- `docs/hwymonitor-reconnect-simulation.md`
+
 ## Contributing
-Contributions are welcome! Please review the [Contributing Guidelines](CONTRIBUTING.md) if you have any suggestions or improvements, then feel free to open an issue or submit a pull request.
+Issues and pull requests are welcome.
 
 ## License
-[GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html) - This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
-Big Thanks to Stainless and BepHax
+Licensed under the GNU General Public License v3.0. See `LICENSE` for details.
+
+## Credits
+Thanks to Stainless and BepHax.
