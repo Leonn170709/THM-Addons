@@ -1551,14 +1551,19 @@ public class HighwayBuilderTHM extends Module {
             return;
         }
 
+        // KitBot $update on finish - intercept before disconnect
         if (kitbotUpdateOnFinish.get() && !isMonitorPauseDeactivate && !isReconnectFailureDeactivate) {
-            String kitbotDir = directionToKitbotCommand(dir);
-            if (kitbotDir != null && mc.player != null && mc.world != null) {
-                ChatUtils.sendPlayerMsg("/msg KitBot1 $update " + kitbotDir);
-                info("Sent $update %s to KitBot1. Waiting up to 60s for teleport...", kitbotDir);
-                kitbotUpdateOnFinishActive = true;
-                kitbotUpdateOnFinishStartTick = mc.world.getTime();
-                kitbotUpdateOnFinishTpAccepted = false;
+            if (isAtHighwayEnd()) {
+                String kitbotDir = directionToKitbotCommand(dir);
+                if (kitbotDir != null && mc.player != null && mc.world != null) {
+                    ChatUtils.sendPlayerMsg("/msg KitBot1 $update " + kitbotDir);
+                    info("Sent $update %s to KitBot1. Waiting up to 60s for teleport...", kitbotDir);
+                    kitbotUpdateOnFinishActive = true;
+                    kitbotUpdateOnFinishStartTick = mc.world.getTime();
+                    kitbotUpdateOnFinishTpAccepted = false;
+                }
+            } else {
+                info("Not at highway end — skipping KitBot $update.");
             }
         }
 
@@ -1667,9 +1672,52 @@ public class HighwayBuilderTHM extends Module {
         return parseWorkingDirectionName(statsCacheSnapshot.workingDirectionName());
     }
 
+    private boolean isAtHighwayEnd() {
+        if (mc.player == null || mc.world == null || dir == null) return false;
+
+        THMSystem thmSystem = THMSystem.get();
+        if (thmSystem == null) return true; // can't determine mode, assume end
+
+        boolean digging = thmSystem.mode.get() == THMSystem.Mode.HighwayDigging;
+        BlockPos playerPos = mc.player.getBlockPos();
+        int builtCount = 0;
+        int totalChecked = 0;
+
+        for (int i = 1; i <= 24; i++) {
+            BlockPos checkPos = playerPos.add(dir.offsetX * i, 0, dir.offsetZ * i);
+
+            if (digging) {
+                // For digging: check if the block at player head level is air (already dug)
+                BlockState stateAtHead = mc.world.getBlockState(checkPos);
+                if (stateAtHead.isAir() || stateAtHead.isReplaceable()) {
+                    builtCount++;
+                }
+            } else {
+                // For paving: check the floor block (one below player level)
+                BlockPos floorPos = checkPos.add(0, -1, 0);
+                BlockState floorState = mc.world.getBlockState(floorPos);
+                if (blocksToPlace.get().contains(floorState.getBlock())) {
+                    builtCount++;
+                }
+            }
+            totalChecked++;
+        }
+
+        // If more than half the blocks ahead are already "done", we're repairing
+        // not at the end — don't send update
+        return builtCount < (totalChecked / 2);
+    }
+
     private String directionToKitbotCommand(HorizontalDirection dir) {
         if (dir == null) return null;
-        return switch (dir) {
+
+        boolean digging = false;
+        THMSystem thmSystem = THMSystem.get();
+        if (thmSystem != null && thmSystem.mode.get() == THMSystem.Mode.HighwayDigging) {
+            digging = true;
+        }
+
+        String base = switch (dir) {
             case North -> "N";
             case South -> "S";
             case East -> "E";
@@ -1679,7 +1727,10 @@ public class HighwayBuilderTHM extends Module {
             case SouthEast -> "SE";
             case SouthWest -> "SW";
         };
+
+        return digging ? "dug" + base : base;
     }
+
 
     private StatsArtifactSnapshot peekAuthoritativeStatsArtifact() {
         StatsArtifactSnapshot canonical = peekStatsArtifact(resolveCanonicalStatsArtifactPath(), StatsArtifactKind.CANONICAL);
