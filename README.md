@@ -7,6 +7,7 @@ THM Addons is a Meteor Client addon focused on highway automation, travel utilit
 - Utility modules for inventory management, rendering, AFK safety, and performance control.
 - PvP-focused modules grouped under a dedicated THM PVP category.
 - Optional integrations for Discord webhooks and Rich Presence.
+- [More Features](FEATURES.md)
 
 ## Requirements
 - Minecraft `1.21.11`
