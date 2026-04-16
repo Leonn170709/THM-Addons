@@ -17,6 +17,7 @@ import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.THMUtils;
 
 public class AfkLogout extends Module {
+    private static final long COORD_LOGOUT_DELAY_MS = 2_000L;
     private static final long SPEED_WINDOW_MS = 5L * 60L * 1000L;
     private static final long MIN_SPEED_WINDOW_MS = 1000L;
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -85,6 +86,14 @@ public class AfkLogout extends Module {
         .build()
     );
 
+    private final Setting<Boolean> disableHighwayBuilderBeforeCoordLogout = sgGeneral.add(new BoolSetting.Builder()
+        .name("disable-highwaybuilder-before-logout")
+        .description("When coordinate logout triggers, disable HighwayBuilder first and wait 2 seconds before logging out.")
+        .defaultValue(false)
+        .visible(enableCoordBased::get)
+        .build()
+    );
+
     // Elytra monitor logout settings
     private final Setting<Boolean> enableElytraMonitor = sgGeneral.add(new BoolSetting.Builder()
         .name("enable-elytra-monitor")
@@ -141,6 +150,9 @@ public class AfkLogout extends Module {
     public int distanceUntilLogout = 0;
     public int usableElytras = 0;
     public String lastPlayerInRangeName = null;
+    private boolean pendingDelayedLogout;
+    private String pendingDelayedLogoutReason;
+    private long pendingDelayedLogoutAtMs;
     public long estimatedTimeRemainingMs = -1L;
 
     private static final class SpeedSample {
@@ -165,10 +177,15 @@ public class AfkLogout extends Module {
 
     @Override
     public void onActivate() {
-        // Record the time when the module is activated
+        clearPendingDelayedLogout();
         moduleActivationTime = System.currentTimeMillis();
         resetSpeedTracking();
         estimatedTimeRemainingMs = -1L;
+    }
+
+    @Override
+    public void onDeactivate() {
+        clearPendingDelayedLogout();
     }
 
     @EventHandler
@@ -187,6 +204,31 @@ public class AfkLogout extends Module {
 
         // Update estimated time remaining (uses movement speed for coord-based)
         estimatedTimeRemainingMs = calculateEstimatedTimeRemainingMs();
+
+        if (pendingDelayedLogout) {
+            if (enableTimeBased.get() && isTimeoutReached()) {
+                logout("Time-based logout triggered after " + timeoutMinutes.get() + " minute(s).");
+                return;
+            }
+
+            if (enableElytraMonitor.get() && usableElytras <= elytraThreshold.get()) {
+                logout("Elytra monitor triggered (usable elytras: " + usableElytras + ", threshold: " + elytraThreshold.get() + ").");
+                return;
+            }
+
+            if (enablePlayerRange.get() && isPlayerInRange()) {
+                String name = lastPlayerInRangeName == null ? "unknown" : lastPlayerInRangeName;
+                logout(playerRangeRadius.get() == 0
+                    ? "Player " + name + " entered render distance."
+                    : "Player " + name + " entered within " + playerRangeRadius.get() + " blocks.");
+                return;
+            }
+
+            if (System.currentTimeMillis() >= pendingDelayedLogoutAtMs) {
+                logout(pendingDelayedLogoutReason);
+            }
+            return;
+        }
 
         // Check time-based logout condition
         if (enableTimeBased.get() && isTimeoutReached()) {
@@ -211,7 +253,11 @@ public class AfkLogout extends Module {
 
         // Check coordinate-based logout condition
         if (enableCoordBased.get() && xCoordsMatch() && zCoordsMatch() && PlayerUtils.getDimension() == dimension.get()) {
-            logout("Arrived at destination coordinates.");
+            if (shouldDelayCoordinateLogoutForHighwayBuilder()) {
+                startDelayedCoordinateLogout("Arrived at destination coordinates.");
+            } else {
+                logout("Arrived at destination coordinates.");
+            }
         }
     }
 
@@ -241,7 +287,33 @@ public class AfkLogout extends Module {
         return (mc.player.getZ() <= zCoords.get() + radius.get() && mc.player.getZ() >= zCoords.get() - radius.get());
     }
 
+    private boolean shouldDelayCoordinateLogoutForHighwayBuilder() {
+        if (!disableHighwayBuilderBeforeCoordLogout.get()) return false;
+
+        HighwayBuilderTHM highwayBuilder = Modules.get().get(HighwayBuilderTHM.class);
+        return highwayBuilder != null && highwayBuilder.isActive();
+    }
+
+    private void startDelayedCoordinateLogout(String reason) {
+        if (pendingDelayedLogout) return;
+
+        HighwayBuilderTHM highwayBuilder = Modules.get().get(HighwayBuilderTHM.class);
+        if (highwayBuilder != null && highwayBuilder.isActive()) highwayBuilder.disable();
+
+        pendingDelayedLogout = true;
+        pendingDelayedLogoutReason = reason;
+        pendingDelayedLogoutAtMs = System.currentTimeMillis() + COORD_LOGOUT_DELAY_MS;
+    }
+
+    private void clearPendingDelayedLogout() {
+        pendingDelayedLogout = false;
+        pendingDelayedLogoutReason = null;
+        pendingDelayedLogoutAtMs = 0L;
+    }
+
     private void logout(String reason) {
+        clearPendingDelayedLogout();
+
         // Toggle AutoReconnect if enabled
         if (toggleAutoReconnect.get() && Modules.get().isActive(AutoReconnect.class)) {
             Modules.get().get(AutoReconnect.class).toggle();

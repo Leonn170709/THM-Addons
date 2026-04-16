@@ -23,8 +23,10 @@ import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.Direction;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.accessor.StuckEatingRetryBridge;
+import xyz.thm.addon.accessor.StuckEatingRetryResult;
 
-public class OffhandManager extends Module {
+public class OffhandManager extends Module implements StuckEatingRetryBridge {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgAutoGap = settings.createGroup("Auto Gap");
     private final SettingGroup sgAutoTotem = settings.createGroup("Auto Totem");
@@ -212,6 +214,38 @@ public class OffhandManager extends Module {
 
     public boolean isEating() {
         return isActive() && eating;
+    }
+
+    @Override
+    public boolean thm$isActivelyEating() {
+        return isEating();
+    }
+
+    @Override
+    public boolean thm$stillNeedsToEat() {
+        return isActive()
+            && mc.player != null
+            && shouldEat()
+            && mc.player.getOffHandStack().getComponents().get(DataComponentTypes.FOOD) != null;
+    }
+
+    @Override
+    public boolean thm$hasValidCurrentEatingItem() {
+        return mc.player != null && mc.player.getOffHandStack().getComponents().get(DataComponentTypes.FOOD) != null;
+    }
+
+    @Override
+    public void thm$forceStopEating() {
+        stopEating();
+    }
+
+    @Override
+    public StuckEatingRetryResult thm$forceRestartEating() {
+        if (!thm$stillNeedsToEat()) return StuckEatingRetryResult.CLEARED;
+        if (!thm$hasValidCurrentEatingItem()) return StuckEatingRetryResult.IMPOSSIBLE;
+
+        startEating();
+        return eating ? StuckEatingRetryResult.RESTARTED : StuckEatingRetryResult.IMPOSSIBLE;
     }
 
     public enum Item {
