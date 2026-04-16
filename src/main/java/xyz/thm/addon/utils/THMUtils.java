@@ -14,6 +14,7 @@ import net.minecraft.util.math.Vec3d;
 import org.jetbrains.annotations.Nullable;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.modules.TunnelMinerModule;
+import xyz.thm.addon.system.THMSystem;
 
 import javax.imageio.ImageIO;
 import java.awt.*;
@@ -140,6 +141,36 @@ public class THMUtils {
         return -1;
     }
 
+    public static String getHighwayDirectionString() {
+        double playerZ = mc.player.getZ();
+        double playerX = mc.player.getX();
+        boolean x = Math.abs(playerZ) < 5;
+        boolean z = Math.abs(playerX) < 5;
+        boolean xp = Math.signum(playerX) == 1.0;
+        boolean zp = Math.signum(playerZ) == 1.0;
+        boolean diag = Math.abs(Math.abs(playerX) - Math.abs(playerZ)) < 5;
+
+        boolean digging = false;
+        THMSystem thmSystem = THMSystem.get();
+        if (thmSystem != null && thmSystem.mode.get() == THMSystem.Mode.HighwayDigging) {
+            digging = true;
+        }
+
+        String base;
+        if (x && xp)            base = "E";
+        else if (x)             base = "W";
+        else if (z && zp)       base = "S";
+        else if (z)             base = "N";
+        else if (diag && xp && zp)  base = "SE";
+        else if (diag && !xp && zp) base = "SW";
+        else if (diag && xp)        base = "NE";
+        else if (diag)              base = "NW";
+        else return null;
+
+        return digging ? "dug" + base : base;
+    }
+
+    //Notifies
     public static void Notify(String heading, String description) {
         String title = (heading == null || heading.isBlank()) ? "THM Addon" : heading;
         String body = description == null ? "" : description;
@@ -294,6 +325,7 @@ public class THMUtils {
         }
     }
 
+    //Server Check
     public static boolean isNot6B6T() {
         assert mc.world != null;
         if (FabricLoader.getInstance().isDevelopmentEnvironment()) return false; // Bypass check in dev environment
@@ -307,6 +339,7 @@ public class THMUtils {
         while (host.endsWith(".")) host = host.substring(0, host.length() - 1);
         return !host.endsWith("6b6t.org");
     }
+    //Old pickup method
     public static void pickupAndReturn() {
         if (mc.player == null) return;
         int savedX;
@@ -335,6 +368,7 @@ public class THMUtils {
         }).start();
 
     }
+    //Unused
     private boolean checkModLoaded(String... modIds)
     {
         boolean loaded = false;
