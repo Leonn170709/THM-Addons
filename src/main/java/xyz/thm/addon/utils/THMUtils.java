@@ -11,6 +11,7 @@ import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.World;
 import org.jetbrains.annotations.Nullable;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.modules.TunnelMinerModule;
@@ -449,6 +450,13 @@ public class THMUtils {
         boolean onDiagonal = Math.abs(Math.abs(playerX) - Math.abs(playerZ)) < 5;
 
         return onXAxis || onZAxis || onDiagonal;
+    }
+
+    public static boolean isOnOfficialHighway() {
+        if (mc.player == null || mc.world == null) return false;
+        if (isNot6B6T()) return false;
+        if (mc.world.getRegistryKey() != World.NETHER) return false;
+        return isOnMainHighway();
     }
     public static String GetVerbatim(String text)
     {

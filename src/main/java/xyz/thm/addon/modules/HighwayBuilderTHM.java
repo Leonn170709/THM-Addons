@@ -142,6 +142,17 @@ public class HighwayBuilderTHM extends Module {
     private static final int STATS_GCM_TAG_BITS = 128;
     private static final int STATS_GCM_NONCE_BYTES = 12;
     private static final int FORWARD_BREAK_CREDIT_TTL_TICKS = 60;
+    private static final int HIGHWAY_FLOOR_Y = 120;
+    private static final int HIGHWAY_RAILING_Y = 121;
+    private static final int HIGHWAY_END_SCAN_DISTANCE = 24;
+    private static final int HIGHWAY_END_NEAR_THRESHOLD = 10;
+    private static final int PAVED_END_REQUIRED_CONSECUTIVE_MISSES = 2;
+    private static final int DUG_END_SCAN_STEPS = 20;
+    private static final int DUG_END_NETHERRACK_THRESHOLD = 20;
+    private static final double PAVED_FLOOR_OBSIDIAN_RATIO = 0.95;
+    private static final double PAVED_RAILING_RATIO = 0.95;
+    private static final double DUG_EXCAVATED_RATIO = 1.0;
+    private static final double DUG_OBSIDIAN_FLOOR_MAX_RATIO = 0.05;
     private static final DateTimeFormatter STATS_SCREENSHOT_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss").withZone(ZoneId.systemDefault());
     private static final SecureRandom STATS_RANDOM = new SecureRandom();
 
@@ -1581,9 +1592,12 @@ public class HighwayBuilderTHM extends Module {
 
         // KitBot $update on finish - intercept before disconnect
         if (kitbotUpdateOnFinish.get() && !isMonitorPauseDeactivate && !isReconnectFailureDeactivate) {
-            if (isAtHighwayEnd()) {
+            if (!isOnOfficialHighway()) {
+                info("Not on an official highway — skipping KitBot $update.");
+            } else if (isAtHighwayEnd()) {
                 String kitbotDir = directionToKitbotCommand(dir); //Could also be done via getHighwayDirectionString()
                 if (kitbotDir != null && mc.player != null && mc.world != null) {
+                    buildKitbotUpdateEnclosure();
                     ChatUtils.sendPlayerMsg("/msg KitBot1 $update " + kitbotDir);
                     info("Sent $update %s to KitBot1. Waiting up to 60s for teleport...", kitbotDir);
                     kitbotUpdateOnFinishActive = true;
@@ -1701,49 +1715,252 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private boolean isAtHighwayEnd() {
-        if (mc.player == null || mc.world == null || dir == null) return false;
-
-        THMSystem thmSystem = THMSystem.get();
-        if (thmSystem == null) return true; // can't determine mode, assume end
-
-        boolean digging = thmSystem.mode.get() == THMSystem.Mode.HighwayDigging;
-        BlockPos playerPos = mc.player.getBlockPos();
-        int builtCount = 0;
-        int totalChecked = 0;
-
-        for (int i = 1; i <= 24; i++) {
-            BlockPos checkPos = playerPos.add(dir.offsetX * i, 0, dir.offsetZ * i);
-
-            if (digging) {
-                // For digging: check if the block at player head level is air (already dug)
-                BlockState stateAtHead = mc.world.getBlockState(checkPos);
-                if (stateAtHead.isAir() || stateAtHead.isReplaceable()) {
-                    builtCount++;
-                }
-            } else {
-                // For paving: check the floor block (one below player level)
-                BlockPos floorPos = checkPos.add(0, -1, 0);
-                BlockState floorState = mc.world.getBlockState(floorPos);
-                if (blocksToPlace.get().contains(floorState.getBlock())) {
-                    builtCount++;
-                }
-            }
-            totalChecked++;
+        if (mc.player == null || mc.world == null || dir == null || blockPosProvider == null) {
+            if (debugLog.get()) info("HB $update debug: missing context player/world/dir/provider -> atEnd=false");
+            return false;
         }
 
-        // If more than half the blocks ahead are already "done", we're repairing
-        // not at the end — don't send update
-        return builtCount < (totalChecked / 2);
+        List<BlockPos> floorAhead = snapshotTemplate(blockPosProvider.getFloor());
+        List<BlockPos> floorBehind = snapshotTemplate(blockPosProvider.getBehindFloor());
+        List<BlockPos> frontAhead = snapshotTemplate(blockPosProvider.getFront());
+        List<BlockPos> frontBehind = snapshotTemplate(blockPosProvider.getBehindFront());
+        List<BlockPos> railingsAhead = snapshotTemplate(blockPosProvider.getRailings(0));
+        List<BlockPos> railingsBehind = snapshotTemplate(blockPosProvider.getBehindRailings(0));
+
+        if (floorAhead.isEmpty()) {
+            if (debugLog.get()) info("HB $update debug: floorAhead empty -> atEnd=false");
+            return false;
+        }
+
+        boolean hasDugContext = !frontAhead.isEmpty()
+            && (isDugSegment(frontBehind, floorBehind, 0) || isDugSegment(frontAhead, floorAhead, 0));
+        boolean hasPavedContext = !railingsAhead.isEmpty()
+            && (isPavedSegment(floorBehind, railingsBehind, 0) || isPavedSegment(floorAhead, railingsAhead, 0));
+        boolean digging = inferDugModeForUpdate(hasDugContext, hasPavedContext);
+
+        boolean officialHighway = isOnOfficialHighway();
+        String axis = directionToKitbotCommand(dir);
+        if (debugLog.get()) {
+            info(
+                "HB $update debug: playerY=%d isDug=%s axis=%s officialHighway=%s dugContext=%s pavedContext=%s",
+                mc.player.getBlockY(),
+                digging,
+                axis != null ? axis : dir.name(),
+                officialHighway,
+                hasDugContext,
+                hasPavedContext
+            );
+        }
+
+        if (digging) {
+            if (frontAhead.isEmpty()) {
+                if (debugLog.get()) info("HB $update debug: dug frontAhead empty -> atEnd=false");
+                return false;
+            }
+            if (!hasDugContext) {
+                if (debugLog.get()) info("HB $update debug: dug context missing -> atEnd=false");
+                return false;
+            }
+            DugEndScanResult dugScan = scanDugEnd(frontAhead, floorAhead);
+            boolean atEnd = dugScan == DugEndScanResult.DUG_END;
+            if (debugLog.get()) info("HB $update debug: dug scan result=%s -> atEnd=%s", dugScan, atEnd);
+            return atEnd;
+        }
+
+        if (railingsAhead.isEmpty()) {
+            if (debugLog.get()) info("HB $update debug: paved railingsAhead empty -> atEnd=false");
+            return false;
+        }
+
+        if (!hasPavedContext) {
+            if (debugLog.get()) info("HB $update debug: paved context missing -> atEnd=false");
+            return false;
+        }
+
+        int runLength = findForwardRunLength(railingsAhead, null, floorAhead, false, PAVED_END_REQUIRED_CONSECUTIVE_MISSES);
+        boolean atEnd = runLength <= HIGHWAY_END_NEAR_THRESHOLD;
+        if (debugLog.get()) {
+            info(
+                "HB $update debug: paved runLength=%d threshold=%d -> atEnd=%s",
+                runLength,
+                HIGHWAY_END_NEAR_THRESHOLD,
+                atEnd
+            );
+        }
+        return atEnd;
+    }
+
+    private int findForwardRunLength(
+        List<BlockPos> railingsTemplate,
+        List<BlockPos> frontTemplate,
+        List<BlockPos> floorTemplate,
+        boolean digging,
+        int requiredConsecutiveMisses
+    ) {
+        int run = 0;
+        int consecutiveMisses = 0;
+
+        for (int step = 0; step < HIGHWAY_END_SCAN_DISTANCE; step++) {
+            boolean matches = digging
+                ? isDugSegment(frontTemplate, floorTemplate, step)
+                : isPavedSegment(floorTemplate, railingsTemplate, step);
+
+            if (matches) {
+                run++;
+                consecutiveMisses = 0;
+            } else {
+                consecutiveMisses++;
+                if (consecutiveMisses >= requiredConsecutiveMisses) break;
+            }
+        }
+
+        return run;
+    }
+
+    private boolean isPavedSegment(List<BlockPos> floorTemplate, List<BlockPos> railingTemplate, int stepOffset) {
+        Ratio floorObsidian = countTemplateMatches(floorTemplate, stepOffset, HIGHWAY_FLOOR_Y, this::isObsidian);
+        Ratio railingBlocks = countTemplateMatches(railingTemplate, stepOffset, HIGHWAY_RAILING_Y, this::isRailingBlock);
+        if (floorObsidian.total == 0 || railingBlocks.total == 0) return false;
+
+        return floorObsidian.value() >= PAVED_FLOOR_OBSIDIAN_RATIO
+            && railingBlocks.value() >= PAVED_RAILING_RATIO;
+    }
+
+    private boolean isDugSegment(List<BlockPos> frontTemplate, List<BlockPos> floorTemplate, int stepOffset) {
+        Ratio excavated = countTemplateMatches(frontTemplate, stepOffset, Integer.MIN_VALUE, this::isExcavatedSpace);
+        Ratio floorObsidian = countTemplateMatches(floorTemplate, stepOffset, HIGHWAY_FLOOR_Y, this::isObsidian);
+        if (excavated.total == 0 || floorObsidian.total == 0) return false;
+
+        return excavated.value() >= DUG_EXCAVATED_RATIO
+            && floorObsidian.value() <= DUG_OBSIDIAN_FLOOR_MAX_RATIO;
+    }
+
+    private DugEndScanResult scanDugEnd(List<BlockPos> frontTemplate, List<BlockPos> floorTemplate) {
+        int netherrackCount = 0;
+        boolean sawAnyObsidian = false;
+
+        for (int step = 0; step < DUG_END_SCAN_STEPS; step++) {
+            Ratio frontObsidian = countTemplateMatches(frontTemplate, step, Integer.MIN_VALUE, this::isObsidian);
+            if (frontObsidian.matches > 0) {
+                sawAnyObsidian = true;
+                if (debugLog.get()) {
+                    info("HB $update debug: dug scan step=%d front obsidian matches=%d -> PAVED_AHEAD", step, frontObsidian.matches);
+                }
+                return DugEndScanResult.PAVED_AHEAD;
+            }
+
+            Ratio floorObsidian = countTemplateMatches(floorTemplate, step, HIGHWAY_FLOOR_Y, this::isObsidian);
+            if (floorObsidian.matches > 0) {
+                sawAnyObsidian = true;
+                if (debugLog.get()) {
+                    info("HB $update debug: dug scan step=%d floor obsidian matches=%d -> PAVED_AHEAD", step, floorObsidian.matches);
+                }
+                return DugEndScanResult.PAVED_AHEAD;
+            }
+
+            Ratio frontNetherrack = countTemplateMatches(frontTemplate, step, Integer.MIN_VALUE, this::isNetherrack);
+            netherrackCount += frontNetherrack.matches;
+        }
+
+        DugEndScanResult result;
+        if (!sawAnyObsidian) {
+            result = DugEndScanResult.DUG_END;
+        } else {
+            result = netherrackCount >= DUG_END_NETHERRACK_THRESHOLD
+                ? DugEndScanResult.DUG_END
+                : DugEndScanResult.CONTINUES_DUG;
+        }
+        if (debugLog.get()) {
+            info(
+                "HB $update debug: dug scan netherrackCount=%d threshold=%d sawAnyObsidian=%s -> %s",
+                netherrackCount,
+                DUG_END_NETHERRACK_THRESHOLD,
+                sawAnyObsidian,
+                result
+            );
+        }
+        return result;
+    }
+
+    private Ratio countTemplateMatches(List<BlockPos> template, int stepOffset, int expectedY, Predicate<BlockState> matcher) {
+        if (template == null || template.isEmpty()) return Ratio.EMPTY;
+
+        int dx = dir.offsetX * stepOffset;
+        int dz = dir.offsetZ * stepOffset;
+
+        int preferredMatches = 0;
+        int preferredTotal = 0;
+        int allMatches = 0;
+        int allTotal = 0;
+
+        for (BlockPos basePos : template) {
+            BlockPos pos = basePos.add(dx, 0, dz);
+            BlockState state = mc.world.getBlockState(pos);
+            boolean matches = matcher.test(state);
+
+            allTotal++;
+            if (matches) allMatches++;
+
+            if (expectedY == Integer.MIN_VALUE || pos.getY() == expectedY) {
+                preferredTotal++;
+                if (matches) preferredMatches++;
+            }
+        }
+
+        if (expectedY != Integer.MIN_VALUE && preferredTotal > 0) return new Ratio(preferredMatches, preferredTotal);
+        return new Ratio(allMatches, allTotal);
+    }
+
+    private boolean isObsidian(BlockState state) {
+        return state.isOf(Blocks.OBSIDIAN);
+    }
+
+    private boolean isRailingBlock(BlockState state) {
+        return !state.isAir() && !state.isReplaceable();
+    }
+
+    private boolean isExcavatedSpace(BlockState state) {
+        return state.isAir() || state.isReplaceable();
+    }
+
+    private boolean isNetherrack(BlockState state) {
+        return state.isOf(Blocks.NETHERRACK);
+    }
+
+    private List<BlockPos> snapshotTemplate(MBPIterator iterator) {
+        if (iterator == null) return Collections.emptyList();
+
+        List<BlockPos> positions = new ArrayList<>();
+        try {
+            while (iterator.hasNext()) {
+                MBlockPos pos = iterator.next();
+                positions.add(new BlockPos(pos.x, pos.y, pos.z));
+            }
+        } catch (StackOverflowError ignored) {
+            return Collections.emptyList();
+        }
+
+        return positions;
+    }
+
+    private record Ratio(int matches, int total) {
+        private static final Ratio EMPTY = new Ratio(0, 0);
+
+        private double value() {
+            return total <= 0 ? 0.0 : (double) matches / total;
+        }
+    }
+
+    private enum DugEndScanResult {
+        CONTINUES_DUG,
+        DUG_END,
+        PAVED_AHEAD
     }
 
     private String directionToKitbotCommand(HorizontalDirection dir) {
         if (dir == null) return null;
 
-        boolean digging = false;
-        THMSystem thmSystem = THMSystem.get();
-        if (thmSystem != null && thmSystem.mode.get() == THMSystem.Mode.HighwayDigging) {
-            digging = true;
-        }
+        boolean digging = inferDugModeForUpdate(false, false);
 
         String base = switch (dir) {
             case North -> "N";
@@ -1757,6 +1974,72 @@ public class HighwayBuilderTHM extends Module {
         };
 
         return digging ? "dug" + base : base;
+    }
+
+    private boolean inferDugModeForUpdate(boolean hasDugContext, boolean hasPavedContext) {
+        if (mc.player == null || mc.world == null) return hasDugContext && !hasPavedContext;
+
+        BlockState floorUnderPlayer = mc.world.getBlockState(mc.player.getBlockPos().down());
+        if (isObsidian(floorUnderPlayer)) return false;
+
+        // Prefer observed structure context over profile or Y-level assumptions.
+        if (hasDugContext && !hasPavedContext) return true;
+        if (hasPavedContext && !hasDugContext) return false;
+
+        int playerY = mc.player.getBlockY();
+        if (playerY == HIGHWAY_FLOOR_Y) return true;      // Y=119 => dug
+        if (playerY == HIGHWAY_RAILING_Y) return false;   // Y=120 => paved
+
+        if (hasDugContext && hasPavedContext) {
+            if (isObsidian(floorUnderPlayer)) return false;
+            if (isNetherrack(floorUnderPlayer)) return true;
+        }
+
+        return playerY <= HIGHWAY_FLOOR_Y;
+    }
+
+    private void buildKitbotUpdateEnclosure() {
+        if (mc.player == null || mc.world == null) return;
+
+        BlockPos base = mc.player.getBlockPos();
+        List<BlockPos> enclosureTargets = List.of(
+            base.north(),
+            base.south(),
+            base.east(),
+            base.west(),
+            base.north().up(),
+            base.south().up(),
+            base.east().up(),
+            base.west().up(),
+            base.up(2)
+        );
+
+        int placed = 0;
+        int attempted = 0;
+
+        for (BlockPos target : enclosureTargets) {
+            if (target.equals(base) || target.equals(base.up())) continue;
+
+            BlockState state = mc.world.getBlockState(target);
+            if (!state.isAir() && !state.isReplaceable()) continue;
+            if (!BlockUtils.canPlace(target)) continue;
+
+            int slot = State.Forward.findAndMoveToHotbar(
+                this,
+                stack -> stack.getItem() instanceof BlockItem && trashItems.get().contains(stack.getItem()),
+                false
+            );
+            if (slot == -1) {
+                warning("KitBot enclosure: no trash blocks available in inventory/hotbar.");
+                break;
+            }
+
+            attempted++;
+            if (tryPlaceBlock(target, slot, rotation.get().place)) placed++;
+        }
+
+        if (placed > 0) info("KitBot enclosure placed %d/%d trash blocks.", placed, attempted);
+        else warning("KitBot enclosure could not place any trash blocks.");
     }
 
 
