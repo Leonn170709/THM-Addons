@@ -7,11 +7,16 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.movement.elytrafly.ElytraFly;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
+import meteordevelopment.meteorclient.utils.player.FindItemResult;
+import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.ArrowItem;
+import net.minecraft.item.Items;
+import net.minecraft.util.Hand;
 import net.minecraft.util.math.Vec3d;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.RotationUtils;
@@ -20,13 +25,12 @@ import java.util.Set;
 
 public class ElytraUAV extends Module {
 
-    private final SettingGroup sgGeneral  = settings.getDefaultGroup();
+    private final SettingGroup sgGeneral   = settings.getDefaultGroup();
     private final SettingGroup sgTargeting = settings.createGroup("Targeting");
-    private final SettingGroup sgFlight   = settings.createGroup("Flight");
+    private final SettingGroup sgFlight    = settings.createGroup("Flight");
 
-    // --- Targeting ---
+    // ── Targeting ────────────────────────────────────────────────────────────
 
-    /** Which entity types to target. Defaults to players only. */
     private final Setting<Set<EntityType<?>>> entities = sgTargeting.add(new EntityTypeListSetting.Builder()
         .name("entities")
         .description("Entity types to target.")
@@ -34,72 +38,107 @@ public class ElytraUAV extends Module {
         .defaultValue(EntityType.PLAYER)
         .build());
 
-    // --- General ---
+    // ── General ──────────────────────────────────────────────────────────────
 
-    /** Ticks to hold the bow before releasing. 20 = full power arrow. */
+    private final Setting<Mode> mode = sgGeneral.add(new EnumSetting.Builder<Mode>()
+        .name("mode")
+        .description("Bow: charge and release an arrow mid-dive. Mace: removes elytra for a smash attack, then re-equips to fly back up.")
+        .defaultValue(Mode.Bow)
+        .build());
+
+    private final Setting<Boolean> silentMaceSwap = sgGeneral.add(new BoolSetting.Builder()
+        .name("silent-mace-swap")
+        .description("Swap to the mace silently (server-side only) so other players don't see the hotbar change.")
+        .defaultValue(true)
+        .visible(() -> mode.get() == Mode.Mace)
+        .build());
+
     private final Setting<Integer> charge = sgGeneral.add(new IntSetting.Builder()
-        .name("charge")
-        .description("Ticks to hold bow before releasing. 20 ticks = full power.")
-        .defaultValue(20).range(5, 40).build());
+        .name("bow-charge-ticks")
+        .description("How many ticks to hold the bow before releasing. 20 ticks = full-power arrow.")
+        .defaultValue(20)
+        .range(5, 40)
+        .visible(() -> mode.get() == Mode.Bow)
+        .build());
 
-    /** How many blocks above the target to hover before diving. */
     private final Setting<Double> hoverHeight = sgGeneral.add(new DoubleSetting.Builder()
         .name("hover-height")
-        .description("Blocks above the target to hover at before diving.")
-        .defaultValue(40.0).build());
+        .description("How many blocks above the target to hover before diving.")
+        .defaultValue(40.0)
+        .min(10.0)
+        .build());
 
-    /** Height above target at which the dive ends and climb begins. */
     private final Setting<Double> diveEndHeight = sgGeneral.add(new DoubleSetting.Builder()
         .name("dive-end-height")
-        .description("Height above target where the dive stops and the climb starts.")
-        .defaultValue(8.0).build());
+        .description("How many blocks above the target to perform the attack. For Mace, keep this high enough to re-equip the elytra safely.")
+        .defaultValue(8.0).min(1.0)
+        .build());
 
-    /**
-     * Horizontal tolerance. Player must be within this distance
-     * before the dive starts. Lower values = more precise hovering.
-     */
     private final Setting<Double> hoverRadius = sgGeneral.add(new DoubleSetting.Builder()
         .name("hover-radius")
-        .description("Horizontal tolerance above target. Lower = more precise positioning.")
-        .defaultValue(1.5).min(0.1).build());
+        .description("Max horizontal distance from the target before the module corrects position.")
+        .defaultValue(1.5)
+        .min(0.1)
+        .build());
 
-    /** Vertical tolerance for hover/dive positioning. */
     private final Setting<Double> heightTolerance = sgGeneral.add(new DoubleSetting.Builder()
         .name("height-tolerance")
-        .description("Vertical tolerance in blocks.")
-        .defaultValue(1.0).min(0.1).build());
+        .description("Accepted vertical deviation in blocks before altitude correction kicks in.")
+        .defaultValue(1.0)
+        .min(0.1)
+        .build());
 
+    // ── Mace-specific ────────────────────────────────────────────────────────
 
-    // --- Flight ---
+    /**
+     * How many ticks to wait after removing the elytra before swinging the
+     * mace. Gives the server time to register the free-fall so the smash
+     * bonus applies.
+     */
+    private final Setting<Integer> elytraRemoveTicks = sgGeneral.add(new IntSetting.Builder()
+        .name("elytra-remove-ticks")
+        .description("Ticks to wait (in free-fall) after removing the elytra before swinging the mace. More ticks = more fall velocity = harder smash.")
+        .defaultValue(6)
+        .range(1, 20)
+        .visible(() -> mode.get() == Mode.Mace)
+        .build());
 
-    /** Horizontal speed applied to ElytraFly on activation. */
+    // ── Flight ────────────────────────────────────────────────────────────────
+
     private final Setting<Double> horizontalSpeed = sgFlight.add(new DoubleSetting.Builder()
         .name("horizontal-speed")
-        .description("Horizontal speed set on ElytraFly when the module activates.")
-        .defaultValue(1.5).min(0).build());
+        .description("ElytraFly horizontal speed applied when this module activates.")
+        .defaultValue(1.5).min(0.1)
+        .build());
 
-    /** Vertical speed applied to ElytraFly on activation. */
     private final Setting<Double> verticalSpeed = sgFlight.add(new DoubleSetting.Builder()
         .name("vertical-speed")
-        .description("Vertical speed set on ElytraFly when the module activates.")
-        .defaultValue(2.5).min(0).build());
+        .description("ElytraFly vertical speed applied when this module activates.")
+        .defaultValue(2.5).min(0.1)
+        .build());
 
-    // -------------------------------------------------------------------------
+    // ─────────────────────────────────────────────────────────────────────────
 
-    private enum State { APPROACH, HOVER, DIVE, CLIMB }
+    private enum State { APPROACH, HOVER, DIVE, SMASH_WAIT, CLIMB }
+    private enum Mode  { Bow, Mace }
 
-    private State         currentState = State.APPROACH;
-    private LivingEntity  targetEntity = null;
-    private int           chargeTimer  = 0;
-    private boolean       hasShot      = false;
-    private int           hoverStableTicks = 0;
-    private double        minDiveVy = 0.0;
+    private State        currentState     = State.APPROACH;
+    private LivingEntity targetEntity     = null;
+    private int          chargeTimer      = 0;
+    private boolean      hasShot          = false;
+    private int          hoverStableTicks = 0;
+    private double       minDiveVy        = 0.0;
+
+    // Mace smash helpers
+    private int          smashWaitTimer   = 0;   // counts down after elytra removal
+    private int          elytraChestSlot  = -1;  // chest-inventory slot of the stored elytra
 
     public ElytraUAV() {
-        super(THMAddon.PVP, "Elytra-UAV", "Hovers above a target and dive-bombs them with a charged arrow.");
+        super(THMAddon.PVP, "Elytra-UAV",
+            "Hovers above a target and dive-bombs it. Bow mode fires a charged arrow; Mace mode removes the elytra for a smash attack then re-equips it.");
     }
 
-    // -------------------------------------------------------------------------
+    // ─────────────────────────────────────────────────────────────────────────
 
     @Override
     public void onActivate() {
@@ -109,11 +148,7 @@ public class ElytraUAV extends Module {
             toggle();
             return;
         }
-
-        currentState = State.APPROACH;
-        chargeTimer  = 0;
-        hasShot      = false;
-        hoverStableTicks = 0;
+        resetState();
 
         ElytraFly elytraFly = Modules.get().get(ElytraFly.class);
         if (elytraFly != null) {
@@ -124,73 +159,56 @@ public class ElytraUAV extends Module {
 
     @Override
     public void onDeactivate() {
+        // If we removed the elytra and never got to re-equip it, put it back.
+        tryReequipElytra();
         releaseAll();
     }
 
-    // -------------------------------------------------------------------------
+    // ─────────────────────────────────────────────────────────────────────────
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
-        if (mc.player == null || mc.world == null || !mc.player.isGliding()) return;
+        if (mc.player == null || mc.world == null) return;
 
-        // Re-acquire if target is gone
+        // During SMASH_WAIT and CLIMB the player may not be gliding yet.
+        if (currentState != State.SMASH_WAIT && currentState != State.CLIMB && !mc.player.isGliding()) return;
+
+        // Re-acquire target if needed.
         if (targetEntity == null || !targetEntity.isAlive()) {
             targetEntity = findClosestTarget();
             if (targetEntity == null) return;
         }
 
-        // Use the true bounding box center — getPos() is feet-only and can be
-        // offset from the actual hitbox center, causing the "one block west" miss.
         Vec3d targetPos = targetEntity.getBoundingBox().getCenter();
         Vec3d targetAim = targetEntity.getEyePos();
 
-        double playerY    = mc.player.getY();
-        double desiredY   = targetPos.y + hoverHeight.get();
-        double distXZ     = Math.hypot(mc.player.getX() - targetPos.x, mc.player.getZ() - targetPos.z);
-        double tolY       = heightTolerance.get();
+        double playerY   = mc.player.getY();
+        double desiredY  = targetPos.y + hoverHeight.get();
+        double distXZ    = Math.hypot(mc.player.getX() - targetPos.x, mc.player.getZ() - targetPos.z);
+        double tolY      = heightTolerance.get();
 
         switch (currentState) {
 
-            // -----------------------------------------------------------------
-            // APPROACH: Fly toward the target horizontally and gain altitude.
-            // Transitions to HOVER once inside the dead-zone at correct height.
-            // A minimum effective radius of 2.0 is enforced so floating-point
-            // imprecision never prevents the transition even if the setting is 0.
-            // -----------------------------------------------------------------
+            // ── APPROACH ─────────────────────────────────────────────────────
             case APPROACH -> {
                 mc.options.useKey.setPressed(false);
-                // Aim at target for precise movement
-                float[] rot = RotationUtils.getRotationsTo(mc.player.getEyePos(), targetAim);
-                mc.player.setYaw(rot[0]);
-                mc.player.setPitch(rot[1]);
-
+                aimAt(targetAim);
                 applyHorizontalCorrection(targetPos, hoverRadius.get());
                 applyVerticalControl(desiredY, tolY);
 
                 if (distXZ <= hoverRadius.get()) {
-                    currentState = State.HOVER;
+                    currentState     = State.HOVER;
                     hoverStableTicks = 0;
                 }
             }
 
-            // -----------------------------------------------------------------
-            // HOVER: Player is directly above the target.
-            // Look straight down, hold altitude, NO horizontal input whatsoever.
-            // If we drift out of the dead-zone, fall back to APPROACH.
-            // -----------------------------------------------------------------
+            // ── HOVER ─────────────────────────────────────────────────────────
             case HOVER -> {
                 mc.options.useKey.setPressed(false);
-                float[] rot = RotationUtils.getRotationsTo(mc.player.getEyePos(), targetAim);
-                mc.player.setYaw(rot[0]);
-                mc.player.setPitch(rot[1]);
+                aimAt(targetAim);
 
                 if (distXZ > hoverRadius.get()) applyHorizontalCorrection(targetPos, hoverRadius.get());
-                else {
-                    mc.options.forwardKey.setPressed(false);
-                    mc.options.backKey.setPressed(false);
-                    mc.options.leftKey.setPressed(false);
-                    mc.options.rightKey.setPressed(false);
-                }
+                else stopHorizontal();
                 applyVerticalControl(desiredY, tolY);
 
                 boolean stableY = Math.abs(playerY - desiredY) <= tolY;
@@ -201,111 +219,228 @@ public class ElytraUAV extends Module {
                     currentState = State.DIVE;
                     chargeTimer  = 0;
                     hasShot      = false;
-                    hoverStableTicks = 0;
-                    minDiveVy = 0.0;
+                    smashWaitTimer = 0;
+                    minDiveVy    = 0.0;
                 }
             }
 
-            // -----------------------------------------------------------------
-            // DIVE: Look straight down, charge bow, descend fast.
-            // Release arrow when fully charged OR approaching abort height.
-            // -----------------------------------------------------------------
+            // ── DIVE ──────────────────────────────────────────────────────────
             case DIVE -> {
-                float[] rot = RotationUtils.getRotationsTo(mc.player.getEyePos(), targetAim);
-                mc.player.setYaw(rot[0]);
-                mc.player.setPitch(rot[1]);
+                aimAt(targetAim);
 
                 if (distXZ > hoverRadius.get()) applyHorizontalCorrection(targetPos, hoverRadius.get());
-                else {
-                    mc.options.forwardKey.setPressed(false);
-                    mc.options.backKey.setPressed(false);
-                    mc.options.leftKey.setPressed(false);
-                    mc.options.rightKey.setPressed(false);
-                }
+                else stopHorizontal();
 
-                boolean hasBow = mc.player.getMainHandStack().getItem() == net.minecraft.item.Items.BOW;
-                boolean hasArrows = mc.player.getAbilities().creativeMode
-                    || meteordevelopment.meteorclient.utils.player.InvUtils.find(itemStack -> itemStack.getItem() instanceof net.minecraft.item.ArrowItem).found();
-                if (!hasBow || !hasArrows) {
+                if (!canDiveAttack()) {
                     mc.options.useKey.setPressed(false);
                     currentState = State.HOVER;
                     break;
                 }
 
-                // Charge bow
-                mc.options.useKey.setPressed(true);
-                chargeTimer++;
+                double diveY        = targetPos.y + diveEndHeight.get();
+                boolean inAttackBand = playerY <= diveY + tolY;
 
-                boolean fullyCharged = chargeTimer >= charge.get();
-                double diveY = targetPos.y + diveEndHeight.get();
-                boolean tooLow  = playerY < diveY - tolY;
-                boolean tooHigh = playerY > diveY + tolY;
+                if (mode.get() == Mode.Bow) {
+                    // Hold use-key to charge the bow.
+                    mc.options.useKey.setPressed(true);
+                    chargeTimer++;
 
-                // Descend until diveY, then hold
-                mc.options.jumpKey.setPressed(tooLow);
-                mc.options.sneakKey.setPressed(tooHigh);
+                    boolean fullyCharged = chargeTimer >= charge.get();
+                    double  vy           = mc.player.getVelocity().y;
+                    if (chargeTimer == 1) minDiveVy = vy;
+                    if (vy < minDiveVy) minDiveVy = vy;
+                    boolean passedPeak = vy > minDiveVy + 0.02;
 
-                // Release at peak downward velocity (ignore charge) or when fully charged.
-                double vy = mc.player.getVelocity().y;
-                if (chargeTimer == 1) minDiveVy = vy;
-                if (vy < minDiveVy) minDiveVy = vy;
-                boolean passedPeak = vy > minDiveVy + 0.02;
-                boolean inReleaseBand = playerY <= diveY + tolY;
+                    // Descend toward diveY.
+                    mc.options.jumpKey.setPressed(playerY < diveY - tolY);
+                    mc.options.sneakKey.setPressed(playerY > diveY + tolY);
 
-                if (!hasShot && inReleaseBand && (passedPeak || fullyCharged)) {
-                    mc.interactionManager.stopUsingItem(mc.player);
+                    if (!hasShot && inAttackBand && (passedPeak || fullyCharged)) {
+                        mc.interactionManager.stopUsingItem(mc.player);
+                        mc.options.useKey.setPressed(false);
+                        hasShot      = true;
+                        currentState = State.CLIMB;
+                    }
+
+                } else {
+                    // Mace: just descend — the actual hit happens in SMASH_WAIT after elytra removal.
                     mc.options.useKey.setPressed(false);
-                    hasShot = true;
+                    mc.options.jumpKey.setPressed(playerY < diveY - tolY);
+                    mc.options.sneakKey.setPressed(playerY > diveY + tolY);
+
+                    if (inAttackBand) {
+                        // Remove the elytra so the server counts us as falling.
+                        removeElytra();
+                        currentState   = State.SMASH_WAIT;
+                        smashWaitTimer = 0;
+                        releaseAll();
+                    }
+                }
+            }
+
+            // ── SMASH_WAIT ────────────────────────────────────────────────────
+            // Elytra is off; we are in free-fall. Wait a few ticks so the server
+            // accumulates fall distance, then swing the mace.
+            case SMASH_WAIT -> {
+                aimAt(targetAim);
+                smashWaitTimer++;
+
+                if (smashWaitTimer >= elytraRemoveTicks.get()) {
+                    // Perform the smash.
+                    performMaceSmash();
+                    // Re-equip the elytra immediately so ElytraFly can kick in.
+                    tryReequipElytra();
                     currentState = State.CLIMB;
                 }
             }
 
-            // -----------------------------------------------------------------
-            // CLIMB: Hold space and go straight up.
-            // If already at or above hover height (e.g. started the module from
-            // high up), skip directly to APPROACH so no time is wasted.
-            // -----------------------------------------------------------------
+            // ── CLIMB ─────────────────────────────────────────────────────────
             case CLIMB -> {
                 mc.options.useKey.setPressed(false);
-                if (playerY >= desiredY - tolY) {
-                    // Already high enough — re-align horizontally before next dive
-                    currentState = State.APPROACH;
-                    chargeTimer  = 0;
-                    hasShot      = false;
+
+                // If not gliding yet (elytra was just re-equipped), re-enable
+                // ElytraFly as a fallback and keep jumping to get airborne.
+                if (!mc.player.isGliding()) {
+                    ElytraFly elytraFly = Modules.get().get(ElytraFly.class);
+                    if (elytraFly != null && !elytraFly.isActive()) elytraFly.toggle();
+                    mc.options.jumpKey.setPressed(true);
                     return;
                 }
 
-                float[] rot = RotationUtils.getRotationsTo(mc.player.getEyePos(), targetAim);
-                mc.player.setYaw(rot[0]);
-                mc.player.setPitch(rot[1]);
-
+                if (playerY >= desiredY - tolY) {
+                    resetState();
+                    currentState = State.APPROACH;
+                    return;
+                }
+                aimAt(targetAim);
                 applyHorizontalCorrection(targetPos, hoverRadius.get());
                 applyVerticalControl(desiredY, tolY);
             }
         }
     }
 
-    // -------------------------------------------------------------------------
+    // ─────────────────────────────────────────────────────────────────────────
+    // Mace helpers
 
-    /** Releases every movement and action key. */
-    private void releaseAll() {
+    /**
+     * PlayerScreenHandler container slot layout:
+     *   5 = helmet, 6 = chestplate, 7 = leggings, 8 = boots
+     *   9–35  = main inventory (inventory indices 9–35)
+     *   36–44 = hotbar (inventory indices 0–8)
+     *
+     * So for a main-inventory slot at inventory index i (9 ≤ i ≤ 35):
+     *   container slot = i          (they share the same number in PlayerScreenHandler)
+     */
+    private static final int CONTAINER_CHEST_SLOT = 6;
+
+    /**
+     * Removes the elytra from the chest armour slot into a free main-inventory
+     * slot so the server registers us as falling (no elytra = no glide).
+     */
+    private void removeElytra() {
+        if (mc.player == null || mc.interactionManager == null) return;
+        if (mc.player.getInventory().getStack(38).getItem() != Items.ELYTRA) return;
+
+        // Find a free MAIN-inventory slot (inventory indices 9–35; skip hotbar 0–8).
+        elytraChestSlot = -1;
+        for (int i = 9; i < 36; i++) {
+            if (mc.player.getInventory().getStack(i).isEmpty()) {
+                elytraChestSlot = i;
+                break;
+            }
+        }
+        if (elytraChestSlot == -1) return; // No space — abort.
+
+        // In PlayerScreenHandler, main-inv index i (9-35) == container slot i.
+        int containerDest = elytraChestSlot;
+
+        // Pick up elytra from chestplate slot onto cursor.
+        mc.interactionManager.clickSlot(
+            mc.player.playerScreenHandler.syncId,
+            CONTAINER_CHEST_SLOT,
+            0,
+            net.minecraft.screen.slot.SlotActionType.PICKUP,
+            mc.player
+        );
+        // Place cursor item into the free inventory slot.
+        mc.interactionManager.clickSlot(
+            mc.player.playerScreenHandler.syncId,
+            containerDest,
+            0,
+            net.minecraft.screen.slot.SlotActionType.PICKUP,
+            mc.player
+        );
+    }
+
+    /** Puts the elytra back into the chest armour slot. */
+    private void tryReequipElytra() {
+        if (mc.player == null || mc.interactionManager == null || elytraChestSlot == -1) return;
+        if (mc.player.getInventory().getStack(elytraChestSlot).getItem() != Items.ELYTRA) {
+            elytraChestSlot = -1;
+            return;
+        }
+
+        int containerSrc = elytraChestSlot; // main-inv index i (9-35) == container slot i
+
+        // Pick up elytra from where we stashed it.
+        mc.interactionManager.clickSlot(
+            mc.player.playerScreenHandler.syncId,
+            containerSrc,
+            0,
+            net.minecraft.screen.slot.SlotActionType.PICKUP,
+            mc.player
+        );
+        // Place it back into the chestplate slot.
+        mc.interactionManager.clickSlot(
+            mc.player.playerScreenHandler.syncId,
+            CONTAINER_CHEST_SLOT,
+            0,
+            net.minecraft.screen.slot.SlotActionType.PICKUP,
+            mc.player
+        );
+        elytraChestSlot = -1;
+    }
+
+    private void performMaceSmash() {
+        FindItemResult mace = InvUtils.findInHotbar(Items.MACE);
+        if (!mace.found() || mc.interactionManager == null || targetEntity == null || !targetEntity.isAlive()) return;
+
+        int selectedSlot = mc.player.getInventory().getSelectedSlot();
+        boolean swapped  = selectedSlot != mace.slot() && InvUtils.swap(mace.slot(), silentMaceSwap.get());
+
+        mc.interactionManager.attackEntity(mc.player, targetEntity);
+        mc.player.swingHand(Hand.MAIN_HAND);
+
+        if (silentMaceSwap.get() && swapped) InvUtils.swapBack();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Movement helpers
+
+    private void aimAt(Vec3d target) {
+        float[] rot = RotationUtils.getRotationsTo(mc.player.getEyePos(), target);
+        mc.player.setYaw(rot[0]);
+        mc.player.setPitch(rot[1]);
+    }
+
+    private void stopHorizontal() {
         mc.options.forwardKey.setPressed(false);
         mc.options.backKey.setPressed(false);
         mc.options.leftKey.setPressed(false);
         mc.options.rightKey.setPressed(false);
+    }
+
+    private void releaseAll() {
+        stopHorizontal();
         mc.options.jumpKey.setPressed(false);
         mc.options.sneakKey.setPressed(false);
         mc.options.useKey.setPressed(false);
     }
 
     private void applyHorizontalCorrection(Vec3d targetPos, double tolerance) {
-        double dx = targetPos.x - mc.player.getX();
-        double dz = targetPos.z - mc.player.getZ();
-
-        double dist = Math.hypot(dx, dz);
-        boolean move = dist > tolerance;
-
-        // Forward-only correction to prevent left/right oscillation.
+        double dx   = targetPos.x - mc.player.getX();
+        double dz   = targetPos.z - mc.player.getZ();
+        boolean move = Math.hypot(dx, dz) > tolerance;
         mc.options.forwardKey.setPressed(move);
         mc.options.backKey.setPressed(false);
         mc.options.rightKey.setPressed(false);
@@ -313,16 +448,31 @@ public class ElytraUAV extends Module {
     }
 
     private void applyVerticalControl(double targetY, double tolerance) {
-        boolean tooLow = mc.player.getY() < targetY - tolerance;
-        boolean tooHigh = mc.player.getY() > targetY + tolerance;
-        mc.options.jumpKey.setPressed(tooLow);
-        mc.options.sneakKey.setPressed(tooHigh);
+        mc.options.jumpKey.setPressed(mc.player.getY() < targetY - tolerance);
+        mc.options.sneakKey.setPressed(mc.player.getY() > targetY + tolerance);
     }
 
-    /**
-     * Returns the closest living, attackable entity whose type is in the
-     * entities setting, excluding the local player and any friends.
-     */
+    private boolean canDiveAttack() {
+        if (mode.get() == Mode.Bow) {
+            boolean hasBow    = mc.player.getMainHandStack().getItem() == Items.BOW;
+            boolean hasArrows = mc.player.getAbilities().creativeMode
+                || InvUtils.find(stack -> stack.getItem() instanceof ArrowItem).found();
+            return hasBow && hasArrows;
+        }
+        // Mace mode: need both mace in hotbar and elytra equipped (so we can remove it).
+        boolean hasMace   = InvUtils.findInHotbar(Items.MACE).found();
+        boolean hasElytra = mc.player.getInventory().getStack(38).getItem() == Items.ELYTRA;
+        return hasMace && hasElytra;
+    }
+
+    private void resetState() {
+        chargeTimer      = 0;
+        hasShot          = false;
+        hoverStableTicks = 0;
+        smashWaitTimer   = 0;
+        minDiveVy        = 0.0;
+    }
+
     private LivingEntity findClosestTarget() {
         LivingEntity closest = null;
         double minDist = Double.MAX_VALUE;
