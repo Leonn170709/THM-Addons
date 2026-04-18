@@ -106,6 +106,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new TunnelMinerModule());
         Modules.get().add(new SignRender());
         Modules.get().add(new AfkLogout());
+        //Modules.get().add(new PingSpeed());
         Modules.get().add(new FlightBypass());
         Modules.get().add(new KitbotFrontend());
         Modules.get().add(new ChestTrackerModule());
