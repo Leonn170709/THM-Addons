@@ -163,6 +163,8 @@ public class AfkLogout extends Module {
     private final java.util.ArrayDeque<Double> bpsBuffer = new java.util.ArrayDeque<>();
     private double bpsBufferSum = 0.0;
     private double lastSampledDistance = -1.0;
+    private long smoothedEtaMs = -1L;
+    private static final double ETA_SMOOTH_ALPHA = 0.05; // lower = smoother, higher = more reactive
 
     public AfkLogout() {
         super(THMAddon.MAIN, "afk-logout", "Logs out when you reach certain conditions. Useful for afk travelling.");
@@ -339,7 +341,11 @@ public class AfkLogout extends Module {
         bpsBuffer.clear();
         bpsBufferSum = 0.0;
         lastSampledDistance = -1.0;
+        lastSampleTimeMs = -1L;
+        smoothedEtaMs = -1L;
     }
+
+    private long lastSampleTimeMs = -1L;
 
     private void updateMovementSpeedWindow() {
         if (!enableCoordBased.get() || PlayerUtils.getDimension() != dimension.get()) {
@@ -347,29 +353,31 @@ public class AfkLogout extends Module {
             return;
         }
 
+        long now = System.currentTimeMillis();
         double remaining = calculateDistanceToTargetPrecise();
 
-        if (lastSampledDistance < 0.0) {
+        if (lastSampledDistance < 0.0 || lastSampleTimeMs < 0L) {
             lastSampledDistance = remaining;
+            lastSampleTimeMs = now;
             return;
         }
 
-        // Blocks moved toward target this tick, converted to blocks/second (20 tps)
-        double delta = lastSampledDistance - remaining;
-        double bps = delta * 20.0;
+        long dtMs = now - lastSampleTimeMs;
+        if (dtMs <= 0L) return;
 
-        // Only record samples where we're actually moving toward the target
+        double delta = lastSampledDistance - remaining;
+        double bps = (delta / dtMs) * 1000.0; // real blocks per real second
+
         if (bps > 0.0) {
             bpsBuffer.addLast(bps);
             bpsBufferSum += bps;
-
-            // Cap buffer at 1 hour of ticks to bound memory usage
             if (bpsBuffer.size() > SPEED_BUFFER_MAX) {
                 bpsBufferSum -= bpsBuffer.removeFirst();
             }
         }
 
         lastSampledDistance = remaining;
+        lastSampleTimeMs = now;
     }
 
     private double getAverageApproachSpeedBps() {
@@ -397,22 +405,39 @@ public class AfkLogout extends Module {
     }
 
     private long calculateEstimatedTimeRemainingMs() {
+        long rawEta;
         if (enableCoordBased.get() && PlayerUtils.getDimension() == dimension.get()) {
-            long coordEta = estimateTimeToTargetMs();
-            if (coordEta >= 0L) return coordEta;
-            // Buffer not ready yet — fall back to time-based if available
+            rawEta = estimateTimeToTargetMs();
+            if (rawEta < 0L) {
+                // Buffer not ready yet — fall back to time-based if available
+                if (enableTimeBased.get()) return calculateTimeUntilLogoutMs();
+                return -1L;
+            }
+        } else if (enableTimeBased.get()) {
+            return calculateTimeUntilLogoutMs(); // timer is already smooth, no EMA needed
+        } else {
+            smoothedEtaMs = -1L;
+            return -1L;
         }
-        if (enableTimeBased.get()) return calculateTimeUntilLogoutMs();
-        return -1L;
+
+        // Apply EMA smoothing to coord-based ETA
+        if (smoothedEtaMs < 0L) {
+            smoothedEtaMs = rawEta; // seed with first real value
+        } else {
+            smoothedEtaMs = (long) (ETA_SMOOTH_ALPHA * rawEta + (1.0 - ETA_SMOOTH_ALPHA) * smoothedEtaMs);
+        }
+        return smoothedEtaMs;
     }
 
     private String formatRemainingTime(long remainingMs) {
         if (remainingMs < 0L) return "N/A";
         long totalSeconds = (long) Math.ceil(remainingMs / 1000.0);
-        long hours = totalSeconds / 3600;
+        long days    = totalSeconds / 86400;
+        long hours   = (totalSeconds % 86400) / 3600;
         long minutes = (totalSeconds % 3600) / 60;
         long seconds = totalSeconds % 60;
         if (totalSeconds < 10L * 60L) return minutes + "m " + seconds + "s";
+        if (days > 0)  return days + "d " + hours + "h " + minutes + "m " + seconds + "s";
         if (hours > 0) return hours + "h " + minutes + "m " + seconds + "s";
         return minutes + "m " + seconds + "s";
     }
