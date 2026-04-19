@@ -107,6 +107,9 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new SignRender());
         Modules.get().add(new AfkLogout());
         //Modules.get().add(new PingSpeed());
+        if (isClassPresent("xyz.thm.addon.modules.BoatNoclip")) {
+            Modules.get().add(new BoatNoclip());
+        }
         Modules.get().add(new FlightBypass());
         Modules.get().add(new KitbotFrontend());
         Modules.get().add(new ChestTrackerModule());
@@ -170,5 +173,14 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
     @Override
     public GithubRepo getRepo() {
         return new GithubRepo("Leonn170709", "THM-Addons", "1.21.11", null);
+    }
+
+    private static boolean isClassPresent(String className) {
+        try {
+            Class.forName(className);
+            return true;
+        } catch (ClassNotFoundException ignored) {
+            return false;
+        }
     }
 }

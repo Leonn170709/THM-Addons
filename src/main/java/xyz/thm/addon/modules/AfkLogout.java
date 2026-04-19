@@ -18,8 +18,11 @@ import xyz.thm.addon.utils.THMUtils;
 
 public class AfkLogout extends Module {
     private static final long COORD_LOGOUT_DELAY_MS = 2_000L;
-    private static final long SPEED_WINDOW_MS = 5L * 60L * 1000L;
-    private static final long MIN_SPEED_WINDOW_MS = 1000L;
+
+    // Growing buffer: up to 1 hour of ticks (20 tps * 3600s), min 40 samples (2s) before first estimate
+    private static final int SPEED_BUFFER_MAX = 72_000;
+    private static final int SPEED_BUFFER_MIN = 40;
+
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
     // Time-based logout settings
@@ -143,6 +146,7 @@ public class AfkLogout extends Module {
         .defaultValue(true)
         .build()
     );
+
     // Internal tracking for time-based logout
     private long moduleActivationTime = 0;
 
@@ -155,21 +159,10 @@ public class AfkLogout extends Module {
     private long pendingDelayedLogoutAtMs;
     public long estimatedTimeRemainingMs = -1L;
 
-    private static final class SpeedSample {
-        private long dtMs;
-        private double delta;
-
-        private SpeedSample(long dtMs, double delta) {
-            this.dtMs = dtMs;
-            this.delta = delta;
-        }
-    }
-
-    private final java.util.ArrayDeque<SpeedSample> speedSamples = new java.util.ArrayDeque<>();
-    private double speedDeltaSum = 0.0;
-    private long speedTimeSumMs = 0L;
-    private long lastSpeedSampleMs = 0L;
-    private double lastRemainingDistance = 0.0;
+    // Growing buffer speed tracking — more accurate the longer the module runs
+    private final java.util.ArrayDeque<Double> bpsBuffer = new java.util.ArrayDeque<>();
+    private double bpsBufferSum = 0.0;
+    private double lastSampledDistance = -1.0;
 
     public AfkLogout() {
         super(THMAddon.MAIN, "afk-logout", "Logs out when you reach certain conditions. Useful for afk travelling.");
@@ -202,7 +195,7 @@ public class AfkLogout extends Module {
         // Update elytra count for HUD/monitoring
         usableElytras = countUsableElytras();
 
-        // Update estimated time remaining (uses movement speed for coord-based)
+        // Update estimated time remaining
         estimatedTimeRemainingMs = calculateEstimatedTimeRemainingMs();
 
         if (pendingDelayedLogout) {
@@ -266,11 +259,19 @@ public class AfkLogout extends Module {
         double playerZ = mc.player.getZ();
         double targetX = xCoords.get();
         double targetZ = zCoords.get();
-
-        // Calculate Euclidean distance
         double deltaX = playerX - targetX;
         double deltaZ = playerZ - targetZ;
         return (int) (Math.sqrt(deltaX * deltaX + deltaZ * deltaZ) - radius.get());
+    }
+
+    private double calculateDistanceToTargetPrecise() {
+        double playerX = mc.player.getX();
+        double playerZ = mc.player.getZ();
+        double targetX = xCoords.get();
+        double targetZ = zCoords.get();
+        double deltaX = playerX - targetX;
+        double deltaZ = playerZ - targetZ;
+        return Math.max(0.0, Math.sqrt(deltaX * deltaX + deltaZ * deltaZ) - radius.get());
     }
 
     private boolean isTimeoutReached() {
@@ -289,17 +290,14 @@ public class AfkLogout extends Module {
 
     private boolean shouldDelayCoordinateLogoutForHighwayBuilder() {
         if (!disableHighwayBuilderBeforeCoordLogout.get()) return false;
-
         HighwayBuilderTHM highwayBuilder = Modules.get().get(HighwayBuilderTHM.class);
         return highwayBuilder != null && highwayBuilder.isActive();
     }
 
     private void startDelayedCoordinateLogout(String reason) {
         if (pendingDelayedLogout) return;
-
         HighwayBuilderTHM highwayBuilder = Modules.get().get(HighwayBuilderTHM.class);
         if (highwayBuilder != null && highwayBuilder.isActive()) highwayBuilder.disable();
-
         pendingDelayedLogout = true;
         pendingDelayedLogoutReason = reason;
         pendingDelayedLogoutAtMs = System.currentTimeMillis() + COORD_LOGOUT_DELAY_MS;
@@ -313,16 +311,10 @@ public class AfkLogout extends Module {
 
     private void logout(String reason) {
         clearPendingDelayedLogout();
-
-        // Toggle AutoReconnect if enabled
         if (toggleAutoReconnect.get() && Modules.get().isActive(AutoReconnect.class)) {
             Modules.get().get(AutoReconnect.class).toggle();
         }
-
-        // Disable this module if auto-toggle is enabled
         if (autoToggle.get()) toggle();
-
-        // Disconnect with the provided reason
         mc.player.networkHandler.onDisconnect(new DisconnectS2CPacket(Text.literal("[AfkLogout] " + reason)));
     }
 
@@ -338,16 +330,15 @@ public class AfkLogout extends Module {
 
     private boolean isUsableElytra(ItemStack stack) {
         if (stack == null || stack.isEmpty() || stack.getItem() != Items.ELYTRA) return false;
-        // Ignore broken elytras or those under 10% durability.
         return THMUtils.getDamage(stack) >= 10.0;
     }
 
+    // ── Speed tracking (growing buffer, more accurate the longer it runs) ─────
+
     private void resetSpeedTracking() {
-        speedSamples.clear();
-        speedDeltaSum = 0.0;
-        speedTimeSumMs = 0L;
-        lastSpeedSampleMs = 0L;
-        lastRemainingDistance = 0.0;
+        bpsBuffer.clear();
+        bpsBufferSum = 0.0;
+        lastSampledDistance = -1.0;
     }
 
     private void updateMovementSpeedWindow() {
@@ -356,67 +347,42 @@ public class AfkLogout extends Module {
             return;
         }
 
-        long now = System.currentTimeMillis();
-        if (lastSpeedSampleMs == 0L) {
-            lastSpeedSampleMs = now;
-            lastRemainingDistance = calculateDistanceToTargetPrecise();
+        double remaining = calculateDistanceToTargetPrecise();
+
+        if (lastSampledDistance < 0.0) {
+            lastSampledDistance = remaining;
             return;
         }
 
-        long dtMs = now - lastSpeedSampleMs;
-        if (dtMs <= 0L) return;
+        // Blocks moved toward target this tick, converted to blocks/second (20 tps)
+        double delta = lastSampledDistance - remaining;
+        double bps = delta * 20.0;
 
-        double remaining = calculateDistanceToTargetPrecise();
-        double delta = lastRemainingDistance - remaining; // positive when moving toward target
+        // Only record samples where we're actually moving toward the target
+        if (bps > 0.0) {
+            bpsBuffer.addLast(bps);
+            bpsBufferSum += bps;
 
-        speedSamples.addLast(new SpeedSample(dtMs, delta));
-        speedTimeSumMs += dtMs;
-        speedDeltaSum += delta;
-
-        trimSpeedWindow();
-
-        lastSpeedSampleMs = now;
-        lastRemainingDistance = remaining;
-    }
-
-    private void trimSpeedWindow() {
-        long excess = speedTimeSumMs - SPEED_WINDOW_MS;
-        while (excess > 0L && !speedSamples.isEmpty()) {
-            SpeedSample sample = speedSamples.peekFirst();
-            if (sample.dtMs <= excess) {
-                speedTimeSumMs -= sample.dtMs;
-                speedDeltaSum -= sample.delta;
-                excess -= sample.dtMs;
-                speedSamples.removeFirst();
-            } else {
-                double ratio = (double) (sample.dtMs - excess) / (double) sample.dtMs;
-                speedDeltaSum -= sample.delta * (1.0 - ratio);
-                sample.delta *= ratio;
-                sample.dtMs -= excess;
-                speedTimeSumMs -= excess;
-                excess = 0L;
+            // Cap buffer at 1 hour of ticks to bound memory usage
+            if (bpsBuffer.size() > SPEED_BUFFER_MAX) {
+                bpsBufferSum -= bpsBuffer.removeFirst();
             }
         }
+
+        lastSampledDistance = remaining;
     }
 
     private double getAverageApproachSpeedBps() {
-        if (speedTimeSumMs < MIN_SPEED_WINDOW_MS) return -1.0;
-        double seconds = speedTimeSumMs / 1000.0;
-        if (seconds <= 0.0) return -1.0;
-        return speedDeltaSum / seconds;
+        if (bpsBuffer.size() < SPEED_BUFFER_MIN) return -1.0;
+        return bpsBufferSum / bpsBuffer.size();
     }
 
-    private long calculateTimeUntilLogoutMs() {
-        long elapsedTime = System.currentTimeMillis() - moduleActivationTime;
-        long timeoutMillis = (long) timeoutMinutes.get() * 60 * 1000;
-        long remaining = timeoutMillis - elapsedTime;
-        return Math.max(0L, remaining);
-    }
+    // ── ETA calculations ──────────────────────────────────────────────────────
 
     private long estimateTimeToTargetMs() {
         if (!enableCoordBased.get()) return -1L;
         if (PlayerUtils.getDimension() != dimension.get()) return -1L;
-        double remainingBlocks = Math.max(0.0, calculateDistanceToTargetPrecise());
+        double remainingBlocks = calculateDistanceToTargetPrecise();
         if (remainingBlocks <= 0.0) return 0L;
         double speedBps = getAverageApproachSpeedBps();
         if (speedBps <= 0.0) return -1L;
@@ -424,22 +390,20 @@ public class AfkLogout extends Module {
         return (long) Math.ceil(seconds * 1000.0);
     }
 
+    private long calculateTimeUntilLogoutMs() {
+        long elapsedTime = System.currentTimeMillis() - moduleActivationTime;
+        long timeoutMillis = (long) timeoutMinutes.get() * 60 * 1000;
+        return Math.max(0L, timeoutMillis - elapsedTime);
+    }
+
     private long calculateEstimatedTimeRemainingMs() {
         if (enableCoordBased.get() && PlayerUtils.getDimension() == dimension.get()) {
-            return estimateTimeToTargetMs();
+            long coordEta = estimateTimeToTargetMs();
+            if (coordEta >= 0L) return coordEta;
+            // Buffer not ready yet — fall back to time-based if available
         }
         if (enableTimeBased.get()) return calculateTimeUntilLogoutMs();
         return -1L;
-    }
-
-    private double calculateDistanceToTargetPrecise() {
-        double playerX = mc.player.getX();
-        double playerZ = mc.player.getZ();
-        double targetX = xCoords.get();
-        double targetZ = zCoords.get();
-        double deltaX = playerX - targetX;
-        double deltaZ = playerZ - targetZ;
-        return Math.max(0.0, Math.sqrt(deltaX * deltaX + deltaZ * deltaZ) - radius.get());
     }
 
     private String formatRemainingTime(long remainingMs) {
@@ -453,10 +417,12 @@ public class AfkLogout extends Module {
         return minutes + "m " + seconds + "s";
     }
 
+    // ── Player range check ────────────────────────────────────────────────────
+
     private boolean isPlayerInRange() {
         if (mc.world == null || mc.player == null) return false;
-        int radius = playerRangeRadius.get();
-        if (radius == 0) {
+        int r = playerRangeRadius.get();
+        if (r == 0) {
             for (PlayerEntity player : mc.world.getPlayers()) {
                 if (player.getUuid().equals(mc.player.getUuid())) continue;
                 lastPlayerInRangeName = player.getGameProfile().name();
@@ -464,8 +430,7 @@ public class AfkLogout extends Module {
             }
             return false;
         }
-
-        double radiusSq = (double) radius * (double) radius;
+        double radiusSq = (double) r * (double) r;
         for (PlayerEntity player : mc.world.getPlayers()) {
             if (player.getUuid().equals(mc.player.getUuid())) continue;
             if (mc.player.squaredDistanceTo(player) <= radiusSq) {
@@ -477,49 +442,19 @@ public class AfkLogout extends Module {
     }
 
     // ── HUD getters ───────────────────────────────────────────────────────────
-    public boolean isTimeBasedEnabled() {
-        return enableTimeBased.get();
-    }
 
-    public boolean isCoordBasedEnabled() {
-        return enableCoordBased.get();
-    }
-
-    public boolean isElytraMonitorEnabled() {
-        return enableElytraMonitor.get();
-    }
-
-    public int getTimeoutMinutes() {
-        return timeoutMinutes.get();
-    }
-
-    public long getEstimatedTimeRemainingMs() { return estimatedTimeRemainingMs; }
-
+    public boolean isTimeBasedEnabled()              { return enableTimeBased.get(); }
+    public boolean isCoordBasedEnabled()             { return enableCoordBased.get(); }
+    public boolean isElytraMonitorEnabled()          { return enableElytraMonitor.get(); }
+    public int getTimeoutMinutes()                   { return timeoutMinutes.get(); }
+    public long getEstimatedTimeRemainingMs()        { return estimatedTimeRemainingMs; }
     public String getEstimatedTimeRemainingDisplay() { return formatRemainingTime(estimatedTimeRemainingMs); }
-
-    public int getDistanceUntilLogout() {
-        return distanceUntilLogout;
-    }
-
-    public int getTargetX() {
-        return xCoords.get();
-    }
-
-    public int getTargetZ() {
-        return zCoords.get();
-    }
-
-    public int getRadius() {
-        return radius.get();
-    }
-
-    public Dimension getTargetDimension() {
-        return dimension.get();
-    }
-
-    public int getElytrasUntilThreshold() {
-        return Math.max(0, usableElytras - elytraThreshold.get());
-    }
+    public int getDistanceUntilLogout()              { return distanceUntilLogout; }
+    public int getTargetX()                          { return xCoords.get(); }
+    public int getTargetZ()                          { return zCoords.get(); }
+    public int getRadius()                           { return radius.get(); }
+    public Dimension getTargetDimension()            { return dimension.get(); }
+    public int getElytrasUntilThreshold()            { return Math.max(0, usableElytras - elytraThreshold.get()); }
 
     @Override
     public String getInfoString() {
@@ -529,7 +464,8 @@ public class AfkLogout extends Module {
             return String.valueOf(usableElytras);
         } else if (enableCoordBased.get()) {
             return String.valueOf(distanceUntilLogout);
-        } else
-        {return String.valueOf(0);}
+        } else {
+            return String.valueOf(0);
+        }
     }
 }
