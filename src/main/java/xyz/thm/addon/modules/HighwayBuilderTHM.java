@@ -449,8 +449,8 @@ public class HighwayBuilderTHM extends Module {
         .name("save-pickaxes")
         .description("How many pickaxes to ensure are saved. Hitting this number in your inventory will trigger a restock or the module toggling off.")
         .defaultValue(1)
-        .range(1, 36)
-        .sliderRange(1, 36)
+        .range(0, 36)
+        .sliderRange(0, 36)
         .visible(() -> !dontBreakTools.get())
         .build()
     );
