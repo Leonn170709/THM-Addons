@@ -319,6 +319,7 @@ public final class ThmMembers {
             case "PvP Lead" -> new Color(218, 109, 255, 255); // Magenta
             case "PvP Branch" -> new Color(255, 0, 4, 255); // Bright Red
             case "Apprentice" -> new Color(95, 70, 53, 255); // Brown
+            case "Retired" -> new Color(0, 1, 1, 255); // Black
             case "Novice" -> new Color(76, 173, 208, 255); // Cyan
             case "Bot" -> new Color(52, 152, 219, 255); // Blue
             case "Kill on Sight", "Kill-on-Sight", "KOS" -> new Color(255, 0, 0, 255); // Red

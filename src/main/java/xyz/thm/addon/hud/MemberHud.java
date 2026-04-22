@@ -100,6 +100,7 @@ public class MemberHud extends HudElement {
             "PvP Lead",
             "PvP Branch",
             "Apprentice",
+            "Retired",
             "Novice",
             "Bot"
         );
