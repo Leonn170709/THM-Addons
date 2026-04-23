@@ -31,6 +31,7 @@ import xyz.thm.addon.modules.*;
 import xyz.thm.addon.modules.chesttracker.ChestTrackerModule;
 import xyz.thm.addon.system.THMTab;
 import xyz.thm.addon.utils.JoinPayload;
+import xyz.thm.addon.utils.KitbotChatRouter;
 import xyz.thm.addon.utils.ServerReconnectService;
 import xyz.thm.addon.utils.ServerStatusHandler;
 import xyz.thm.addon.utils.THMUtils;
@@ -77,9 +78,11 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         MOD_META = FabricLoader.getInstance().getModContainer(MOD_ID).orElseThrow().getMetadata();
         ServerStatusHandler.getInstance();
         ServerReconnectService.getInstance();
+        KitbotChatRouter.getInstance();
 
         // Modules
         Modules.get().add(new HighwayBuilderTHM());
+        Modules.get().add(new ModuleManager());
         Modules.get().add(new AxisViewer());
         Modules.get().add(new BlockCounter());
         Modules.get().add(new DiscordNotifs());
@@ -87,6 +90,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new AntiDrop());
         Modules.get().add(new ScaffoldTHM());
         Modules.get().add(new PaketLimiter());
+        Modules.get().add(new PacketLoggerTHM());
         Modules.get().add(new OffhandManager());
         Modules.get().add(new HotbarManager());
         Modules.get().add(new UnfocusedFpsLimiter());
@@ -104,18 +108,18 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new AutoPortal());
         Modules.get().add(new DiscordRPC());
         Modules.get().add(new TunnelMinerModule());
+        Modules.get().add(new ElytraRoute());
         Modules.get().add(new SignRender());
         Modules.get().add(new AfkLogout());
         //Modules.get().add(new PingSpeed());
-        if (isClassPresent("xyz.thm.addon.modules.BoatNoclip")) {
-            Modules.get().add(new BoatNoclip());
-        }
+        addOptionalModule("xyz.thm.addon.modules.BoatNoclip");
         Modules.get().add(new FlightBypass());
         Modules.get().add(new KitbotFrontend());
         Modules.get().add(new ChestTrackerModule());
         Modules.get().add(new ElytraUAV()); //Still WIP
         if (BaritoneUtils.IS_AVAILABLE) {
             Modules.get().add(new THMHwyMonitor());
+            Modules.get().add(new ObsidianFarmerTHM());
             Modules.get().add(new HighwayTools());
         }
 
@@ -136,6 +140,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Hud.get().register(MemberHud.INFO);
         Hud.get().register(KosHud.INFO);
         Hud.get().register(TunnelMinerHud.INFO);
+        Hud.get().register(ElytraFlightHud.INFO);
         Hud.get().register(AfkLogoutHud.INFO);
 
         //Themes
@@ -175,12 +180,15 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         return new GithubRepo("Leonn170709", "THM-Addons", "1.21.11", null);
     }
 
-    private static boolean isClassPresent(String className) {
+    private static void addOptionalModule(String className) {
         try {
-            Class.forName(className);
-            return true;
+            Object instance = Class.forName(className).getDeclaredConstructor().newInstance();
+            if (instance instanceof meteordevelopment.meteorclient.systems.modules.Module module) {
+                Modules.get().add(module);
+            }
         } catch (ClassNotFoundException ignored) {
-            return false;
+        } catch (ReflectiveOperationException | LinkageError e) {
+            LOG.warn("Failed to load optional module {}", className, e);
         }
     }
 }

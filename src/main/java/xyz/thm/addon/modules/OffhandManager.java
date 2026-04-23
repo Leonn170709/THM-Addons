@@ -87,6 +87,8 @@ public class OffhandManager extends Module implements StuckEatingRetryBridge {
     private boolean moved;
     private boolean sentMsg;
     private boolean swapped;
+    private long thmActiveRecoveryToken;
+    private long thmNextRecoveryToken = 1L;
 
     public OffhandManager() {
         super(THMAddon.MAIN, "offhand-manager", "Automatically manages your offhand (optimized for highway work).");
@@ -166,6 +168,7 @@ public class OffhandManager extends Module implements StuckEatingRetryBridge {
             }
         } else {
             // If we are not eating check if we should start eating
+            if (thmActiveRecoveryToken != 0L) return;
             if (shouldEat() && mc.player.getOffHandStack().getComponents().get(DataComponentTypes.FOOD) != null) {
                 startEating();
             }
@@ -235,12 +238,32 @@ public class OffhandManager extends Module implements StuckEatingRetryBridge {
     }
 
     @Override
-    public void thm$forceStopEating() {
+    public long thm$beginWatchdogRecovery() {
+        if (!isActive()) return 0L;
+        if (thmActiveRecoveryToken != 0L) return thmActiveRecoveryToken;
+
+        long token = thmNextRecoveryToken++;
+        if (token == 0L) token = thmNextRecoveryToken++;
+        thmActiveRecoveryToken = token;
+        return token;
+    }
+
+    @Override
+    public void thm$endWatchdogRecovery(long token) {
+        if (token == 0L || token != thmActiveRecoveryToken) return;
+        thmActiveRecoveryToken = 0L;
+    }
+
+    @Override
+    public void thm$forceStopEating(long token) {
+        if (token == 0L || token != thmActiveRecoveryToken) return;
         stopEating();
     }
 
     @Override
-    public StuckEatingRetryResult thm$forceRestartEating() {
+    public StuckEatingRetryResult thm$forceRestartEating(long token) {
+        if (token == 0L || token != thmActiveRecoveryToken) return StuckEatingRetryResult.IMPOSSIBLE;
+
         if (!thm$stillNeedsToEat()) return StuckEatingRetryResult.CLEARED;
         if (!thm$hasValidCurrentEatingItem()) return StuckEatingRetryResult.IMPOSSIBLE;
 

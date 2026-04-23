@@ -173,7 +173,10 @@ public class BetterEchestFarmer extends Module {
 
         if (target == null) {
             HitResult hit = mc.player.raycast(4.5, 0, false);
-            if (hit.getType() == HitResult.Type.BLOCK) target = ((BlockHitResult) hit).getBlockPos().up();
+            if (hit.getType() == HitResult.Type.BLOCK) {
+                BlockPos hitPos = ((BlockHitResult) hit).getBlockPos();
+                target = mc.world.getBlockState(hitPos).isOf(Blocks.ENDER_CHEST) ? hitPos : hitPos.up();
+            }
             else return;
         }
 

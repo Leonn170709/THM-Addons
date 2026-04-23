@@ -7,7 +7,11 @@ public interface StuckEatingRetryBridge {
 
     boolean thm$hasValidCurrentEatingItem();
 
-    void thm$forceStopEating();
+    long thm$beginWatchdogRecovery();
 
-    StuckEatingRetryResult thm$forceRestartEating();
+    void thm$endWatchdogRecovery(long token);
+
+    void thm$forceStopEating(long token);
+
+    StuckEatingRetryResult thm$forceRestartEating(long token);
 }

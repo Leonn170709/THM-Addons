@@ -78,6 +78,16 @@ public class THMHwyMonitor extends Module {
     private static final long RESTART_EVIDENCE_TTL_MS = 20_000L;
     private static final AtomicBoolean NON_RESTART_HARD_FAIL_SIGNAL = new AtomicBoolean(false);
     private static final AtomicBoolean RESTART_HARD_FAIL_SIGNAL = new AtomicBoolean(false);
+    private static final int GHOSTBLOCK_LOW_RATE_SAMPLE_TICKS = 20;
+    private static final int GHOSTBLOCK_ESCALATE_TICKS = 20 * 20;
+    private static final int GHOSTBLOCK_CONFIRM_TICKS = 2 * 20;
+    private static final int GHOSTBLOCK_NO_PROGRESS_TRIGGER_TICKS = 5 * 60 * 20;
+    private static final int RUBBERBAND_FORWARD_WARMUP_TICKS = 15 * 20;
+    private static final int RUBBERBAND_EVENT_WINDOW_TICKS = 90 * 20;
+    private static final int RUBBERBAND_EVENT_TRIGGER_COUNT = 3;
+    private static final int RUBBERBAND_RECONNECT_DELAY_SECONDS = 60;
+    private static final double GHOSTBLOCK_CONFIRMED_PROGRESS_BLOCKS = 0.75;
+    private static final double RUBBERBAND_BACKTRACK_BLOCKS = 1.5;
 
     private static final int[] RING_ROADS = new int[] {
         200, 500, 750, 1000, 1500, 2000, 2500, 5000, 7500, 10000, 15000, 20000, 25000,
@@ -145,6 +155,14 @@ public class THMHwyMonitor extends Module {
         .range(15, 900)
         .sliderRange(30, 300)
         .visible(() -> autoRecover.get() && recoverForwardStalls.get())
+        .build()
+    );
+
+    private final Setting<Boolean> recoverRubberbandGhostblocks = sgGeneral.add(new BoolSetting.Builder()
+        .name("recover-rubberband-ghostblocks")
+        .description("Disconnects and AutoReconnects if HighwayBuilder Forward appears rubberbanded or ghostblocked for too long.")
+        .defaultValue(true)
+        .visible(autoRecover::get)
         .build()
     );
 
@@ -225,12 +243,14 @@ public class THMHwyMonitor extends Module {
     private long pendingAlignmentGateAttemptId;
     private long nextAlignmentGateAttemptId = 1L;
     private long activeReconnectCycleId;
+    private ReconnectOwner reconnectOwner = ReconnectOwner.None;
     private long restartEvidenceGateCycleId;
     private boolean delayedMainServerResumePending;
     private long delayedMainServerResumeCycleId;
     private long delayedMainServerResumeAtMs;
     private String delayedMainServerResumeContext = "";
     private boolean restartRecoveryActive;
+    private ObsidianFarmerTHM recoveryFarmer;
     private boolean postRejoinDirectionGateActive;
     private int postRejoinDirectionRetryCount;
     private long postRejoinDirectionNextAttemptAtMs;
@@ -245,6 +265,21 @@ public class THMHwyMonitor extends Module {
     private long restartBuilderDisableGraceId;
     private long nextRestartBuilderDisableGraceId = 1L;
     private boolean previousAutoReconnectToggleState;
+    private boolean rearmNormalReconnectAfterForwardReconnectResume;
+    private HorizontalDirection ghostblockWatchDirection;
+    private boolean ghostblockWatchActive;
+    private boolean ghostblockTickSamplingActive;
+    private int ghostblockObservationTicks;
+    private int ghostblockNoConfirmedProgressTicks;
+    private int ghostblockLowRateSampleTicks;
+    private boolean ghostblockCandidateActive;
+    private double ghostblockCandidateCoordinate;
+    private int ghostblockCandidateTicks;
+    private double ghostblockConfirmedBestCoordinate;
+    private double ghostblockRecentPeakCoordinate;
+    private double ghostblockLastProjectedCoordinate;
+    private boolean ghostblockHasLastProjectedCoordinate;
+    private final List<Integer> ghostblockRubberbandEventTicks = new ArrayList<>();
 
     private record AxisProbeResult(
         boolean allSamplesLoaded,
@@ -278,6 +313,12 @@ public class THMHwyMonitor extends Module {
         WorkLine line,
         double distance
     ) {}
+
+    private enum ReconnectOwner {
+        None,
+        HighwayBuilder,
+        ObsidianFarmer
+    }
 
     public THMHwyMonitor() {
         super(THMAddon.MAIN, "THM Highway Monitor", "Monitors alignment and recovers HighwayBuilder from drift.");
@@ -415,6 +456,7 @@ public class THMHwyMonitor extends Module {
         trackedDirection = "";
         recoveryYawBeforeMove = Float.NaN;
         resetForwardProgressWatch();
+        resetRubberbandGhostblockWatch();
         clearPendingAlignmentGateRequest();
         clearPostRejoinDirectionGateState();
         resetReconnectAutomationState(true);
@@ -424,6 +466,7 @@ public class THMHwyMonitor extends Module {
         previousAutoReconnectToggleState = autoReconnect.get();
         if (autoReconnect.get()) {
             armReconnectCycle("onActivate", false);
+            reconnectOwner = ReconnectOwner.HighwayBuilder;
         }
     }
 
@@ -457,6 +500,7 @@ public class THMHwyMonitor extends Module {
         trackedDirection = "";
         recoveryYawBeforeMove = Float.NaN;
         resetForwardProgressWatch();
+        resetRubberbandGhostblockWatch();
         clearPendingAlignmentGateRequest();
         clearPostRejoinDirectionGateState();
         unregisterReconnectServiceListeners();
@@ -505,6 +549,19 @@ public class THMHwyMonitor extends Module {
             return;
         }
 
+        if (reconnectOwner == ReconnectOwner.ObsidianFarmer) {
+            delayedMainServerResumePending = true;
+            delayedMainServerResumeCycleId = cycleId;
+            delayedMainServerResumeAtMs = System.currentTimeMillis() + MAIN_SERVER_RESUME_DELAY_MS;
+            delayedMainServerResumeContext = contextTag == null ? "obsidian-farmer" : contextTag;
+            info(
+                "Reconnect service reached MAIN_SERVER (%s). Waiting 6.0s before ObsidianFarmerTHM resume (cycle %d).",
+                delayedMainServerResumeContext,
+                cycleId
+            );
+            return;
+        }
+
         boolean restartEvidenceMatched = restartEvidenceGateCycleId == cycleId;
         if (!restartEvidenceMatched) {
             return;
@@ -539,18 +596,35 @@ public class THMHwyMonitor extends Module {
             return;
         }
 
+        if (reconnectOwner == ReconnectOwner.ObsidianFarmer) {
+            ObsidianFarmerTHM farmer = recoveryFarmer;
+            clearRestartAutomationState("obsidian-farmer-failure:" + reason.name(), true, true);
+            reconnectOwner = ReconnectOwner.None;
+            recoveryFarmer = null;
+            if (farmer != null) farmer.onMonitorReconnectFailure(cycleId, reason.name(), detail);
+            warning("Reconnect failed (%s): %s", reason.name(), detail == null ? "" : detail);
+            return;
+        }
+
+        clearHighwayBuilderReconnectModuleRestoreSnapshot("reconnect-failure:" + reason.name());
         clearRestartRecoveryState("failure:" + reason.name(), false, true);
         warning("Reconnect failed (%s): %s", reason.name(), detail == null ? "" : detail);
     }
 
     private void clearRestartRecoveryState(String reason, boolean disarmService, boolean clearCycleBinding) {
         restartRecoveryActive = false;
+        resetRubberbandGhostblockWatch();
         clearPendingRestartBuilderDisableGrace();
         restartEvidenceGateCycleId = 0L;
         clearDelayedMainServerResumeState();
         clearPostRejoinDirectionGateState();
         if (clearCycleBinding) activeReconnectCycleId = 0L;
         if (disarmService) reconnectService().disarmReconnect("THMHwyMonitor clearRestartRecoveryState: " + reason);
+    }
+
+    private void clearHighwayBuilderReconnectModuleRestoreSnapshot(String reason) {
+        ModuleManager manager = Modules.get().get(ModuleManager.class);
+        if (manager != null) manager.clearReconnectModuleRestoreSnapshot(reason);
     }
 
     private void clearDelayedMainServerResumeState() {
@@ -573,6 +647,13 @@ public class THMHwyMonitor extends Module {
 
     private long armReconnectCycle(String source, boolean markRestartEvidenceGate) {
         long cycleId = reconnectService().armReconnect(restartRejoinDelayMinutes.get(), "THMHwyMonitor:" + source);
+        activeReconnectCycleId = cycleId;
+        if (markRestartEvidenceGate) restartEvidenceGateCycleId = cycleId;
+        return cycleId;
+    }
+
+    private long armReconnectCycleSeconds(int delaySeconds, String source, boolean markRestartEvidenceGate) {
+        long cycleId = reconnectService().armReconnectSeconds(delaySeconds, "THMHwyMonitor:" + source);
         activeReconnectCycleId = cycleId;
         if (markRestartEvidenceGate) restartEvidenceGateCycleId = cycleId;
         return cycleId;
@@ -660,6 +741,10 @@ public class THMHwyMonitor extends Module {
 
         HighwayBuilderTHM builderBeforeDisconnect = Modules.get().get(HighwayBuilderTHM.class);
         boolean builderWasActiveAtDisconnect = builderBeforeDisconnect != null && builderBeforeDisconnect.isActive();
+        ObsidianFarmerTHM farmerBeforeDisconnect = Modules.get().get(ObsidianFarmerTHM.class);
+        boolean farmerWasActiveAtDisconnect = farmerBeforeDisconnect != null
+            && farmerBeforeDisconnect.isActive()
+            && farmerBeforeDisconnect.isManagingThmHwyMonitor();
         unresolvedMainServerDisconnectCandidate = builderWasActiveAtDisconnect;
         String disconnectScreenReason = readDisconnectedScreenReasonLower();
 
@@ -688,6 +773,16 @@ public class THMHwyMonitor extends Module {
             return;
         }
 
+        if (!builderWasActiveAtDisconnect && farmerWasActiveAtDisconnect) {
+            unresolvedMainServerDisconnectCandidate = false;
+            recoveryFarmer = farmerBeforeDisconnect;
+            reconnectOwner = ReconnectOwner.ObsidianFarmer;
+            restartRecoveryActive = true;
+            long cycleId = armReconnectCycle("obsidian-farmer-disconnect", false);
+            info("Detected disconnect while ObsidianFarmerTHM was active. Armed reconnect cycle %d.", cycleId);
+            return;
+        }
+
         pendingDisconnectScreenEvidenceCheck = true;
         pendingDisconnectScreenEvidenceUntilMs = System.currentTimeMillis() + DISCONNECT_SCREEN_EVIDENCE_TIMEOUT_MS;
         info("Disconnect detected without immediate hard-fail evidence. Waiting up to 3.0s for disconnect-screen reason.");
@@ -695,6 +790,7 @@ public class THMHwyMonitor extends Module {
 
     private void handleDetectedNonRestartHardFail(String source) {
         abortActiveRecoveryForNonRestartHardFail();
+        clearHighwayBuilderReconnectModuleRestoreSnapshot("non-restart-hard-fail:" + source);
         clearRestartAutomationState("non-restart-hard-fail:" + source, true, true);
         clearRestartDisconnectEvidence();
         unresolvedMainServerDisconnectCandidate = false;
@@ -849,6 +945,7 @@ public class THMHwyMonitor extends Module {
                     restartEvidenceGateCycleId = cycleId;
                 } else {
                     cycleId = armReconnectCycle("restart-detection", true);
+                    reconnectOwner = ReconnectOwner.HighwayBuilder;
                 }
 
                 info("Restart reconnect handling armed through ServerReconnectService (cycle %d).", cycleId);
@@ -888,7 +985,8 @@ public class THMHwyMonitor extends Module {
             || deferRestartScreenshotUntilReconnect
             || deferredRestartScreenshotAfterReconnectPending
             || pendingDisconnectScreenEvidenceCheck
-            || pendingDisconnectScreenEvidenceUntilMs != 0L;
+            || pendingDisconnectScreenEvidenceUntilMs != 0L
+            || rearmNormalReconnectAfterForwardReconnectResume;
     }
 
     private void resetReconnectAutomationState(boolean clearCycleBinding) {
@@ -908,12 +1006,16 @@ public class THMHwyMonitor extends Module {
         clearRestartDisconnectEvidence();
         clearNonRestartHardFailSignal();
         clearRestartHardFailSignal();
+        reconnectOwner = ReconnectOwner.None;
+        recoveryFarmer = null;
+        rearmNormalReconnectAfterForwardReconnectResume = false;
         clearRestartRecoveryState("reset-automation", false, clearCycleBinding);
     }
 
     private void clearRestartAutomationState(String reason, boolean disarmService, boolean clearCycleBinding) {
         boolean hadState = hasRestartAutomationState();
         resetReconnectAutomationState(clearCycleBinding);
+        clearHighwayBuilderReconnectModuleRestoreSnapshot("clear-restart-automation:" + reason);
         if (disarmService) reconnectService().disarmReconnect("THMHwyMonitor clearRestartAutomationState: " + reason);
 
         if (!hadState) return;
@@ -926,6 +1028,12 @@ public class THMHwyMonitor extends Module {
 
         if (!builder.prepareForMonitorReconnectPause(activeReconnectCycleId)) {
             enterReconnectSafetyStop("Unable to establish reconnect baseline before restart pause.");
+            return;
+        }
+
+        ModuleManager manager = Modules.get().get(ModuleManager.class);
+        if (manager != null && manager.isActive() && !manager.prepareForMonitorReconnectPause(activeReconnectCycleId, source)) {
+            enterReconnectSafetyStop("Unable to freeze Module Manager reconnect snapshot before restart pause.");
             return;
         }
 
@@ -958,6 +1066,7 @@ public class THMHwyMonitor extends Module {
 
         if (currentToggle) {
             long cycleId = armReconnectCycle("toggle-on", false);
+            reconnectOwner = ReconnectOwner.HighwayBuilder;
             info("Auto-reconnect enabled. Armed reconnect cycle %d.", cycleId);
         } else {
             clearRestartAutomationState("toggle-off", true, true);
@@ -972,12 +1081,20 @@ public class THMHwyMonitor extends Module {
         handleReconnectAutomationTickLane();
 
         if (mc.player == null || mc.world == null) {
+            resetRubberbandGhostblockWatch();
             clearPendingAlignmentGateRequest();
             return;
         }
 
         if (!isHighwayRecoveryAllowedOnCurrentServer()) {
+            resetRubberbandGhostblockWatch();
             abortActiveRecoveryForNonMainServer("server-state-" + getCommittedServerState().name());
+            return;
+        }
+
+        HighwayBuilderTHM ghostblockBuilder = Modules.get().get(HighwayBuilderTHM.class);
+        GhostblockReconnectTrigger ghostblockTrigger = updateRubberbandGhostblockWatch(ghostblockBuilder);
+        if (ghostblockTrigger != GhostblockReconnectTrigger.None && tryBeginRubberbandGhostblockReconnect(ghostblockBuilder, ghostblockTrigger)) {
             return;
         }
 
@@ -989,6 +1106,7 @@ public class THMHwyMonitor extends Module {
 
         if (!autoRecover.get()) {
             resetForwardProgressWatch();
+            resetRubberbandGhostblockWatch();
             clearPendingAlignmentGateRequest();
             return;
         }
@@ -1241,7 +1359,11 @@ public class THMHwyMonitor extends Module {
         RecoveryTarget correctionTarget;
         boolean updateTracking = target != null;
         boolean localEscapeOnly = false;
-        if (isStallRecoveryCause(recoveryCause)) {
+        if (recoveryCause == RecoveryCause.CenterStall) {
+            correctionTarget = localStallEscapeTarget;
+            localEscapeOnly = true;
+            updateTracking = false;
+        } else if (recoveryCause == RecoveryCause.ForwardStall) {
             if (target == null || target.distance() > maxCorrectionDistance.get()) {
                 correctionTarget = localStallEscapeTarget;
                 localEscapeOnly = true;
@@ -1362,6 +1484,302 @@ public class THMHwyMonitor extends Module {
         return (x * direction.offsetX + z * direction.offsetZ) / magnitude;
     }
 
+    private GhostblockReconnectTrigger updateRubberbandGhostblockWatch(HighwayBuilderTHM builder) {
+        if (!autoRecover.get() || !recoverRubberbandGhostblocks.get()) {
+            resetRubberbandGhostblockWatch();
+            return GhostblockReconnectTrigger.None;
+        }
+
+        if (isReconnectRecoveryWorkActive()) {
+            resetRubberbandGhostblockWatch();
+            return GhostblockReconnectTrigger.None;
+        }
+
+        if (recoveryPhase != RecoveryPhase.None || cooldownTicks > 0) {
+            return GhostblockReconnectTrigger.None;
+        }
+
+        if (mc.player == null || mc.world == null || builder == null || !builder.isActive()) {
+            resetRubberbandGhostblockWatch();
+            return GhostblockReconnectTrigger.None;
+        }
+
+        if (builder.shouldSuppressThmHwyMonitorMisalignmentRecovery() || !builder.isInForwardState()) {
+            resetRubberbandGhostblockWatch();
+            return GhostblockReconnectTrigger.None;
+        }
+
+        HorizontalDirection direction = builder.getWorkingDirection();
+        if (direction == null) {
+            resetRubberbandGhostblockWatch();
+            return GhostblockReconnectTrigger.None;
+        }
+
+        double projected = projectedForwardCoordinate(mc.player.getX(), mc.player.getZ(), direction);
+        if (!ghostblockWatchActive || ghostblockWatchDirection != direction) {
+            startRubberbandGhostblockWatch(direction, projected);
+            return GhostblockReconnectTrigger.None;
+        }
+
+        ghostblockObservationTicks++;
+        ghostblockNoConfirmedProgressTicks++;
+        if (ghostblockCandidateActive) ghostblockCandidateTicks++;
+
+        boolean shouldSampleProgress = ghostblockTickSamplingActive || ++ghostblockLowRateSampleTicks >= GHOSTBLOCK_LOW_RATE_SAMPLE_TICKS;
+        if (shouldSampleProgress) {
+            ghostblockLowRateSampleTicks = 0;
+            sampleGhostblockConfirmedProgress(projected);
+        }
+
+        if (!ghostblockTickSamplingActive && ghostblockNoConfirmedProgressTicks >= GHOSTBLOCK_ESCALATE_TICKS) {
+            ghostblockTickSamplingActive = true;
+            ghostblockRecentPeakCoordinate = Math.max(ghostblockRecentPeakCoordinate, projected);
+            ghostblockHasLastProjectedCoordinate = false;
+        }
+
+        if (ghostblockTickSamplingActive) {
+            sampleRubberbandMovement(projected);
+            pruneRubberbandEvents();
+            if (
+                ghostblockObservationTicks >= RUBBERBAND_FORWARD_WARMUP_TICKS
+                    && ghostblockRubberbandEventTicks.size() >= RUBBERBAND_EVENT_TRIGGER_COUNT
+            ) {
+                return GhostblockReconnectTrigger.Rubberband;
+            }
+        }
+
+        if (ghostblockNoConfirmedProgressTicks >= GHOSTBLOCK_NO_PROGRESS_TRIGGER_TICKS) {
+            return GhostblockReconnectTrigger.LongNoProgress;
+        }
+
+        return GhostblockReconnectTrigger.None;
+    }
+
+    private void startRubberbandGhostblockWatch(HorizontalDirection direction, double projected) {
+        ghostblockWatchActive = true;
+        ghostblockWatchDirection = direction;
+        ghostblockTickSamplingActive = false;
+        ghostblockObservationTicks = 0;
+        ghostblockNoConfirmedProgressTicks = 0;
+        ghostblockLowRateSampleTicks = 0;
+        ghostblockCandidateActive = false;
+        ghostblockCandidateCoordinate = 0.0;
+        ghostblockCandidateTicks = 0;
+        ghostblockConfirmedBestCoordinate = projected;
+        ghostblockRecentPeakCoordinate = projected;
+        ghostblockLastProjectedCoordinate = projected;
+        ghostblockHasLastProjectedCoordinate = true;
+        ghostblockRubberbandEventTicks.clear();
+    }
+
+    private void sampleGhostblockConfirmedProgress(double projected) {
+        if (ghostblockCandidateActive) {
+            if (projected + FORWARD_PROGRESS_RESET_EPSILON < ghostblockCandidateCoordinate) {
+                ghostblockCandidateActive = false;
+                ghostblockCandidateTicks = 0;
+            } else if (ghostblockCandidateTicks >= GHOSTBLOCK_CONFIRM_TICKS && projected >= ghostblockCandidateCoordinate) {
+                confirmGhostblockProgress(Math.max(projected, ghostblockCandidateCoordinate));
+                return;
+            }
+        }
+
+        if (!ghostblockCandidateActive && projected >= ghostblockConfirmedBestCoordinate + GHOSTBLOCK_CONFIRMED_PROGRESS_BLOCKS) {
+            ghostblockCandidateActive = true;
+            ghostblockCandidateCoordinate = projected;
+            ghostblockCandidateTicks = 0;
+        }
+    }
+
+    private void confirmGhostblockProgress(double projected) {
+        ghostblockConfirmedBestCoordinate = Math.max(ghostblockConfirmedBestCoordinate, projected);
+        ghostblockRecentPeakCoordinate = ghostblockConfirmedBestCoordinate;
+        ghostblockNoConfirmedProgressTicks = 0;
+        ghostblockLowRateSampleTicks = 0;
+        ghostblockCandidateActive = false;
+        ghostblockCandidateTicks = 0;
+        ghostblockTickSamplingActive = false;
+        ghostblockHasLastProjectedCoordinate = false;
+        ghostblockRubberbandEventTicks.clear();
+    }
+
+    private void sampleRubberbandMovement(double projected) {
+        if (!ghostblockHasLastProjectedCoordinate) {
+            ghostblockLastProjectedCoordinate = projected;
+            ghostblockRecentPeakCoordinate = Math.max(ghostblockRecentPeakCoordinate, projected);
+            ghostblockHasLastProjectedCoordinate = true;
+            return;
+        }
+
+        if (projected > ghostblockRecentPeakCoordinate) {
+            ghostblockRecentPeakCoordinate = projected;
+        }
+
+        if (ghostblockRecentPeakCoordinate - projected >= RUBBERBAND_BACKTRACK_BLOCKS) {
+            ghostblockRubberbandEventTicks.add(ghostblockObservationTicks);
+            ghostblockRecentPeakCoordinate = projected;
+            ghostblockCandidateActive = false;
+            ghostblockCandidateTicks = 0;
+        }
+
+        ghostblockLastProjectedCoordinate = projected;
+    }
+
+    private void pruneRubberbandEvents() {
+        int oldestAllowedTick = ghostblockObservationTicks - RUBBERBAND_EVENT_WINDOW_TICKS;
+        ghostblockRubberbandEventTicks.removeIf(tick -> tick < oldestAllowedTick);
+    }
+
+    private void resetRubberbandGhostblockWatch() {
+        ghostblockWatchActive = false;
+        ghostblockWatchDirection = null;
+        ghostblockTickSamplingActive = false;
+        ghostblockObservationTicks = 0;
+        ghostblockNoConfirmedProgressTicks = 0;
+        ghostblockLowRateSampleTicks = 0;
+        ghostblockCandidateActive = false;
+        ghostblockCandidateCoordinate = 0.0;
+        ghostblockCandidateTicks = 0;
+        ghostblockConfirmedBestCoordinate = 0.0;
+        ghostblockRecentPeakCoordinate = 0.0;
+        ghostblockLastProjectedCoordinate = 0.0;
+        ghostblockHasLastProjectedCoordinate = false;
+        ghostblockRubberbandEventTicks.clear();
+    }
+
+    private boolean isReconnectRecoveryWorkActive() {
+        return restartRecoveryActive
+            || restartBuilderDisableGraceScheduled
+            || restartEvidenceGateCycleId != 0L
+            || delayedMainServerResumePending
+            || delayedMainServerResumeCycleId != 0L
+            || postRejoinDirectionGateActive
+            || deferredRestartScreenshotAfterReconnectPending;
+    }
+
+    private boolean tryBeginRubberbandGhostblockReconnect(HighwayBuilderTHM builder, GhostblockReconnectTrigger trigger) {
+        if (trigger == GhostblockReconnectTrigger.None || builder == null) return false;
+
+        String triggerLabel = trigger == GhostblockReconnectTrigger.Rubberband ? "rubberband" : "ghostblock";
+        if (!reconnectAutomationEnabled()) {
+            warning("Forward %s recovery detected, but THMHwyMonitor auto-reconnect is disabled. Leaving HighwayBuilder running.", triggerLabel);
+            resetRubberbandGhostblockWatch();
+            return false;
+        }
+
+        if (!hasLiveServerConnection()) {
+            warning("Forward %s recovery detected, but there is no live server connection to disconnect from.", triggerLabel);
+            resetRubberbandGhostblockWatch();
+            return false;
+        }
+
+        if (!builder.isActive() || !builder.isInForwardState() || builder.getWorkingDirection() == null) {
+            resetRubberbandGhostblockWatch();
+            return false;
+        }
+
+        long cycleId = trigger == GhostblockReconnectTrigger.Rubberband
+            ? armReconnectCycleSeconds(RUBBERBAND_RECONNECT_DELAY_SECONDS, "forward-rubberband", true)
+            : armReconnectCycle("forward-ghostblock", true);
+        reconnectOwner = ReconnectOwner.HighwayBuilder;
+        rearmNormalReconnectAfterForwardReconnectResume = true;
+
+        if (!verifyForwardReconnectPreflight(cycleId, trigger)) {
+            abortRubberbandGhostblockReconnectAttempt("preflight-failed", true);
+            return false;
+        }
+
+        restartRecoveryActive = true;
+        resetRubberbandGhostblockWatch();
+
+        if (!builder.prepareForMonitorReconnectPause(cycleId)) {
+            warning("Forward %s recovery aborted: unable to establish HighwayBuilder reconnect baseline.", triggerLabel);
+            abortRubberbandGhostblockReconnectAttempt("builder-baseline-failed", true);
+            return false;
+        }
+
+        ModuleManager manager = Modules.get().get(ModuleManager.class);
+        if (manager != null && manager.isActive() && !manager.prepareForMonitorReconnectPause(cycleId, "forward-" + triggerLabel)) {
+            warning("Forward %s recovery aborted: unable to freeze Module Manager reconnect snapshot.", triggerLabel);
+            abortRubberbandGhostblockReconnectAttempt("module-manager-baseline-failed", true);
+            return false;
+        }
+
+        if (!builder.checkpointStatsForMonitorReconnectPause("forward-" + triggerLabel + "-pre-disconnect")) {
+            warning("Forward %s recovery aborted: unable to checkpoint HighwayBuilder stats before disconnect.", triggerLabel);
+            abortRubberbandGhostblockReconnectAttempt("stats-checkpoint-failed", true);
+            return false;
+        }
+
+        builder.disableForMonitorRealignPause();
+        if (builder.isActive()) {
+            warning("Forward %s recovery aborted: HighwayBuilder did not disable for reconnect pause.", triggerLabel);
+            abortRubberbandGhostblockReconnectAttempt("builder-disable-failed", true);
+            return false;
+        }
+
+        info(
+            "Forward %s recovery armed cycle %d. Disconnecting so AutoReconnect can resume HighwayBuilder.",
+            triggerLabel,
+            cycleId
+        );
+        mc.getNetworkHandler().getConnection().disconnect(Text.of("THMHwyMonitor Forward " + triggerLabel + " recovery"));
+        return true;
+    }
+
+    private boolean verifyForwardReconnectPreflight(long cycleId, GhostblockReconnectTrigger trigger) {
+        ServerReconnectService.ReconnectPreflight preflight = reconnectService().getReconnectPreflight();
+        String triggerLabel = trigger == GhostblockReconnectTrigger.Rubberband ? "rubberband" : "ghostblock";
+
+        if (!preflight.serviceArmed() || preflight.cycleId() != cycleId) {
+            warning("Forward %s recovery aborted: reconnect service was not armed for cycle %d.", triggerLabel, cycleId);
+            return false;
+        }
+
+        if (!preflight.autoReconnectModulePresent() || !preflight.autoReconnectActive()) {
+            warning("Forward %s recovery aborted: Meteor AutoReconnect is missing or inactive.", triggerLabel);
+            return false;
+        }
+
+        Double moduleDelaySeconds = preflight.autoReconnectSettingDelaySeconds();
+        if (moduleDelaySeconds == null) {
+            warning("Forward %s recovery aborted: Meteor AutoReconnect delay could not be read.", triggerLabel);
+            return false;
+        }
+
+        int effectiveDelaySeconds = preflight.effectiveDelaySeconds();
+        if (trigger == GhostblockReconnectTrigger.Rubberband && effectiveDelaySeconds != RUBBERBAND_RECONNECT_DELAY_SECONDS) {
+            warning(
+                "Forward rubberband recovery aborted: expected exact %d second reconnect delay, got %d.",
+                RUBBERBAND_RECONNECT_DELAY_SECONDS,
+                effectiveDelaySeconds
+            );
+            return false;
+        }
+
+        if (Math.abs(moduleDelaySeconds - effectiveDelaySeconds) > 0.5) {
+            warning(
+                "Forward %s recovery aborted: Meteor AutoReconnect delay %.1fs does not match service delay %ds.",
+                triggerLabel,
+                moduleDelaySeconds,
+                effectiveDelaySeconds
+            );
+            return false;
+        }
+
+        return true;
+    }
+
+    private void abortRubberbandGhostblockReconnectAttempt(String reason, boolean rearmNormalReconnect) {
+        clearRestartAutomationState("forward-rubberband-ghostblock-abort:" + reason, true, true);
+        resetRubberbandGhostblockWatch();
+
+        if (rearmNormalReconnect && reconnectAutomationEnabled() && isActive()) {
+            long cycleId = armReconnectCycle("forward-recovery-abort-rearm", false);
+            reconnectOwner = ReconnectOwner.HighwayBuilder;
+            info("Re-armed normal AutoReconnect cycle %d after aborted forward reconnect recovery.", cycleId);
+        }
+    }
+
     private void handleReconnectAutomationTickLane() {
         handleAutoReconnectToggleTransitions();
         refreshReconnectBaselineValidity();
@@ -1404,6 +1822,7 @@ public class THMHwyMonitor extends Module {
 
     private void abortActiveRecoveryForNonMainServer(String source) {
         resetForwardProgressWatch();
+        resetRubberbandGhostblockWatch();
         clearPendingAlignmentGateRequest();
 
         if (recoveryPhase == RecoveryPhase.None && !recoveryModulesPaused) return;
@@ -1473,6 +1892,17 @@ public class THMHwyMonitor extends Module {
         long cycleId = delayedMainServerResumeCycleId;
         String contextTag = delayedMainServerResumeContext;
         clearDelayedMainServerResumeState();
+
+        if (reconnectOwner == ReconnectOwner.ObsidianFarmer) {
+            ObsidianFarmerTHM farmer = recoveryFarmer;
+            clearRestartAutomationState("obsidian-farmer-main-server-ready", true, true);
+            reconnectOwner = ReconnectOwner.None;
+            recoveryFarmer = null;
+            if (farmer != null && farmer.isActive()) {
+                farmer.onMonitorReconnectMainServerReady(cycleId, contextTag);
+            }
+            return;
+        }
 
         info(
             "Reconnect MAIN_SERVER delay complete (%s). Entering reconnect direction gate (cycle %d).",
@@ -2127,13 +2557,35 @@ public class THMHwyMonitor extends Module {
             return false;
         }
 
+        ModuleManager manager = Modules.get().get(ModuleManager.class);
+        if (manager != null && manager.isActive()) {
+            ModuleManager.ReconnectRestoreOutcome restoreOutcome = manager.restoreReconnectManagedModules(activeReconnectCycleId);
+            if (restoreOutcome == ModuleManager.ReconnectRestoreOutcome.CriticalFailure) {
+                enterReconnectSafetyStop("Critical managed module failed to restore after reconnect.");
+                return false;
+            }
+        }
+
+        if (!builder.completeReconnectResumeAfterManagedModules(activeReconnectCycleId)) {
+            enterReconnectSafetyStop("HighwayBuilder refused reconnect finalization after managed module restore.");
+            return false;
+        }
+
         info("Resumed THM HighwayBuilder after post-rejoin checks.");
         return true;
     }
 
     private void finishSuccessfulReconnectResume() {
         maybeTakeDeferredRestartScreenshotAfterReconnect("main-server-ready");
+        boolean rearmNormalReconnect = rearmNormalReconnectAfterForwardReconnectResume;
         clearRestartAutomationState("post-main-server finalization complete", true, true);
+        resetRubberbandGhostblockWatch();
+
+        if (rearmNormalReconnect && reconnectAutomationEnabled() && isActive()) {
+            long cycleId = armReconnectCycle("forward-recovery-resume-rearm", false);
+            reconnectOwner = ReconnectOwner.HighwayBuilder;
+            info("Re-armed normal AutoReconnect cycle %d after forward reconnect recovery resume.", cycleId);
+        }
     }
 
     private PostRejoinDirectionResult determineConclusivePostRejoinWorkingDirection() {
@@ -2288,6 +2740,7 @@ public class THMHwyMonitor extends Module {
             builder.restoreCenterSpeedBaselineForFailedReconnect(cycleId);
             builder.disableForReconnectSafetyStop();
         }
+        clearHighwayBuilderReconnectModuleRestoreSnapshot("reconnect-safety-stop");
 
         if (restartScreenshotsEnabled() && !postRejoinTerminalScreenshotTaken) {
             postRejoinTerminalScreenshotTaken = true;
@@ -2793,6 +3246,12 @@ public class THMHwyMonitor extends Module {
         None,
         Forward,
         Center
+    }
+
+    private enum GhostblockReconnectTrigger {
+        None,
+        Rubberband,
+        LongNoProgress
     }
 
     private enum WorkLine {

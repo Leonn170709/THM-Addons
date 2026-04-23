@@ -30,6 +30,15 @@ public abstract class AutoEatMixin implements StuckEatingRetryBridge {
     @Shadow protected abstract void startEating();
     @Shadow public abstract boolean shouldEat();
     @Unique private boolean bephax$wasBaritone = false;
+    @Unique private long thm$activeRecoveryToken;
+    @Unique private long thm$nextRecoveryToken = 1L;
+    @Unique private boolean thm$hasEatingOwnership;
+
+    @Inject(method = "onTick", at = @At("HEAD"), cancellable = true)
+    private void thm$suppressAutonomousStarts(CallbackInfo ci) {
+        if (!eating && thm$activeRecoveryToken != 0L) ci.cancel();
+    }
+
     @Inject(method = "eat", at = @At("HEAD"), cancellable = true)
     private void onEat(CallbackInfo ci) {
         ci.cancel();
@@ -58,6 +67,10 @@ public abstract class AutoEatMixin implements StuckEatingRetryBridge {
         }
         if (!mc.player.isUsingItem()) Utils.rightClick();
         eating = true;
+    }
+    @Inject(method = "startEating", at = @At("TAIL"))
+    private void thm$markEatingOwnership(CallbackInfo ci) {
+        thm$hasEatingOwnership = true;
     }
     @Inject(method = "onTick", at = @At("HEAD"))
     private void onTickValidate(CallbackInfo ci) {
@@ -88,8 +101,13 @@ public abstract class AutoEatMixin implements StuckEatingRetryBridge {
             PathManagers.get().resume();
         }
     }
+    @Inject(method = "stopEating", at = @At("TAIL"))
+    private void thm$clearEatingOwnership(CallbackInfo ci) {
+        thm$hasEatingOwnership = false;
+    }
     @Inject(method = "onDeactivate", at = @At("HEAD"))
     private void onDeactivateCleanup(CallbackInfo ci) {
+        if (thm$hasEatingOwnership && !eating) stopEating();
         InventoryManager.getInstance().setEating(false);
         if (mc.options != null) {
             mc.options.useKey.setPressed(false);
@@ -135,8 +153,28 @@ public abstract class AutoEatMixin implements StuckEatingRetryBridge {
     }
 
     @Override
-    public void thm$forceStopEating() {
-        if (eating) stopEating();
+    public long thm$beginWatchdogRecovery() {
+        AutoEat autoEat = (AutoEat) (Object) this;
+        if (!autoEat.isActive()) return 0L;
+        if (thm$activeRecoveryToken != 0L) return thm$activeRecoveryToken;
+
+        long token = thm$nextRecoveryToken++;
+        if (token == 0L) token = thm$nextRecoveryToken++;
+        thm$activeRecoveryToken = token;
+        return token;
+    }
+
+    @Override
+    public void thm$endWatchdogRecovery(long token) {
+        if (token == 0L || token != thm$activeRecoveryToken) return;
+        thm$activeRecoveryToken = 0L;
+    }
+
+    @Override
+    public void thm$forceStopEating(long token) {
+        if (token == 0L || token != thm$activeRecoveryToken) return;
+
+        if (thm$hasEatingOwnership || eating) stopEating();
         else {
             InventoryManager.getInstance().setEating(false);
             if (mc.options != null) mc.options.useKey.setPressed(false);
@@ -144,9 +182,11 @@ public abstract class AutoEatMixin implements StuckEatingRetryBridge {
     }
 
     @Override
-    public StuckEatingRetryResult thm$forceRestartEating() {
+    public StuckEatingRetryResult thm$forceRestartEating(long token) {
+        if (token == 0L || token != thm$activeRecoveryToken) return StuckEatingRetryResult.IMPOSSIBLE;
+
         AutoEat autoEat = (AutoEat) (Object) this;
-        if (!autoEat.isActive()) return StuckEatingRetryResult.CLEARED;
+        if (!autoEat.isActive()) return StuckEatingRetryResult.IMPOSSIBLE;
         if (!shouldEat()) return StuckEatingRetryResult.CLEARED;
 
         startEating();
