@@ -1,0 +1,133 @@
+HighwayBuilder reconnect module cache change log
+Generated: 2026-04-19
+
+Summary
+- Added a HighwayBuilder session-scoped reconnect module cache to restore user modules that get turned off during AutoReconnect transfer.
+- Kept Builder-owned and reconnect-owner modules out of this cache so existing ownership logic stays unchanged.
+- Added critical reconnect module handling so combat protection modules can force a HighwayBuilder hard-fail if they do not come back after reconnect.
+
+Files changed
+- src/main/java/xyz/thm/addon/modules/HighwayBuilderTHM.java
+- src/main/java/xyz/thm/addon/modules/THMHwyMonitor.java
+
+HighwayBuilderTHM changes
+- Added import usage for:
+  - ActiveModulesChangedEvent
+  - AutoReconnect
+- Added setting:
+  - critical-reconnect-modules
+  - type: StringListSetting
+  - default: Kill Aura
+  - purpose: identify cached reconnect-restored modules that are safety-critical
+- Added reconnect module cache runtime state:
+  - desiredReconnectActiveModules
+  - frozenReconnectActiveModules
+  - warnedUnknownCriticalReconnectModuleTitles
+  - warnedExcludedCriticalReconnectModuleTitles
+  - reconnectModuleCacheFrozen
+  - reconnectModuleRestoreInProgress
+  - frozenReconnectModuleGeneration
+  - preserveReconnectModuleCacheOnDisconnectDeactivate
+- Added reconnect restore result enum:
+  - ReconnectModuleRestoreOutcome
+  - values:
+    - Success
+    - CriticalFailure
+
+Reconnect cache behavior
+- On normal HighwayBuilder activate:
+  - clears disconnect-preserve flag
+  - captures the initial desired reconnect module cache from live eligible active modules
+  - validates configured critical reconnect module names
+- While HighwayBuilder is active:
+  - listens for ActiveModulesChangedEvent
+  - refreshes desiredReconnectActiveModules from current live eligible active modules
+  - ignores updates when:
+    - the cache is frozen
+    - a restore pass is in progress
+    - the client is not cleanly live-connected on MAIN_SERVER
+- On game leave while HighwayBuilder is active:
+  - freezes reconnect module cache if needed
+  - preserves frozen cache across the disconnect-driven deactivation
+- On HighwayBuilder deactivate:
+  - clears frozen reconnect cache on reconnect-failure deactivates
+  - clears full reconnect module cache runtime on ordinary deactivates
+  - preserves frozen reconnect cache during disconnect-driven deactivate after onGameLeave
+
+Reconnect cache helpers added
+- isEligibleReconnectCachedModule(Module module)
+- findModuleByExactTitle(String title)
+- warnUnknownCriticalReconnectModuleTitle(String title)
+- warnExcludedCriticalReconnectModuleTitle(String title)
+- validateCriticalReconnectModuleTitles()
+- collectEligibleActiveReconnectModules()
+- hasLiveServerConnectionForReconnectModuleCache()
+- canCaptureReconnectModuleCacheFromLiveState()
+- isLiveConnectedOnMainServerForReconnectModuleCache()
+- refreshDesiredReconnectModuleCacheFromLiveState(String reason)
+- freezeReconnectModuleCacheIfNeeded(long generation, String reason)
+- clearFrozenReconnectModuleCache(String reason)
+- clearReconnectModuleCacheRuntime(String reason)
+- clearReconnectModuleRestoreSnapshot(String reason)
+- resolveCriticalReconnectModules()
+- tryEnableReconnectCachedModule(Module module)
+- hardFailForReconnectCriticalModuleRestore(String moduleTitle)
+- restoreReconnectCachedModules(long generation)
+
+Reconnect cache exclusions
+- HighwayBuilderTHM
+- THMHwyMonitor
+- AutoReconnect
+- ObsidianFarmerTHM
+- Timer
+- Speed
+- HotbarManager
+- AntiDrop
+- SpeedMine
+
+Critical reconnect module behavior
+- Critical module names are resolved by exact module title.
+- Unknown configured titles are ignored and warned once.
+- Excluded configured titles are ignored and warned once.
+- Critical status only applies if the module:
+  - resolves successfully
+  - is eligible for reconnect caching
+  - exists in the frozen pre-transfer desired cache
+- During restore:
+  - critical modules are restored before non-critical modules
+  - if a critical module fails to re-enable:
+    - frozen reconnect cache is cleared
+    - HighwayBuilder hard-fails through hardFailForMonitorRecovery(...)
+    - THMHwyMonitor non-restart hard-fail handling is triggered
+    - restore returns CriticalFailure
+- Non-critical restore failures:
+  - do not abort reconnect
+  - leave the module in the desired cache baseline for future reconnect attempts
+
+THMHwyMonitor integration changes
+- On reconnect failure:
+  - clears HighwayBuilder frozen reconnect module restore snapshot before restart recovery cleanup
+- On non-restart hard-fail handling:
+  - clears HighwayBuilder frozen reconnect module restore snapshot
+- On general restart automation state clear:
+  - clears HighwayBuilder frozen reconnect module restore snapshot
+- On reconnect safety stop:
+  - clears HighwayBuilder frozen reconnect module restore snapshot
+- In successful post-rejoin resume path:
+  - after builder.resumeFromReconnect(...) succeeds
+  - calls builder.restoreReconnectCachedModules(activeReconnectCycleId)
+  - if result is CriticalFailure:
+    - stops normal reconnect success continuation
+    - clears post-rejoin direction gate state
+    - leaves hard-fail handling to own the remainder of the flow
+
+Behavior intentionally unchanged
+- Center Speed/Timer baseline ownership and restore
+- MineEChest timer ownership and restore
+- HotbarManager / AntiDrop / SpeedMine companion ownership
+- THMHwyMonitor ownership of AutoReconnect/reconnect automation
+- ObsidianFarmer reconnect ownership
+
+Notes
+- This file documents the reconnect module cache plan work only.
+- Runtime logging for this feature was intentionally removed after the feature implementation, per user request.

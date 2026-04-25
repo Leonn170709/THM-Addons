@@ -7,6 +7,7 @@
   },
   "mixins": [
     "BlockedServersMixin",
+    "ChatInputSuggestorMixin",
     "HighwayBuilderBowMixin",
     "HighwayBuilderCameraMixin",
     "HighwayBuilderEntityMixin",
@@ -23,6 +24,7 @@
     "meteor.CrystalAuraMixin",
     "meteor.GuiThemeMixin",
     "meteor.KillAuraMixin",
+    "meteor.ModuleMixin",
     "meteor.MeteorGuiThemeMixin",
     "meteor.NametagsMixin",
     "meteor.NoSlowMixin",

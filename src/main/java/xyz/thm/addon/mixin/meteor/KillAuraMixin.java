@@ -40,6 +40,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
+import xyz.thm.addon.modules.ModuleManager;
 import xyz.thm.addon.system.THMSystem;
 import xyz.thm.addon.utils.InventoryManager;
 import xyz.thm.addon.utils.InventoryManager.SwapMode;
@@ -180,6 +181,7 @@ public abstract class KillAuraMixin extends Module {
         bephax$switchTimer = System.currentTimeMillis();
         bephax$autoSwapTimer = System.currentTimeMillis();
         bephax$silentSwapped = false;
+        ModuleManager.traceKillAuraMixinEvent("onActivate", "Kill Aura activated.");
     }
     @Inject(method = "onDeactivate", at = @At("TAIL"))
     private void onDeactivateInject(CallbackInfo ci) {
@@ -189,17 +191,32 @@ public abstract class KillAuraMixin extends Module {
             bephax$inventoryManager.syncToClient();
             bephax$silentSwapped = false;
         }
+        ModuleManager.traceKillAuraMixinEvent("onDeactivate", "Kill Aura deactivated.");
     }
+
+    @Inject(method = "onTick", at = @At("HEAD"), cancellable = true)
+    private void onTickGuardDisconnectedState(CallbackInfo ci) {
+        if (mc.player != null && mc.world != null) return;
+
+        attacking = false;
+        bephax$silentRotations = null;
+        bephax$rotated = false;
+        ModuleManager.traceKillAuraMixinEvent("disconnected-guard", "Cleared attacking/rotation state because player or world was null.");
+        ci.cancel();
+    }
+
     @Unique
     @EventHandler(priority = EventPriority.HIGHEST)
     private void onPreTickHighest(TickEvent.Pre event) {
         if (!isActive() || mc.player == null) return;
         if (!bephax$grimRotate.get()) return;
         if (rotation.get() != KillAura.RotationMode.None) {
+            ModuleManager.traceKillAuraMixinEvent("force-rotation-none", "Forced rotation mode to None for grim rotate path.");
             rotation.set(KillAura.RotationMode.None);
         }
         if (bephax$swapMode.get() == SwapMode.Silent) {
             if (autoSwitch.get()) {
+                ModuleManager.traceKillAuraMixinEvent("force-autoswitch-off", "Forced autoSwitch off for silent swap path.");
                 autoSwitch.set(false);
             }
         }
