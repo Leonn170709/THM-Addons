@@ -52,6 +52,9 @@ tasks {
     jar {
         inputs.property("archivesName", project.base.archivesName.get())
 
+        exclude("xyz/thm/addon/modules/ElytraUAV.class")
+        exclude("xyz/thm/addon/modules/ElytraUAV$*.class")
+
         from("LICENSE") {
             rename { "${it}_${inputs.properties["archivesName"]}" }
         }

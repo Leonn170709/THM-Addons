@@ -37,12 +37,9 @@ public final class KitbotChatRouter {
             return;
         }
 
-        if (frontend.isActive()) {
-            frontend.warning("KitbotFrontend is already active.");
+        if (!KitbotFrontend.submitChatRequest(result.request())) {
+            frontend.warning("KitBot request window is already active.");
             return;
         }
-
-        frontend.applyChatRequest(result.request());
-        frontend.toggle();
     }
 }

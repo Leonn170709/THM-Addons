@@ -116,7 +116,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new FlightBypass());
         Modules.get().add(new KitbotFrontend());
         Modules.get().add(new ChestTrackerModule());
-        Modules.get().add(new ElytraUAV()); //Still WIP
+        addOptionalModule("xyz.thm.addon.modules.ElytraUAV"); // Still WIP and may be excluded from release jars.
         if (BaritoneUtils.IS_AVAILABLE) {
             Modules.get().add(new THMHwyMonitor());
             Modules.get().add(new ObsidianFarmerTHM());

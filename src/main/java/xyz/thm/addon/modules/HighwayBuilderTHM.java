@@ -123,6 +123,9 @@ public class HighwayBuilderTHM extends Module {
     private static final String RESTART_DETECTED_MARKER = "server restart detected";
     private static final String STATS_ARTIFACT_MAGIC = "HB_STATS_ARTIFACT_V1";
     private static final int STATS_ARTIFACT_VERSION = 1;
+    private static final long KITBOT_FRONTEND_WINDOW_BUFFER_MS = 1_000L;
+    private static final long KITBOT_INVENTORY_PROOF_GRACE_MS = 30_000L;
+    private static final int KITBOT_MAX_ACCEPTED_ATTEMPTS = 3;
     private static final long STATS_CHECKPOINT_INTERVAL_MS = 10 * 60 * 1000L;
     private static final int STATS_SCREENSHOT_DELAY_MS = 250;
     private static final long STATS_MEMORY_RETRY_RECHECK_MS = 5_000L;
@@ -591,6 +594,17 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+    private final Setting<List<Item>> protectedItems = sgInventory.add(new ItemListSetting.Builder()
+        .name("protected-items")
+        .description("Items that trash cleanup must never throw out, even if they are also listed as trash.")
+        .defaultValue(
+            Items.ENDER_CHEST, Items.OBSIDIAN, Items.NETHERITE_PICKAXE, Items.NETHERITE_SWORD,
+            Items.NETHERITE_SHOVEL, Items.NETHERITE_AXE, Items.ELYTRA, Items.TOTEM_OF_UNDYING,
+            Items.ENCHANTED_GOLDEN_APPLE
+        )
+        .build()
+    );
+
     private final Setting<Boolean> foodRestock = sgInventory.add(new BoolSetting.Builder()
         .name("food-restock")
         .description("Restocks one configured food stack when your valid food count drops to the saved amount.")
@@ -636,7 +650,7 @@ public class HighwayBuilderTHM extends Module {
 
     private final Setting<Boolean> ejectUselessShulkers = sgInventory.add(new BoolSetting.Builder()
         .name("eject-useless-shulkers")
-        .description("Whether you should eject useless shulkers. Warning - will throw out any shulkers that don't contain blocks to place, pickaxes, or food. Be careful with your kits.")
+        .description("Whether you should eject useless shulkers. Shulkers containing protected items, blocks to place, pickaxes, or food are preserved.")
         .defaultValue(true)
         .build()
     );
@@ -949,11 +963,11 @@ public class HighwayBuilderTHM extends Module {
     private final ForwardSchedulerRuntime forwardSchedulerRuntime = new ForwardSchedulerRuntime();
     private int invalidRestockRecoveryRetries;
     private boolean invalidRestockRecoveryPending;
-    private boolean kitbotTpHandled;
     private boolean kitbotUpdateOnFinishActive;
     private long kitbotUpdateOnFinishStartTick;
     private boolean kitbotUpdateOnFinishTpAccepted;
     private boolean kitbotOrderInFlight;
+    private boolean kitbotOrderFrontendSucceeded;
     private boolean kitbotEnclosureActive;
     private boolean kitbotEnclosureRestorePending;
     private boolean kitbotReturnAnchorSaved;
@@ -963,9 +977,12 @@ public class HighwayBuilderTHM extends Module {
     private int kitbotOrderBaselineShulkerCount;
     private int kitbotOrderExpectedShulkerGain;
     private int kitbotOrderSentAtAge;
-    private int kitbotOrderRetryCount;
+    private int kitbotOrderAcceptedAttempts;
     private int kitbotOrderLastObservedMatchingShulkerCount;
     private int kitbotPartialDeliveryGraceUntilAge;
+    private long kitbotNextSubmitAtMs;
+    private long kitbotInventoryProofDeadlineMs;
+    private final KitbotFrontend.LifecycleListener kitbotRestockLifecycleListener = this::onKitbotRestockLifecycle;
     private CenterSpeedSnapshot centerSpeedSnapshot;
     private boolean centerSpeedSnapshotOwned;
     private boolean centerSpeedOverrideActive;
@@ -1394,6 +1411,7 @@ public class HighwayBuilderTHM extends Module {
         ReconnectResumeContext reconnectResume = reconnectResumeContext;
         reconnectResumeContext = null;
         boolean reconnectActivation = reconnectResume != null;
+        KitbotFrontend.addLifecycleListener(kitbotRestockLifecycleListener);
         clearKitbotRuntimeState("module-activate");
 
         if (centerSpeedMonitorRecoveryOwned && !resumeStatsSessionOnNextActivate) {
@@ -1531,6 +1549,7 @@ public class HighwayBuilderTHM extends Module {
     }
     @Override
     public void onDeactivate() {
+        KitbotFrontend.removeLifecycleListener(kitbotRestockLifecycleListener);
         if (input != null) input.stop();
         resetEatingPauseWatchdog();
         countedBrokenForwardPositions.clear();
@@ -2073,7 +2092,7 @@ public class HighwayBuilderTHM extends Module {
 
             int slot = State.Forward.findAndMoveToHotbar(
                 this,
-                stack -> stack.getItem() instanceof BlockItem && trashItems.get().contains(stack.getItem()),
+                stack -> stack.getItem() instanceof BlockItem && isDroppableTrashStack(stack),
                 false
             );
             if (slot == -1) {
@@ -3051,14 +3070,103 @@ public class HighwayBuilderTHM extends Module {
             }
             return;
         }
+    }
 
-        if (state != State.KitbotOrder || kitbotTpHandled) return;
+    private void onKitbotRestockLifecycle(KitbotFrontend.LifecycleEvent event) {
+        if (!shouldProcessKitbotRestockLifecycle(event)) return;
 
-        if (msg.contains(KITBOT_NAME + " wants to teleport to you")) {
-            ChatUtils.sendPlayerMsg("/tpy " + KITBOT_NAME);
-            info("Accepted " + KITBOT_NAME + " teleport request.");
-            kitbotTpHandled = true;
+        switch (event.state()) {
+            case Succeeded -> handleKitbotRestockFrontendSuccess(event);
+            case Failed -> handleKitbotRestockFrontendFailure(event);
+            default -> {
+            }
         }
+    }
+
+    private boolean shouldProcessKitbotRestockLifecycle(KitbotFrontend.LifecycleEvent event) {
+        return event != null
+            && state == State.KitbotOrder
+            && kitbotOrderInFlight
+            && event.origin() == KitbotFrontend.RequestOrigin.API
+            && event.mode() == KitbotFrontend.Mode.Kit;
+    }
+
+    private void handleKitbotRestockFrontendSuccess(KitbotFrontend.LifecycleEvent event) {
+        kitbotOrderInFlight = false;
+        kitbotOrderFrontendSucceeded = true;
+        kitbotInventoryProofDeadlineMs = System.currentTimeMillis() + KITBOT_INVENTORY_PROOF_GRACE_MS;
+        kitbotNextSubmitAtMs = 0L;
+
+        if (restockDebugLog.get()) {
+            restockDebug(
+                "KitbotOrder frontend success; waiting up to %dms for matching shulker proof (detail=%s).",
+                KITBOT_INVENTORY_PROOF_GRACE_MS,
+                event.detail()
+            );
+        }
+    }
+
+    private void handleKitbotRestockFrontendFailure(KitbotFrontend.LifecycleEvent event) {
+        kitbotOrderInFlight = false;
+        kitbotOrderFrontendSucceeded = false;
+        kitbotInventoryProofDeadlineMs = 0L;
+
+        KitbotFrontend.FailureReason reason = event.failureReason();
+        String detail = event.detail();
+        if (isRetryableKitbotRestockFailure(reason) && kitbotOrderAcceptedAttempts < KITBOT_MAX_ACCEPTED_ATTEMPTS) {
+            scheduleKitbotRestockSubmitAfterWindow(
+                event.remainingWindowMs(),
+                "frontend failure " + describeKitbotFrontendFailure(reason, detail)
+            );
+            warning(
+                "Kitbot restock attempt %d/%d failed (%s). Retrying after KitBot window clears.",
+                kitbotOrderAcceptedAttempts,
+                KITBOT_MAX_ACCEPTED_ATTEMPTS,
+                describeKitbotFrontendFailure(reason, detail)
+            );
+            return;
+        }
+
+        String message = "Kitbot restock failed";
+        if (kitbotOrderAcceptedAttempts >= KITBOT_MAX_ACCEPTED_ATTEMPTS && isRetryableKitbotRestockFailure(reason)) {
+            message += " after " + KITBOT_MAX_ACCEPTED_ATTEMPTS + " accepted attempts";
+        }
+        message += ": " + describeKitbotFrontendFailure(reason, detail);
+        failActiveKitbotRestock(message);
+    }
+
+    private boolean isRetryableKitbotRestockFailure(KitbotFrontend.FailureReason reason) {
+        if (reason == null) return false;
+        return switch (reason) {
+            case TimedOut, Disconnected, TransportFailure, GenericError, UnableToFulfill -> true;
+            case InsufficientTokens, VoucherCredits, OutOfStock, InvalidKit, NotWhitelisted, MaxOrderViolation, PermissionDenied -> false;
+        };
+    }
+
+    private String describeKitbotFrontendFailure(KitbotFrontend.FailureReason reason, String detail) {
+        String safeDetail = detail == null || detail.isBlank() ? "no detail" : detail;
+        return reason == null ? safeDetail : reason + " - " + safeDetail;
+    }
+
+    private void scheduleKitbotRestockSubmitAfterWindow(long remainingWindowMs, String reason) {
+        long remaining = Math.max(Math.max(remainingWindowMs, KitbotFrontend.getRemainingWindowMs()), 0L);
+        kitbotNextSubmitAtMs = System.currentTimeMillis() + remaining + KITBOT_FRONTEND_WINDOW_BUFFER_MS;
+        if (restockDebugLog.get()) {
+            restockDebug(
+                "KitbotOrder scheduled next submit in %dms after %s (frontendRemaining=%dms).",
+                remaining + KITBOT_FRONTEND_WINDOW_BUFFER_MS,
+                reason,
+                remaining
+            );
+        }
+    }
+
+    private void failActiveKitbotRestock(String message) {
+        returnPlayerToKitbotAnchorIfSaved();
+        invalidateKitbotBlockadeState("kitbot-order-failed");
+        clearKitbotRuntimeState("kitbot-order-failed");
+        if (restockTask.failActiveTaskHard(message)) return;
+        error(message);
     }
 
     @EventHandler
@@ -3466,15 +3574,28 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private void clearKitbotOrderTracking(String reason) {
-        if (!kitbotOrderInFlight) return;
+        boolean hadOrderState = kitbotOrderInFlight
+            || kitbotOrderFrontendSucceeded
+            || kitbotOrderBaselineShulkerCount != 0
+            || kitbotOrderExpectedShulkerGain != 0
+            || kitbotOrderSentAtAge != 0
+            || kitbotOrderAcceptedAttempts != 0
+            || kitbotOrderLastObservedMatchingShulkerCount != 0
+            || kitbotPartialDeliveryGraceUntilAge != 0
+            || kitbotNextSubmitAtMs != 0L
+            || kitbotInventoryProofDeadlineMs != 0L;
+        if (!hadOrderState) return;
 
         kitbotOrderInFlight = false;
+        kitbotOrderFrontendSucceeded = false;
         kitbotOrderBaselineShulkerCount = 0;
         kitbotOrderExpectedShulkerGain = 0;
         kitbotOrderSentAtAge = 0;
-        kitbotOrderRetryCount = 0;
+        kitbotOrderAcceptedAttempts = 0;
         kitbotOrderLastObservedMatchingShulkerCount = 0;
         kitbotPartialDeliveryGraceUntilAge = 0;
+        kitbotNextSubmitAtMs = 0L;
+        kitbotInventoryProofDeadlineMs = 0L;
         if (restockDebugLog.get()) restockDebug("KitbotOrder cleared in-flight order tracking (%s).", reason);
     }
 
@@ -3492,7 +3613,6 @@ public class HighwayBuilderTHM extends Module {
         kitbotReturnX = kitbotReturnY = kitbotReturnZ = 0;
         kitbotReturnYaw = 0;
         kitbotAnchorPos.set(0, 0, 0);
-        kitbotTpHandled = false;
 
         if (hadEnclosureState && restockDebugLog.get()) {
             restockDebug("Kitbot enclosure state cleared (%s).", reason);
@@ -3595,7 +3715,7 @@ public class HighwayBuilderTHM extends Module {
         Block block = state.getBlock();
         Item item = block.asItem();
         return blocksToPlace.get().contains(block)
-            || (item != Items.AIR && trashItems.get().contains(item));
+            || isDroppableTrashItem(item);
     }
 
     private boolean isKitbotRequiredAirClear(BlockState state) {
@@ -3832,7 +3952,7 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private boolean isForwardTrashPlacementStack(ItemStack stack) {
-        return stack.getItem() instanceof BlockItem && trashItems.get().contains(stack.getItem());
+        return stack.getItem() instanceof BlockItem && isDroppableTrashStack(stack);
     }
 
     private boolean isForwardLatchedPlaceSlotValid(ForwardTask task) {
@@ -5954,7 +6074,7 @@ public class HighwayBuilderTHM extends Module {
         for (int i = 0; i < mc.player.getInventory().getMainStacks().size(); i++) {
             ItemStack itemStack = mc.player.getInventory().getStack(i);
             if (!(itemStack.getItem() instanceof BlockItem)) continue;
-            if (!trashItems.get().contains(itemStack.getItem())) continue;
+            if (!isDroppableTrashStack(itemStack)) continue;
             return i;
         }
 
@@ -6127,25 +6247,54 @@ public class HighwayBuilderTHM extends Module {
         restockTask.setEnderChests();
     }
 
+    private boolean isProtectedItem(Item item) {
+        return item != null
+            && item != Items.AIR
+            && protectedItems.get().contains(item);
+    }
+
+    private boolean isProtectedItemStack(ItemStack itemStack) {
+        return itemStack != null
+            && !itemStack.isEmpty()
+            && isProtectedItem(itemStack.getItem());
+    }
+
+    private boolean isDroppableTrashItem(Item item) {
+        return item != null
+            && item != Items.AIR
+            && trashItems.get().contains(item)
+            && !isProtectedItem(item);
+    }
+
+    private boolean isDroppableTrashStack(ItemStack itemStack) {
+        return itemStack != null
+            && !itemStack.isEmpty()
+            && isDroppableTrashItem(itemStack.getItem());
+    }
+
     private boolean isUsefulCursorStack(ItemStack itemStack) {
         if (itemStack == null || itemStack.isEmpty()) return false;
+        if (isProtectedItemStack(itemStack)) return true;
         if (itemStack.isIn(ItemTags.PICKAXES)) return true;
         if (isConfiguredFoodStack(itemStack)) return true;
         if (Utils.isShulker(itemStack.getItem())) return isUsefulShulkerStack(itemStack);
         if (itemStack.getItem() instanceof BlockItem bi) {
-            if (trashItems.get().contains(itemStack.getItem())) return false;
+            if (isDroppableTrashStack(itemStack)) return false;
             if (blocksToPlace.get().contains(bi.getBlock())) return true;
             if (bi == Items.ENDER_CHEST) return true;
         }
-        if (itemStack.isOf(Items.OBSIDIAN) && !trashItems.get().contains(Items.OBSIDIAN)) return true;
+        if (itemStack.isOf(Items.OBSIDIAN) && !isDroppableTrashItem(Items.OBSIDIAN)) return true;
         return false;
     }
 
     private boolean isUsefulShulkerStack(ItemStack itemStack) {
+        if (isProtectedItemStack(itemStack)) return true;
+
         ItemStack[] items = new ItemStack[27];
         Utils.getItemsInContainerItem(itemStack, items);
 
         for (ItemStack stack : items) {
+            if (isProtectedItemStack(stack)) return true;
             if (stack.getItem() instanceof BlockItem bi
                 && (blocksToPlace.get().contains(bi.getBlock())
                 || (blocksToPlace.get().contains(Blocks.OBSIDIAN) && bi == Items.ENDER_CHEST))) {
@@ -7468,7 +7617,7 @@ public class HighwayBuilderTHM extends Module {
                 // still should prioritise trash
                 int slot = findAndMoveToHotbar(b, itemStack -> {
                     if (!(itemStack.getItem() instanceof BlockItem)) return false;
-                    return b.trashItems.get().contains(itemStack.getItem());
+                    return b.isDroppableTrashStack(itemStack);
                 });
 
                 // next we prioritise placement blocks
@@ -7906,12 +8055,10 @@ public class HighwayBuilderTHM extends Module {
 
                     for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
                         ItemStack itemStack = b.mc.player.getInventory().getStack(i);
-                        if (itemStack.getItem() == Items.OBSIDIAN && !b.trashItems.get().contains(Items.OBSIDIAN)) continue;
-
                         boolean droppableShulker = Utils.isShulker(itemStack.getItem())
                             && b.ejectUselessShulkers.get()
                             && !isUsefulShulker(b, itemStack);
-                        boolean droppableTrashItem = b.trashItems.get().contains(itemStack.getItem());
+                        boolean droppableTrashItem = b.isDroppableTrashStack(itemStack);
                         if (!droppableShulker && !droppableTrashItem) continue;
 
                         if (isReservedHotbarSlot(b, i)) {
@@ -8022,7 +8169,7 @@ public class HighwayBuilderTHM extends Module {
             private boolean isEligibleTrashReserveStack(HighwayBuilderTHM b, ItemStack itemStack) {
                 return itemStack.getItem() instanceof BlockItem
                     && !Utils.isShulker(itemStack.getItem())
-                    && b.trashItems.get().contains(itemStack.getItem());
+                    && b.isDroppableTrashStack(itemStack);
             }
 
             private boolean isUsefulShulker(HighwayBuilderTHM b, ItemStack itemStack) {
@@ -8290,12 +8437,10 @@ public class HighwayBuilderTHM extends Module {
             private static final int KITBOT_FAILSAFE_MIN_SHULKERS = 2;
             private static final int KITBOT_FAILSAFE_DELAY_TICKS = 200;
             private static final int KITBOT_PARTIAL_DELIVERY_GRACE_TICKS = 40;
-            private static final int KITBOT_NO_DELIVERY_RETRY_TICKS = 20 * 180;
             private enum FailureMode {
                 KITBOT_LOCAL,
                 POST_DELIVERY_RESTORE
             }
-            private boolean orderSent;
             private boolean positionReady;
             private BlockadeType sourceBlockadeType;
             private HorizontalDirection containerDirection;
@@ -8305,12 +8450,10 @@ public class HighwayBuilderTHM extends Module {
 
             @Override
             protected void start(HighwayBuilderTHM b) {
-                orderSent = b.kitbotOrderInFlight;
                 positionReady = false;
                 sourceBlockadeType = b.getEffectiveBlockadeType();
                 containerDirection = b.getRestockContainerDirection(b.dir);
                 expansionDirection = b.getKitbotExpansionDirection(containerDirection);
-                b.kitbotTpHandled = false;
                 b.cacheKitbotReturnAnchorFromPlayer();
                 b.kitbotEnclosureActive = true;
                 b.kitbotEnclosureRestorePending = false;
@@ -8358,57 +8501,90 @@ public class HighwayBuilderTHM extends Module {
                     return;
                 }
 
-                if (!orderSent) {
-                    KitbotRestockKit kit = b.kitbotRestockKit.get();
-                    int amount = 4;
-                    b.kitbotOrderBaselineShulkerCount = countMatchingRestockShulkersInInventory(b);
-                    b.kitbotOrderExpectedShulkerGain = amount;
-                    b.kitbotOrderSentAtAge = b.mc.player.age;
-                    b.kitbotOrderRetryCount = 0;
-                    b.kitbotOrderLastObservedMatchingShulkerCount = b.kitbotOrderBaselineShulkerCount;
-                    b.kitbotPartialDeliveryGraceUntilAge = 0;
-                    KitbotFrontend.kitOrder(kit.kitName, amount);
-                    b.info("Ordering kit '%s' x%d from %s.", kit.kitName, amount, KITBOT_NAME);
-                    orderSent = true;
-                    b.kitbotOrderInFlight = true;
+                if (!b.kitbotOrderInFlight && !b.kitbotOrderFrontendSucceeded) {
+                    submitKitbotOrderIfReady(b);
                     return;
                 }
 
-                if (handleNoDeliveryTimeout(b)) return;
+                if (b.kitbotOrderInFlight) return;
 
-                if (hasExpectedKitDelivery(b)) {
+                if (b.kitbotOrderFrontendSucceeded && hasExpectedKitDelivery(b)) {
                     b.returnPlayerToKitbotAnchorIfSaved();
                     b.kitbotEnclosureRestorePending = true;
+                    return;
+                }
+
+                if (b.kitbotOrderFrontendSucceeded && System.currentTimeMillis() >= b.kitbotInventoryProofDeadlineMs) {
+                    failKitbotOrder(
+                        b,
+                        "Kitbot restock delivery arrived, but matching shulkers were not detected within 30 seconds.",
+                        FailureMode.KITBOT_LOCAL
+                    );
                 }
             }
 
-            private boolean handleNoDeliveryTimeout(HighwayBuilderTHM b) {
-                int currentShulkerCount = countMatchingRestockShulkersInInventory(b);
-                int gainedShulkers = Math.max(currentShulkerCount - b.kitbotOrderBaselineShulkerCount, 0);
-                int ticksWaiting = Math.max(b.mc.player.age - b.kitbotOrderSentAtAge, 0);
+            private void submitKitbotOrderIfReady(HighwayBuilderTHM b) {
+                long now = System.currentTimeMillis();
+                if (b.kitbotNextSubmitAtMs > 0L && now < b.kitbotNextSubmitAtMs) return;
 
-                if (gainedShulkers > 0 || ticksWaiting < KITBOT_NO_DELIVERY_RETRY_TICKS) return false;
-
-                if (b.kitbotOrderRetryCount == 0) {
-                    KitbotRestockKit kit = b.kitbotRestockKit.get();
-                    int amount = Math.max(b.kitbotOrderExpectedShulkerGain, 4);
-                    KitbotFrontend.kitOrder(kit.kitName, amount);
-                    b.kitbotOrderSentAtAge = b.mc.player.age;
-                    b.kitbotOrderRetryCount = 1;
-                    b.warning("Kitbot restock received no shulkers after 3 minutes. Retrying kit order.");
-                    if (b.restockDebugLog.get()) {
-                        b.restockDebug("KitbotOrder retry issued after %d ticks with gainedShulkers=%d baseline=%d current=%d.",
-                            ticksWaiting,
-                            gainedShulkers,
-                            b.kitbotOrderBaselineShulkerCount,
-                            currentShulkerCount
-                        );
-                    }
-                    return true;
+                if (b.kitbotOrderAcceptedAttempts >= KITBOT_MAX_ACCEPTED_ATTEMPTS) {
+                    failKitbotOrder(b, "Kitbot restock failed after " + KITBOT_MAX_ACCEPTED_ATTEMPTS + " accepted attempts.", FailureMode.KITBOT_LOCAL);
+                    return;
                 }
 
-                failKitbotOrder(b, "Kitbot restock failed.", FailureMode.KITBOT_LOCAL);
-                return true;
+                KitbotRestockKit kit = b.kitbotRestockKit.get();
+                int amount = Math.max(b.kitbotOrderExpectedShulkerGain, 4);
+                int baseline = b.kitbotOrderAcceptedAttempts == 0
+                    ? countMatchingRestockShulkersInInventory(b)
+                    : b.kitbotOrderBaselineShulkerCount;
+
+                if (!KitbotFrontend.kitOrder(kit.kitName, amount)) {
+                    long remainingWindowMs = KitbotFrontend.getRemainingWindowMs();
+                    if (remainingWindowMs > 0L || KitbotFrontend.hasActiveWindow()) {
+                        b.scheduleKitbotRestockSubmitAfterWindow(remainingWindowMs, "blocked frontend window");
+                        if (b.restockDebugLog.get()) {
+                            b.restockDebug("KitbotOrder submit blocked by frontend window; acceptedAttempts=%d/%d.",
+                                b.kitbotOrderAcceptedAttempts,
+                                KITBOT_MAX_ACCEPTED_ATTEMPTS
+                            );
+                        }
+                        return;
+                    }
+
+                    failKitbotOrder(b, "Kitbot restock request could not be submitted to KitbotFrontend.", FailureMode.KITBOT_LOCAL);
+                    return;
+                }
+
+                if (b.kitbotOrderAcceptedAttempts == 0) {
+                    b.kitbotOrderBaselineShulkerCount = baseline;
+                    b.kitbotOrderExpectedShulkerGain = amount;
+                    b.kitbotOrderLastObservedMatchingShulkerCount = baseline;
+                    b.kitbotPartialDeliveryGraceUntilAge = 0;
+                }
+
+                b.kitbotOrderAcceptedAttempts++;
+                b.kitbotOrderSentAtAge = b.mc.player.age;
+                b.kitbotOrderInFlight = true;
+                b.kitbotOrderFrontendSucceeded = false;
+                b.kitbotNextSubmitAtMs = 0L;
+                b.kitbotInventoryProofDeadlineMs = 0L;
+                b.info(
+                    "Ordering kit '%s' x%d from %s (attempt %d/%d).",
+                    kit.kitName,
+                    amount,
+                    KITBOT_NAME,
+                    b.kitbotOrderAcceptedAttempts,
+                    KITBOT_MAX_ACCEPTED_ATTEMPTS
+                );
+
+                if (b.restockDebugLog.get()) {
+                    b.restockDebug("KitbotOrder accepted by frontend: baseline=%d expectedGain=%d attempts=%d/%d.",
+                        b.kitbotOrderBaselineShulkerCount,
+                        b.kitbotOrderExpectedShulkerGain,
+                        b.kitbotOrderAcceptedAttempts,
+                        KITBOT_MAX_ACCEPTED_ATTEMPTS
+                    );
+                }
             }
 
             private boolean isAtOrderOffsetTarget(HighwayBuilderTHM b) {
@@ -8640,7 +8816,7 @@ public class HighwayBuilderTHM extends Module {
             private int findKitbotBlockSlot(HighwayBuilderTHM b) {
                 int slot = findAndMoveToHotbar(b, itemStack -> {
                     if (!(itemStack.getItem() instanceof BlockItem)) return false;
-                    return b.trashItems.get().contains(itemStack.getItem());
+                    return b.isDroppableTrashStack(itemStack);
                 }, false);
 
                 if (slot != -1) return slot;
@@ -8686,11 +8862,7 @@ public class HighwayBuilderTHM extends Module {
                 if (failureMode == FailureMode.POST_DELIVERY_RESTORE && b.restockDebugLog.get()) {
                     b.restockDebug("KitbotOrder post-delivery restore failure: %s", message);
                 }
-                b.returnPlayerToKitbotAnchorIfSaved();
-                b.invalidateKitbotBlockadeState("kitbot-order-failed");
-                b.clearKitbotRuntimeState("kitbot-order-failed");
-                if (b.restockTask.failActiveTaskHard(message)) return;
-                b.error(message);
+                b.failActiveKitbotRestock(message);
             }
         },
 
@@ -10825,7 +10997,7 @@ public class HighwayBuilderTHM extends Module {
                 if (replaceTools && AutoTool.isTool(itemStack)) return i;
 
                 // Store the slot if it contains thrash
-                if (b.trashItems.get().contains(itemStack.getItem())) thrashSlot = i;
+                if (b.isDroppableTrashStack(itemStack)) thrashSlot = i;
 
                 // Update tracked stats about slots that contain building blocks
                 if (itemStack.getItem() instanceof BlockItem blockItem && (b.blocksToPlace.get().contains(blockItem.getBlock()) || b.blocksToPlace.get().contains(Blocks.OBSIDIAN) && blockItem == Items.ENDER_CHEST)) {
@@ -11077,7 +11249,7 @@ public class HighwayBuilderTHM extends Module {
         protected int findBlocksToPlacePrioritizeTrash(HighwayBuilderTHM b) {
             int slot = findAndMoveToHotbar(b, itemStack -> {
                 if (!(itemStack.getItem() instanceof BlockItem)) return false;
-                return b.trashItems.get().contains(itemStack.getItem());
+                return b.isDroppableTrashStack(itemStack);
             });
 
             return slot != -1 ? slot : findBlocksToPlace(b);

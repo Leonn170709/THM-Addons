@@ -69,6 +69,7 @@ public class ElytraRoute extends Module {
     private static final long MAIN_SERVER_GATE_WARNING_INTERVAL_MS = 5_000L;
     private static final int LANDING_CHUNK_LOAD_RADIUS = 1;
     private static final long LANDING_CHUNK_WARNING_INTERVAL_MS = 5_000L;
+    private static final int RESTOCK_INVALID_SOURCE_RETRY_LIMIT = PLAYER_INVENTORY_SLOTS;
 
     private final SettingGroup sgRoute = settings.getDefaultGroup();
     private final SettingGroup sgRestock = settings.createGroup("Restock");
@@ -349,6 +350,9 @@ public class ElytraRoute extends Module {
     private ItemEntity pickupTarget;
     private int currentSourceFailureTicks;
     private int expectedShulkerCountAfterPickup;
+    private int invalidRestockSourceAttempts;
+    private boolean restockOpenedSourceValidated;
+    private boolean openedInvalidRestockSource;
     private RestockFailureReason deferredRestockFailureReason;
     private String deferredRestockFailureMessage;
 
@@ -419,7 +423,10 @@ public class ElytraRoute extends Module {
         handleAutoReconnectToggleTransitions();
         clearStaleDisconnectedScreenIfLiveConnected();
 
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.world == null) {
+            releaseMovement();
+            return;
+        }
 
         if (!allowMainServerRouteActions("tick")) return;
 
@@ -483,6 +490,8 @@ public class ElytraRoute extends Module {
     private void onGameLeft(GameLeftEvent event) {
         if (!isActive()) return;
 
+        releaseMovement();
+
         if (autoReconnect.get()) {
             beginRouteReconnectPause("game-left", true);
         } else {
@@ -492,6 +501,7 @@ public class ElytraRoute extends Module {
 
     private boolean shouldForceRouteFlightMovement() {
         if (mc.player == null || mc.world == null) return false;
+        if (!hasLiveServerConnection()) return false;
         if (routeStartPending || reconnectPaused || state != State.FLIGHT) return false;
         if (ServerStatusHandler.getInstance().getCommittedState() != ServerState.MAIN_SERVER) return false;
         return !isInsideArrivalRadius() && !needsFoodRestock() && !needsElytraRestock();
@@ -604,7 +614,8 @@ public class ElytraRoute extends Module {
 
     private boolean allowMainServerRouteActions(String source) {
         ServerState serverState = ServerStatusHandler.getInstance().getCommittedState();
-        if (serverState == ServerState.MAIN_SERVER) {
+        boolean liveConnection = hasLiveServerConnection();
+        if (liveConnection && serverState == ServerState.MAIN_SERVER) {
             mainServerGateTicks = 0;
             lastMainServerGateWarningAtMs = 0L;
 
@@ -641,7 +652,10 @@ public class ElytraRoute extends Module {
 
         reconnectPaused = true;
         if (autoReconnect.get()) {
-            armRouteReconnectIfNeeded(source + "-" + serverState.name().toLowerCase());
+            String reconnectSource = liveConnection
+                ? source + "-" + serverState.name().toLowerCase()
+                : source + "-disconnected";
+            armRouteReconnectIfNeeded(reconnectSource);
         } else {
             warnMainServerGate(serverState);
         }
@@ -896,6 +910,9 @@ public class ElytraRoute extends Module {
         pickupTarget = null;
         currentSourceFailureTicks = 0;
         expectedShulkerCountAfterPickup = -1;
+        invalidRestockSourceAttempts = 0;
+        restockOpenedSourceValidated = false;
+        openedInvalidRestockSource = false;
         clearDeferredRestockFailure();
     }
 
@@ -926,6 +943,9 @@ public class ElytraRoute extends Module {
         pickupTarget = null;
         currentSourceFailureTicks = 0;
         expectedShulkerCountAfterPickup = -1;
+        invalidRestockSourceAttempts = 0;
+        restockOpenedSourceValidated = false;
+        openedInvalidRestockSource = false;
         lastLandingChunkWarningAtMs = 0L;
         clearReconnectRuntime(true);
         clearDeferredRestockFailure();
@@ -1376,6 +1396,9 @@ public class ElytraRoute extends Module {
     private void startRestockInterrupt(RestockKind kind, ResumeState resumeState) {
         if (kind == RestockKind.NONE) return;
 
+        boolean continuingRestockCycle = isRestockState(state) || (state == State.LANDING && landingReason == LandingReason.RESTOCK);
+        if (!continuingRestockCycle) invalidRestockSourceAttempts = 0;
+
         if (kind == RestockKind.FOOD) {
             queuedFoodRestock = false;
             queuedElytraRestock = resumeState == ResumeState.ROUTE_FLIGHT && needsElytraRestock();
@@ -1395,6 +1418,8 @@ public class ElytraRoute extends Module {
         pickupTarget = null;
         currentSourceFailureTicks = 0;
         expectedShulkerCountAfterPickup = -1;
+        restockOpenedSourceValidated = false;
+        openedInvalidRestockSource = false;
         clearDeferredRestockFailure();
 
         beginLanding(LandingReason.RESTOCK);
@@ -1443,16 +1468,50 @@ public class ElytraRoute extends Module {
     private void tickRestockPlace() {
         if (actionDelayTicks > 0) return;
 
-        ShulkerCandidate candidate = findBestInventoryShulker();
-        if (candidate == null) {
-            handleRestockFailure(RestockFailureReason.NO_MATCHING_SHULKER, "No matching inventory shulker was found for the current restock need.");
+        if (isCurrentRestockRequestSatisfied()) {
+            finishCurrentRestockPass();
             return;
         }
 
-        restockSourceInventorySlot = candidate.slot();
-        restockSourceHotbarSlot = moveInventorySlotToHotbar(restockSourceInventorySlot);
         if (restockSourceHotbarSlot == -1) {
-            handleRestockFailure(RestockFailureReason.PLACE_FAILED, "Unable to move the restock shulker into a hotbar slot.");
+            ShulkerCandidate candidate = findBestInventoryShulker();
+            if (candidate == null) {
+                handleRestockFailure(RestockFailureReason.NO_MATCHING_SHULKER, "No matching inventory shulker was found for the current restock need.");
+                return;
+            }
+
+            restockSourceInventorySlot = candidate.slot();
+            restockSourceHotbarSlot = moveInventorySlotToHotbar(restockSourceInventorySlot);
+            if (restockSourceHotbarSlot == -1) {
+                handleRestockFailure(RestockFailureReason.PLACE_FAILED, "Unable to move the restock shulker into a safe hotbar slot.");
+                return;
+            }
+
+            currentSourceFailureTicks = 0;
+            if (!SlotUtils.isHotbar(restockSourceInventorySlot)) {
+                actionDelayTicks = inventoryDelay.get();
+                return;
+            }
+        }
+
+        if (!isPreparedRestockHotbarShulkerUsable()) {
+            currentSourceFailureTicks++;
+            if (currentSourceFailureTicks <= 20) {
+                actionDelayTicks = Math.max(1, inventoryDelay.get());
+                return;
+            }
+
+            invalidRestockSourceAttempts++;
+            restockSourceInventorySlot = -1;
+            restockSourceHotbarSlot = -1;
+            currentSourceFailureTicks = 0;
+
+            if (invalidRestockSourceAttempts > RESTOCK_INVALID_SOURCE_RETRY_LIMIT) {
+                handleRestockFailure(RestockFailureReason.PLACE_FAILED, "Restock shulker hotbar preparation did not stabilize.");
+                return;
+            }
+
+            actionDelayTicks = Math.max(1, inventoryDelay.get());
             return;
         }
 
@@ -1468,6 +1527,8 @@ public class ElytraRoute extends Module {
         placedShulkerPos = placePos.toImmutable();
         actionDelayTicks = inventoryDelay.get();
         currentSourceFailureTicks = 0;
+        restockOpenedSourceValidated = false;
+        openedInvalidRestockSource = false;
         state = State.RESTOCK_OPEN;
     }
 
@@ -1509,6 +1570,17 @@ public class ElytraRoute extends Module {
 
         boolean wantFood = shouldRestockFoodThisPass();
         boolean wantElytra = shouldRestockElytraThisPass();
+
+        if (!restockOpenedSourceValidated) {
+            restockOpenedSourceValidated = true;
+            if (activeRestockKind == RestockKind.ELYTRA && findBestFlightReadyElytraContainerSlot() == -1) {
+                openedInvalidRestockSource = true;
+                invalidRestockSourceAttempts++;
+                state = State.RESTOCK_CLOSE;
+                currentSourceFailureTicks = 0;
+                return;
+            }
+        }
 
         if (wantElytra) {
             int containerSlot = findBestFlightReadyElytraContainerSlot();
@@ -1637,6 +1709,31 @@ public class ElytraRoute extends Module {
         expectedShulkerCountAfterPickup = -1;
         clearDeferredRestockFailure();
 
+        if (openedInvalidRestockSource) {
+            openedInvalidRestockSource = false;
+            restockOpenedSourceValidated = false;
+            restockSourceInventorySlot = -1;
+            restockSourceHotbarSlot = -1;
+
+            if (invalidRestockSourceAttempts > RESTOCK_INVALID_SOURCE_RETRY_LIMIT) {
+                handleRestockFailure(RestockFailureReason.NO_MATCHING_SHULKER, "Too many invalid elytra shulker sources were opened.");
+                return;
+            }
+
+            if (hasFlightReadyElytraShulkerInInventory()) {
+                startRestockInterrupt(RestockKind.ELYTRA, resumeStateAfterRestock);
+                return;
+            }
+
+            if (countTotalFlightReadyElytras() > 0) {
+                resumeAfterPartialElytraRestock("No more valid elytra shulkers were found after cleaning up an invalid source.");
+                return;
+            }
+
+            handleRestockFailure(RestockFailureReason.NO_FLIGHT_READY_ELYTRA, "No flight-ready elytras were found in remaining shulkers.");
+            return;
+        }
+
         if (deferredReason != null) {
             applyRestockFailureOutcome(deferredReason, deferredMessage);
             return;
@@ -1657,17 +1754,22 @@ public class ElytraRoute extends Module {
         if (completed == RestockKind.FOOD && !needsFoodRestock()) queuedFoodRestock = false;
         if (completed == RestockKind.ELYTRA && hasSatisfiedLooseElytraTargetAfterRepair()) queuedElytraRestock = false;
 
-        if (queuedFoodRestock && !foodRestockSuppressed && needsFoodRestock()) {
-            startRestockInterrupt(RestockKind.FOOD, resumeStateAfterRestock);
-            return;
-        }
-
         if (shouldContinueElytraRestockAfterPass(completed)) {
             if (!restockElytras.get()) {
                 state = State.OUT_OF_ELYTRAS_WAIT;
             } else {
                 startRestockInterrupt(RestockKind.ELYTRA, resumeStateAfterRestock);
             }
+            return;
+        }
+
+        if (shouldAcceptPartialElytraRestock(completed)) {
+            resumeAfterPartialElytraRestock("Elytra restock target was only partially met because no more valid elytra shulkers were found.");
+            return;
+        }
+
+        if (queuedFoodRestock && !foodRestockSuppressed && needsFoodRestock()) {
+            startRestockInterrupt(RestockKind.FOOD, resumeStateAfterRestock);
             return;
         }
 
@@ -1943,6 +2045,24 @@ public class ElytraRoute extends Module {
         return activeRestockKind == RestockKind.ELYTRA || queuedElytraRestock;
     }
 
+    private boolean isCurrentRestockRequestSatisfied() {
+        return switch (activeRestockKind) {
+            case ELYTRA -> hasSatisfiedLooseElytraTargetAfterRepair();
+            case FOOD -> !needsFoodRestock();
+            case NONE -> !queuedFoodRestock && !queuedElytraRestock;
+        };
+    }
+
+    private boolean isElytraRestockFailure(RestockFailureReason reason) {
+        if (!shouldRestockElytraThisPass()) return false;
+        return reason == RestockFailureReason.NO_MATCHING_SHULKER
+            || reason == RestockFailureReason.PLACE_FAILED
+            || reason == RestockFailureReason.OPEN_FAILED
+            || reason == RestockFailureReason.LOOT_TIMEOUT
+            || reason == RestockFailureReason.TARGET_UNMET
+            || reason == RestockFailureReason.NO_FLIGHT_READY_ELYTRA;
+    }
+
     private void handleRestockFailure(RestockFailureReason reason, String message) {
         releaseMovement();
         restoreRotationSnapshot();
@@ -1969,6 +2089,19 @@ public class ElytraRoute extends Module {
 
         boolean noFlightReady = countTotalFlightReadyElytras() <= 0 && requiresFlightReadyStateAfterRestock();
         boolean foodOnlyFailure = !noFlightReady && shouldRestockFoodThisPass() && !shouldRestockElytraThisPass();
+
+        if (isElytraRestockFailure(reason) && restockElytras.get()) {
+            if (noFlightReady && hasFlightReadyElytraShulkerInInventory() && reason != RestockFailureReason.PLACE_FAILED) {
+                warning(message);
+                startRestockInterrupt(RestockKind.ELYTRA, resumeStateAfterRestock);
+                return;
+            }
+
+            if (countTotalFlightReadyElytras() > 0 && !hasFlightReadyElytraShulkerInInventory()) {
+                resumeAfterPartialElytraRestock(message);
+                return;
+            }
+        }
 
         if (noFlightReady) {
             warning(message);
@@ -2027,8 +2160,10 @@ public class ElytraRoute extends Module {
     }
 
     private void releaseMovement() {
-        if (mc.player == null) return;
         mc.options.forwardKey.setPressed(false);
+        mc.options.backKey.setPressed(false);
+        mc.options.leftKey.setPressed(false);
+        mc.options.rightKey.setPressed(false);
         mc.options.jumpKey.setPressed(false);
         mc.options.sneakKey.setPressed(false);
     }
@@ -2305,8 +2440,9 @@ public class ElytraRoute extends Module {
 
     private ShulkerCandidate findBestInventoryShulker() {
         boolean needFood = shouldRestockFoodThisPass() && needsFoodRestock();
-        boolean needElytra = shouldRestockElytraThisPass() && (needsElytraRestock() || canPullMoreLooseElytras() || hasUnusableWornElytra());
-        RestockKind primary = activeRestockKind == RestockKind.NONE ? (needFood ? RestockKind.FOOD : RestockKind.ELYTRA) : activeRestockKind;
+        boolean needElytra = needsElytraSourceThisPass();
+        RestockKind primary = getPrimaryRestockNeed(needFood, needElytra);
+        if (primary == RestockKind.NONE) return null;
 
         ShulkerCandidate best = null;
         int bestScore = Integer.MIN_VALUE;
@@ -2317,7 +2453,8 @@ public class ElytraRoute extends Module {
 
             int food = countConfiguredFoodInShulker(stack);
             int elytras = countFlightReadyElytrasInShulker(stack);
-            if ((!needFood || food <= 0) && (!needElytra || elytras <= 0)) continue;
+            if (primary == RestockKind.ELYTRA && elytras <= 0) continue;
+            if (primary == RestockKind.FOOD && food <= 0) continue;
 
             int tier;
             if (needFood && needElytra && food > 0 && elytras > 0) tier = 3;
@@ -2333,6 +2470,45 @@ public class ElytraRoute extends Module {
         }
 
         return best;
+    }
+
+    private boolean needsElytraSourceThisPass() {
+        return shouldRestockElytraThisPass()
+            && (needsElytraRestock() || canPullMoreLooseElytras() || hasUnusableWornElytra());
+    }
+
+    private RestockKind getPrimaryRestockNeed(boolean needFood, boolean needElytra) {
+        if (activeRestockKind == RestockKind.ELYTRA && needElytra) return RestockKind.ELYTRA;
+        if (activeRestockKind == RestockKind.FOOD && needFood) return RestockKind.FOOD;
+        if (needElytra) return RestockKind.ELYTRA;
+        if (needFood) return RestockKind.FOOD;
+        return RestockKind.NONE;
+    }
+
+    private boolean isPreparedRestockHotbarShulkerUsable() {
+        if (!SlotUtils.isHotbar(restockSourceHotbarSlot)) return false;
+        return isValidRestockSourceForCurrentNeed(mc.player.getInventory().getStack(restockSourceHotbarSlot));
+    }
+
+    private boolean isValidRestockSourceForCurrentNeed(ItemStack stack) {
+        if (!isShulkerBox(stack)) return false;
+
+        boolean needFood = shouldRestockFoodThisPass() && needsFoodRestock();
+        boolean needElytra = needsElytraSourceThisPass();
+        RestockKind primary = getPrimaryRestockNeed(needFood, needElytra);
+
+        if (primary == RestockKind.ELYTRA) return countFlightReadyElytrasInShulker(stack) > 0;
+        if (primary == RestockKind.FOOD) return countConfiguredFoodInShulker(stack) > 0;
+        return false;
+    }
+
+    private boolean hasFlightReadyElytraShulkerInInventory() {
+        for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (isShulkerBox(stack) && countFlightReadyElytrasInShulker(stack) > 0) return true;
+        }
+
+        return false;
     }
 
     private boolean isShulkerBox(ItemStack stack) {
@@ -2391,7 +2567,17 @@ public class ElytraRoute extends Module {
             if (!isProtectedRestockHotbarStack(mc.player.getInventory().getStack(i))) return i;
         }
 
-        return mc.player.getInventory().getSelectedSlot();
+        if (countEmptyLooseSlots() > 0) {
+            for (int i = 0; i < 9; i++) {
+                ItemStack stack = mc.player.getInventory().getStack(i);
+                if (!isShulkerBox(stack) || isValidRestockSourceForCurrentNeed(stack)) continue;
+
+                shiftClickHotbarItemOut(i);
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     private boolean isProtectedRestockHotbarStack(ItemStack stack) {
@@ -2617,11 +2803,54 @@ public class ElytraRoute extends Module {
         return countLooseFlightReadyElytras() >= elytraRestockAmount.get();
     }
 
+    private boolean shouldAcceptPartialElytraRestock(RestockKind completed) {
+        if (isInsideArrivalRadius()) return false;
+        if (!(completed == RestockKind.ELYTRA || queuedElytraRestock)) return false;
+        if (!restockElytras.get()) return false;
+        if (hasSatisfiedLooseElytraTargetAfterRepair()) return false;
+        if (hasFlightReadyElytraShulkerInInventory()) return false;
+        return countTotalFlightReadyElytras() > 0;
+    }
+
     private boolean shouldContinueElytraRestockAfterPass(RestockKind completed) {
         if (isInsideArrivalRadius()) return false;
         if (!(completed == RestockKind.ELYTRA || queuedElytraRestock)) return false;
         if (!restockElytras.get()) return countTotalFlightReadyElytras() <= 0;
-        return !hasSatisfiedLooseElytraTargetAfterRepair();
+        return !hasSatisfiedLooseElytraTargetAfterRepair() && hasFlightReadyElytraShulkerInInventory();
+    }
+
+    private void resumeAfterPartialElytraRestock(String message) {
+        int usable = countTotalFlightReadyElytras();
+        warning("%s Resuming with %d flight-ready elytra%s.", message, usable, usable == 1 ? "" : "s");
+
+        activeRestockKind = RestockKind.NONE;
+        queuedElytraRestock = false;
+        restockSourceInventorySlot = -1;
+        restockSourceHotbarSlot = -1;
+        currentSourceFailureTicks = 0;
+        invalidRestockSourceAttempts = 0;
+        restockOpenedSourceValidated = false;
+        openedInvalidRestockSource = false;
+
+        if (queuedFoodRestock && !foodRestockSuppressed && needsFoodRestock()) {
+            startRestockInterrupt(RestockKind.FOOD, resumeStateAfterRestock);
+            return;
+        }
+
+        if (isInsideArrivalRadius() || resumeStateAfterRestock == ResumeState.ARRIVED_WAIT) {
+            state = State.ARRIVED_WAIT;
+            stateTicks = 0;
+            return;
+        }
+
+        if (usable <= 0) {
+            state = State.OUT_OF_ELYTRAS_WAIT;
+            stateTicks = 0;
+            return;
+        }
+
+        state = State.TAKEOFF_AWAIT_GROUND;
+        stateTicks = 0;
     }
 
     private void swapContainerElytraWithBrokenInventorySlot(int containerSlotId, int inventorySlotIndex) {
