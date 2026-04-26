@@ -28,6 +28,7 @@
     "meteor.MeteorGuiThemeMixin",
     "meteor.NametagsMixin",
     "meteor.NoSlowMixin",
+    "meteor.NukerMixin",
     "meteor.NotifierMixin",
     "meteor.ScaffoldMixin",
     "meteor.TimerMixin"
