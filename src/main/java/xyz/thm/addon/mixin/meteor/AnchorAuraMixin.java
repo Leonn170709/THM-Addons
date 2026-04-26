@@ -20,7 +20,7 @@ public class AnchorAuraMixin {
     private void thm$ignoreThmMembers(CallbackInfo ci) {
         THMSystem system = THMSystem.get();
         if (system == null || !system.ignoreThmMembers.get()) return;
-        if (target != null && ThmMembers.isThmMember(target)) {
+        if (ThmMembers.isThmMember(target)) {
             renderBlockPos = null;
             target = null;
             ci.cancel();
