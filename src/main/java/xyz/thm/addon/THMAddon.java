@@ -119,7 +119,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         addOptionalModule("xyz.thm.addon.modules.ElytraUAV"); // Still WIP and may be excluded from release jars.
         if (BaritoneUtils.IS_AVAILABLE) {
             Modules.get().add(new THMHwyMonitor());
-            Modules.get().add(new ObsidianFarmerTHM());
+            //Modules.get().add(new ObsidianFarmerTHM()); //Not enabled in production
             Modules.get().add(new HighwayTools());
         }
 
