@@ -5,9 +5,9 @@ import meteordevelopment.meteorclient.events.meteor.ActiveModulesChangedEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
+import meteordevelopment.meteorclient.settings.ModuleListSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
-import meteordevelopment.meteorclient.settings.StringListSetting;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.combat.KillAura;
@@ -35,7 +35,6 @@ public class ModuleManager extends Module {
     private static final String DEBUG_FILE_NAME = "module-manager-debug.log";
     private static final String TIMER_TITLE = "Timer";
     private static final String SPEED_TITLE = "Speed";
-    private static final String KILL_AURA_TITLE = "Kill Aura";
     private static final String LEASE_MONITOR_RECONNECT = "monitor-reconnect";
     private static final String LEASE_HIGHWAYBUILDER_CENTER = "highwaybuilder-center-speed";
     private static final String LEASE_HIGHWAYBUILDER_ECHEST = "highwaybuilder-echest-break-speed";
@@ -43,11 +42,11 @@ public class ModuleManager extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgDebugging = settings.createGroup("Debugging", true);
 
-    private final Setting<List<String>> criticalReconnectModules = sgGeneral.add(new StringListSetting.Builder()
+    private final Setting<List<Module>> criticalReconnectModules = sgGeneral.add(new ModuleListSetting.Builder()
         .name("critical-reconnect-modules")
         .description("Managed modules that must come back after reconnect before HighwayBuilder resumes.")
-        .defaultValue(KILL_AURA_TITLE)
-        .onChanged(strings -> validateCriticalReconnectModuleTitles())
+        .defaultValue(KillAura.class)
+        .onChanged(modules -> validateCriticalReconnectModules())
         .build()
     );
 
@@ -77,8 +76,7 @@ public class ModuleManager extends Module {
 
     private final LinkedHashSet<Module> desiredReconnectActiveModules = new LinkedHashSet<>();
     private final LinkedHashSet<Module> frozenReconnectActiveModules = new LinkedHashSet<>();
-    private final HashSet<String> warnedUnknownCriticalReconnectModuleTitles = new HashSet<>();
-    private final HashSet<String> warnedExcludedCriticalReconnectModuleTitles = new HashSet<>();
+    private final HashSet<String> warnedExcludedCriticalReconnectModules = new HashSet<>();
     private final LinkedHashSet<Module> lastKnownActiveModules = new LinkedHashSet<>();
     private final LinkedHashMap<String, OwnershipLease> activeLeases = new LinkedHashMap<>();
 
@@ -102,7 +100,7 @@ public class ModuleManager extends Module {
         pendingAutoDisableWhenIdle = false;
         initializeActiveSnapshot();
         seedDesiredReconnectModuleCacheFromLiveState("activate");
-        validateCriticalReconnectModuleTitles();
+        validateCriticalReconnectModules();
         syncKillAuraAttackingSnapshot();
         writeDebugLine(formatEventLine("module-manager-active", "manager enabled", null, Collections.emptyList(), null));
     }
@@ -375,7 +373,7 @@ public class ModuleManager extends Module {
     }
 
     private void logKillAuraMixinEvent(String event, String detail) {
-        Module killAura = findModuleByExactTitle(KILL_AURA_TITLE);
+        Module killAura = Modules.get().get(KillAura.class);
         ModuleContext context = buildContext(killAura);
         writeDebugLine(formatEventLine(
             "killaura-mixin",
@@ -490,48 +488,19 @@ public class ModuleManager extends Module {
             && !(module instanceof THMHwyMonitor);
     }
 
-    private void validateCriticalReconnectModuleTitles() {
-        for (String configuredTitle : criticalReconnectModules.get()) {
-            if (configuredTitle == null) continue;
-            String title = configuredTitle.trim();
-            if (title.isEmpty()) continue;
-
-            Module module = findModuleByExactTitle(title);
-            if (module == null) {
-                warnUnknownCriticalReconnectModuleTitle(title);
-                continue;
-            }
-
-            if (!isEligibleManagedModule(module)) {
-                warnExcludedCriticalReconnectModuleTitle(title);
-            }
+    private void validateCriticalReconnectModules() {
+        for (Module module : criticalReconnectModules.get()) {
+            if (module == null) continue;
+            if (!isEligibleManagedModule(module)) warnExcludedCriticalReconnectModule(module);
         }
     }
 
-    private void warnUnknownCriticalReconnectModuleTitle(String title) {
-        if (title == null || title.isBlank()) return;
-        if (warnedUnknownCriticalReconnectModuleTitles.add(title)) {
-            warning("Ignoring unknown critical reconnect module title '%s'.", title);
-            writeDebugLine(formatEventLine("critical-module-warning", "unknown-title=" + title, null, Collections.emptyList(), null));
+    private void warnExcludedCriticalReconnectModule(Module module) {
+        if (module == null || module.title == null || module.title.isBlank()) return;
+        if (warnedExcludedCriticalReconnectModules.add(module.title)) {
+            warning("Ignoring critical reconnect module '%s' because Module Manager excludes that module from management.", module.title);
+            writeDebugLine(formatEventLine("critical-module-warning", "excluded-module=" + module.title, module, Collections.emptyList(), null));
         }
-    }
-
-    private void warnExcludedCriticalReconnectModuleTitle(String title) {
-        if (title == null || title.isBlank()) return;
-        if (warnedExcludedCriticalReconnectModuleTitles.add(title)) {
-            warning("Ignoring critical reconnect module title '%s' because Module Manager excludes that module from management.", title);
-            writeDebugLine(formatEventLine("critical-module-warning", "excluded-title=" + title, null, Collections.emptyList(), null));
-        }
-    }
-
-    private Module findModuleByExactTitle(String title) {
-        if (title == null || title.isBlank()) return null;
-
-        for (Module module : Modules.get().getAll()) {
-            if (module != null && title.equals(module.title)) return module;
-        }
-
-        return null;
     }
 
     private boolean hasLiveServerConnectionForManagedCache() {
@@ -573,7 +542,7 @@ public class ModuleManager extends Module {
             else desiredReconnectActiveModules.remove(module);
         }
 
-        validateCriticalReconnectModuleTitles();
+        validateCriticalReconnectModules();
         logReconnectSnapshot("refresh-live", 0L, reason);
     }
 
@@ -607,19 +576,10 @@ public class ModuleManager extends Module {
     private LinkedHashSet<Module> resolveCriticalReconnectModules() {
         LinkedHashSet<Module> criticalModules = new LinkedHashSet<>();
 
-        for (String configuredTitle : criticalReconnectModules.get()) {
-            if (configuredTitle == null) continue;
-            String title = configuredTitle.trim();
-            if (title.isEmpty()) continue;
-
-            Module module = findModuleByExactTitle(title);
-            if (module == null) {
-                warnUnknownCriticalReconnectModuleTitle(title);
-                continue;
-            }
-
+        for (Module module : criticalReconnectModules.get()) {
+            if (module == null) continue;
             if (!isEligibleManagedModule(module)) {
-                warnExcludedCriticalReconnectModuleTitle(title);
+                warnExcludedCriticalReconnectModule(module);
                 continue;
             }
 
