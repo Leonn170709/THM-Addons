@@ -422,6 +422,11 @@ public class HighwayBuilderTHM extends Module {
         .name("double-mine")
         .description("Whether to double mine blocks when applicable (normal mine and packet mine simultaneously).")
         .defaultValue(true)
+        .onChanged(value -> {
+            if (!isActive()) return;
+            if (!value) releaseActiveDoubleMineRuntime(true);
+            syncManagedSpeedMineOwnership();
+        })
         .build()
     );
 
@@ -438,6 +443,10 @@ public class HighwayBuilderTHM extends Module {
         .description("Wether to use the Speedmine module to speed up basalt breaking")
         .defaultValue(false)
         .visible(doubleMine::get)
+        .onChanged(value -> {
+            if (!isActive()) return;
+            syncManagedSpeedMineOwnership();
+        })
         .build()
     );
 
@@ -1125,6 +1134,7 @@ public class HighwayBuilderTHM extends Module {
     ) {}
 
     private record SpeedMineSettingsSnapshot(
+        boolean wasActive,
         SpeedMine.Mode mode,
         SpeedMine.ListMode blocksFilter,
         List<Block> blocks,
@@ -1527,11 +1537,7 @@ public class HighwayBuilderTHM extends Module {
         }
         if (!Modules.get().get(HotbarManager.class).isActive() && hotbarmanager.get()) { Modules.get().get(HotbarManager.class).toggle();}
         if (!Modules.get().get(AntiDrop.class).isActive() && antidrop.get()) { Modules.get().get(AntiDrop.class).toggle();}
-        if (speedmine.get()) {
-            SpeedMine speedMineModule = Modules.get().get(SpeedMine.class);
-            if (!speedMineModule.isActive()) speedMineModule.toggle();
-            applySpeedMineHighwayBuilderOverrides(speedMineModule);
-        }
+        syncManagedSpeedMineOwnership();
 
         THMSystem thmSystem = THMSystem.get();
         if (thmSystem != null) {
@@ -1559,6 +1565,7 @@ public class HighwayBuilderTHM extends Module {
         KitbotFrontend.removeLifecycleListener(kitbotRestockLifecycleListener);
         if (input != null) input.stop();
         resetEatingPauseWatchdog();
+        releaseActiveDoubleMineRuntime(true);
         countedBrokenForwardPositions.clear();
         countedPlacedForwardPositions.clear();
         clearPendingForwardBreakCredits();
@@ -3182,6 +3189,7 @@ public class HighwayBuilderTHM extends Module {
         if (hasActiveInMemoryStatsSession() && !statsSessionTerminalOrFinalizing) {
             persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, "game-leave");
         }
+        releaseActiveDoubleMineRuntime(false);
         clearPendingForwardBreakCredits();
         suspended = true;
         inventory = false;
@@ -3303,8 +3311,7 @@ public class HighwayBuilderTHM extends Module {
         ignoreCrystals.clear();
         resetForwardSchedulerRuntime();
 
-        normalMining = null;
-        packetMining = null;
+        releaseActiveDoubleMineRuntime(false);
     }
 
     private void updateSignBreakRegex() {
@@ -3339,6 +3346,7 @@ public class HighwayBuilderTHM extends Module {
         SpeedMine.ListMode filter = blocksFilter != null ? blocksFilter.get() : SpeedMine.ListMode.Blacklist;
 
         return new SpeedMineSettingsSnapshot(
+            speedMine.isActive(),
             speedMine.mode.get(),
             filter,
             blocks,
@@ -3350,6 +3358,7 @@ public class HighwayBuilderTHM extends Module {
     @SuppressWarnings("unchecked")
     private void applySpeedMineHighwayBuilderOverrides(SpeedMine speedMine) {
         if (speedMineSettingsSnapshot == null) speedMineSettingsSnapshot = captureSpeedMineSettings(speedMine);
+        if (!speedMine.isActive()) speedMine.toggle();
 
         speedMine.mode.set(SpeedMine.Mode.Damage);
 
@@ -3395,7 +3404,21 @@ public class HighwayBuilderTHM extends Module {
         Setting<Boolean> grimBypassSetting = (Setting<Boolean>) speedMine.settings.get("grim-bypass");
         if (grimBypassSetting != null) grimBypassSetting.set(snapshot.grimBypass());
 
+        if (snapshot.wasActive() != speedMine.isActive()) speedMine.toggle();
+
         speedMineSettingsSnapshot = null;
+    }
+
+    private boolean shouldOwnManagedSpeedMine() {
+        return isActive() && doubleMine.get() && speedmine.get();
+    }
+
+    private void syncManagedSpeedMineOwnership() {
+        SpeedMine speedMineModule = Modules.get().get(SpeedMine.class);
+        if (speedMineModule == null) return;
+
+        if (shouldOwnManagedSpeedMine()) applySpeedMineHighwayBuilderOverrides(speedMineModule);
+        else restoreSpeedMineSettingsIfNeeded();
     }
 
     private boolean shouldSkipSignBreak(BlockPos pos, BlockState state) {
@@ -6545,6 +6568,23 @@ public class HighwayBuilderTHM extends Module {
                 removed.originalState().getBlock()
             );
         }
+    }
+
+    private void releaseActiveDoubleMineRuntime(boolean abortNormalMining) {
+        if (normalMining != null) {
+            cancelPendingForwardBreakCredit(normalMining.blockPos);
+            if (abortNormalMining && mc.getNetworkHandler() != null) {
+                mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, normalMining.blockPos, normalMining.direction));
+            }
+            normalMining = null;
+        }
+
+        if (packetMining != null) {
+            cancelPendingForwardBreakCredit(packetMining.blockPos);
+            packetMining = null;
+        }
+
+        DoubleMineBlock.rateLimited = false;
     }
 
     private boolean consumePendingForwardBreakCredit(BlockPos pos) {
