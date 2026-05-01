@@ -59,6 +59,7 @@ public abstract class LogoutSpotsMixin {
             .name("capture-limb-animation")
             .description("Keep arm and leg motion from the logout moment.")
             .defaultValue(true)
+            .visible(thm$improvedLogoutShape::get)
             .build()
         );
     }
