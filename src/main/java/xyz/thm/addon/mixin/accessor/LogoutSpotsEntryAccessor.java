@@ -1,4 +1,4 @@
-package xyz.thm.addon.mixin.meteor;
+package xyz.thm.addon.mixin.accessor;
 
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Accessor;

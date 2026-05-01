@@ -1,4 +1,4 @@
-package xyz.thm.addon.mixin.meteor;
+package xyz.thm.addon.mixin.accessor;
 
 import net.minecraft.entity.LivingEntity;
 import org.spongepowered.asm.mixin.Mixin;
