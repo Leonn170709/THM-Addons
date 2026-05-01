@@ -43,6 +43,7 @@ public abstract class LogoutSpotsMixin {
     @Shadow private Setting<SettingColor> lineColor;
 
     @Unique private Setting<Boolean> thm$improvedLogoutShape;
+    @Unique private Setting<Boolean> thm$captureLimbAnimation;
     @Unique private final Map<UUID, OtherClientPlayerEntity> thm$ghosts = new HashMap<>();
 
     @Inject(method = "<init>", at = @At("TAIL"))
@@ -51,6 +52,12 @@ public abstract class LogoutSpotsMixin {
         thm$improvedLogoutShape = sgThm.add(new BoolSetting.Builder()
             .name("improved-render-shape")
             .description("Render logout spots using a ghost player model snapshot with real limb poses.")
+            .defaultValue(true)
+            .build()
+        );
+        thm$captureLimbAnimation = sgThm.add(new BoolSetting.Builder()
+            .name("capture-limb-animation")
+            .description("Keep arm and leg motion from the logout moment.")
             .defaultValue(true)
             .build()
         );
@@ -121,9 +128,17 @@ public abstract class LogoutSpotsMixin {
 
         LimbAnimator limbAnimator = ((LivingEntityAccessor) ghost).thm$getLimbAnimator();
         ((LimbAnimatorAccessor) limbAnimator).thm$setAnimationProgress(poseData.thm$getLimbPos());
-        // Freeze limb movement so logout spots remain static even if logout happened mid-motion.
-        ((LimbAnimatorAccessor) limbAnimator).thm$setLastSpeed(0);
-        ((LimbAnimatorAccessor) limbAnimator).thm$setSpeedInternal(0);
-        ((LimbAnimatorAccessor) limbAnimator).thm$setTimeScale(1);
+        if (thm$captureLimbAnimation != null && thm$captureLimbAnimation.get()) {
+            // Freeze at captured swing phase/amount so the pose is preserved but does not keep animating.
+            ((LimbAnimatorAccessor) limbAnimator).thm$setLastSpeed(poseData.thm$getLimbAmplitude());
+            ((LimbAnimatorAccessor) limbAnimator).thm$setSpeedInternal(poseData.thm$getLimbAmplitude());
+            ((LimbAnimatorAccessor) limbAnimator).thm$setTimeScale(0);
+        } else {
+            ((LimbAnimatorAccessor) limbAnimator).thm$setLastSpeed(0);
+            ((LimbAnimatorAccessor) limbAnimator).thm$setSpeedInternal(0);
+            ((LimbAnimatorAccessor) limbAnimator).thm$setAnimationProgress(0);
+            ((LimbAnimatorAccessor) limbAnimator).thm$setTimeScale(0);
+        }
+
     }
 }

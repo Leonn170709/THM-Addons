@@ -8,6 +8,7 @@ import xyz.thm.addon.modules.KitbotFrontend;
 
 public final class KitbotChatRouter {
     private static KitbotChatRouter INSTANCE;
+    private static boolean enabled = true;
 
     private KitbotChatRouter() {
         MeteorClient.EVENT_BUS.subscribe(this);
@@ -18,8 +19,18 @@ public final class KitbotChatRouter {
         return INSTANCE;
     }
 
+    public static void setEnabled(boolean value) {
+        enabled = value;
+    }
+
+    public static boolean isEnabled() {
+        return enabled;
+    }
+
     @EventHandler
     private void onSendMessage(SendMessageEvent event) {
+        if (!enabled) return;
+
         if (event.message == null) return;
         String message = event.message.trim();
         if (!message.startsWith("$")) return;
