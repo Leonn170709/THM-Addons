@@ -411,10 +411,22 @@ public class HighwayBuilderTHM extends Module {
 
     // Digging
 
+    private final Setting<Boolean> instamineBypass = sgDigging.add(new BoolSetting.Builder()
+        .name("instamine-bypass")
+        .description("Uses old-style breaking for basalt/blackstone override blocks so double mine and fast break only bypass when they are truly instamineable. Scheduler budgeting stays unchanged.")
+        .defaultValue(false)
+        .build()
+    );
+
     private final Setting<Boolean> doubleMine = sgDigging.add(new BoolSetting.Builder()
         .name("double-mine")
         .description("Whether to double mine blocks when applicable (normal mine and packet mine simultaneously).")
         .defaultValue(true)
+        .onChanged(value -> {
+            if (!isActive()) return;
+            if (!value) releaseActiveDoubleMineRuntime(true);
+            syncManagedSpeedMineOwnership();
+        })
         .build()
     );
 
@@ -431,6 +443,10 @@ public class HighwayBuilderTHM extends Module {
         .description("Wether to use the Speedmine module to speed up basalt breaking")
         .defaultValue(false)
         .visible(doubleMine::get)
+        .onChanged(value -> {
+            if (!isActive()) return;
+            syncManagedSpeedMineOwnership();
+        })
         .build()
     );
 
@@ -600,7 +616,7 @@ public class HighwayBuilderTHM extends Module {
         .defaultValue(
             Items.ENDER_CHEST, Items.OBSIDIAN, Items.NETHERITE_PICKAXE, Items.NETHERITE_SWORD,
             Items.NETHERITE_SHOVEL, Items.NETHERITE_AXE, Items.ELYTRA, Items.TOTEM_OF_UNDYING,
-            Items.ENCHANTED_GOLDEN_APPLE
+            Items.ENCHANTED_GOLDEN_APPLE, Items.EXPERIENCE_BOTTLE
         )
         .build()
     );
@@ -1118,6 +1134,7 @@ public class HighwayBuilderTHM extends Module {
     ) {}
 
     private record SpeedMineSettingsSnapshot(
+        boolean wasActive,
         SpeedMine.Mode mode,
         SpeedMine.ListMode blocksFilter,
         List<Block> blocks,
@@ -1520,11 +1537,7 @@ public class HighwayBuilderTHM extends Module {
         }
         if (!Modules.get().get(HotbarManager.class).isActive() && hotbarmanager.get()) { Modules.get().get(HotbarManager.class).toggle();}
         if (!Modules.get().get(AntiDrop.class).isActive() && antidrop.get()) { Modules.get().get(AntiDrop.class).toggle();}
-        if (speedmine.get()) {
-            SpeedMine speedMineModule = Modules.get().get(SpeedMine.class);
-            if (!speedMineModule.isActive()) speedMineModule.toggle();
-            applySpeedMineHighwayBuilderOverrides(speedMineModule);
-        }
+        syncManagedSpeedMineOwnership();
 
         THMSystem thmSystem = THMSystem.get();
         if (thmSystem != null) {
@@ -1552,6 +1565,7 @@ public class HighwayBuilderTHM extends Module {
         KitbotFrontend.removeLifecycleListener(kitbotRestockLifecycleListener);
         if (input != null) input.stop();
         resetEatingPauseWatchdog();
+        releaseActiveDoubleMineRuntime(true);
         countedBrokenForwardPositions.clear();
         countedPlacedForwardPositions.clear();
         clearPendingForwardBreakCredits();
@@ -3175,6 +3189,7 @@ public class HighwayBuilderTHM extends Module {
         if (hasActiveInMemoryStatsSession() && !statsSessionTerminalOrFinalizing) {
             persistCurrentStatsSession(StatsSessionState.OPEN, true, 0L, "game-leave");
         }
+        releaseActiveDoubleMineRuntime(false);
         clearPendingForwardBreakCredits();
         suspended = true;
         inventory = false;
@@ -3296,8 +3311,7 @@ public class HighwayBuilderTHM extends Module {
         ignoreCrystals.clear();
         resetForwardSchedulerRuntime();
 
-        normalMining = null;
-        packetMining = null;
+        releaseActiveDoubleMineRuntime(false);
     }
 
     private void updateSignBreakRegex() {
@@ -3332,6 +3346,7 @@ public class HighwayBuilderTHM extends Module {
         SpeedMine.ListMode filter = blocksFilter != null ? blocksFilter.get() : SpeedMine.ListMode.Blacklist;
 
         return new SpeedMineSettingsSnapshot(
+            speedMine.isActive(),
             speedMine.mode.get(),
             filter,
             blocks,
@@ -3343,6 +3358,7 @@ public class HighwayBuilderTHM extends Module {
     @SuppressWarnings("unchecked")
     private void applySpeedMineHighwayBuilderOverrides(SpeedMine speedMine) {
         if (speedMineSettingsSnapshot == null) speedMineSettingsSnapshot = captureSpeedMineSettings(speedMine);
+        if (!speedMine.isActive()) speedMine.toggle();
 
         speedMine.mode.set(SpeedMine.Mode.Damage);
 
@@ -3388,7 +3404,21 @@ public class HighwayBuilderTHM extends Module {
         Setting<Boolean> grimBypassSetting = (Setting<Boolean>) speedMine.settings.get("grim-bypass");
         if (grimBypassSetting != null) grimBypassSetting.set(snapshot.grimBypass());
 
+        if (snapshot.wasActive() != speedMine.isActive()) speedMine.toggle();
+
         speedMineSettingsSnapshot = null;
+    }
+
+    private boolean shouldOwnManagedSpeedMine() {
+        return isActive() && doubleMine.get() && speedmine.get();
+    }
+
+    private void syncManagedSpeedMineOwnership() {
+        SpeedMine speedMineModule = Modules.get().get(SpeedMine.class);
+        if (speedMineModule == null) return;
+
+        if (shouldOwnManagedSpeedMine()) applySpeedMineHighwayBuilderOverrides(speedMineModule);
+        else restoreSpeedMineSettingsIfNeeded();
     }
 
     private boolean shouldSkipSignBreak(BlockPos pos, BlockState state) {
@@ -4194,6 +4224,20 @@ public class HighwayBuilderTHM extends Module {
         } catch (StackOverflowError ignored) {
             return false;
         }
+    }
+
+    private boolean safeCanInstaBreakForBreaking(BlockPos pos) {
+        if (!shouldBypassInstamineOverrideForBreaking(pos)) return safeCanInstaBreak(pos);
+
+        try {
+            return BlockUtils.canInstaBreak(pos);
+        } catch (StackOverflowError ignored) {
+            return false;
+        }
+    }
+
+    private boolean shouldBypassInstamineOverrideForBreaking(BlockPos pos) {
+        return instamineBypass.get() && isForwardMultiBreakInstamineOverride(pos);
     }
 
     private boolean isForwardMultiBreakInstamineOverride(BlockPos pos) {
@@ -6526,6 +6570,23 @@ public class HighwayBuilderTHM extends Module {
         }
     }
 
+    private void releaseActiveDoubleMineRuntime(boolean abortNormalMining) {
+        if (normalMining != null) {
+            cancelPendingForwardBreakCredit(normalMining.blockPos);
+            if (abortNormalMining && mc.getNetworkHandler() != null) {
+                mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, normalMining.blockPos, normalMining.direction));
+            }
+            normalMining = null;
+        }
+
+        if (packetMining != null) {
+            cancelPendingForwardBreakCredit(packetMining.blockPos);
+            packetMining = null;
+        }
+
+        DoubleMineBlock.rateLimited = false;
+    }
+
     private boolean consumePendingForwardBreakCredit(BlockPos pos) {
         if (pos == null || mc.world == null) return false;
 
@@ -7105,7 +7166,7 @@ public class HighwayBuilderTHM extends Module {
                 if (
                     safeCanBreak(task.pos, state)
                         && (task.type.mineBlocksToPlace() || !blocksToPlace.get().contains(state.getBlock()))
-                        && !safeCanInstaBreak(task.pos)
+                        && !safeCanInstaBreakForBreaking(task.pos)
                         && (!Modules.get().get(SpeedMine.class).instamine() || state.calcBlockBreakingDelta(mc.player, mc.world, task.pos) <= 0.5)
                         && (normalMining == null || !task.pos.equals(normalMining.blockPos))
                         && (packetMining == null || !task.pos.equals(packetMining.blockPos))
@@ -7149,7 +7210,7 @@ public class HighwayBuilderTHM extends Module {
 
             if (slot != mc.player.getInventory().getSelectedSlot()) InvUtils.swap(slot, false);
 
-            boolean multiBreak = currentMineActionsThisTick() > 1 && safeCanInstaBreak(task.pos);
+            boolean multiBreak = currentMineActionsThisTick() > 1 && safeCanInstaBreakForBreaking(task.pos);
             if (safeCanBreak(task.pos, state)) {
                 Block blockBefore = state.getBlock();
                 if (!tryMineBlock(task.pos, state, false, () -> createOrRefreshForwardBreakCredit(task.type, task.pos, state))) continue;
@@ -10762,7 +10823,7 @@ public class HighwayBuilderTHM extends Module {
                     if (
                         b.safeCanBreak(pos.getBlockPos(), pos.getState())
                             && (mineBlocksToPlace || !b.blocksToPlace.get().contains(pos.getState().getBlock()))
-                            && !b.safeCanInstaBreak(pos.getBlockPos()) && (!Modules.get().get(SpeedMine.class).instamine() || pos.getState().calcBlockBreakingDelta(b.mc.player, b.mc.world, pos.getBlockPos()) <= 0.5)
+                            && !b.safeCanInstaBreakForBreaking(pos.getBlockPos()) && (!Modules.get().get(SpeedMine.class).instamine() || pos.getState().calcBlockBreakingDelta(b.mc.player, b.mc.world, pos.getBlockPos()) <= 0.5)
                             && (b.normalMining == null || !pos.getBlockPos().equals(b.normalMining.blockPos))
                             && (b.packetMining == null || !pos.getBlockPos().equals(b.packetMining.blockPos))
                     ) {
@@ -10809,7 +10870,7 @@ public class HighwayBuilderTHM extends Module {
                 if (slot != b.mc.player.getInventory().getSelectedSlot()) InvUtils.swap(slot, false);
 
                 BlockPos mcPos = pos.getBlockPos();
-                boolean multiBreak = b.currentMineActionsThisTick() > 1 && b.safeCanInstaBreak(mcPos) && !b.rotation.get().mine;
+                boolean multiBreak = b.currentMineActionsThisTick() > 1 && b.safeCanInstaBreakForBreaking(mcPos) && !b.rotation.get().mine;
                 if (b.safeCanBreak(mcPos, state)) {
                     Block blockBefore = state.getBlock();
                     if (!b.tryMineBlock(mcPos, state, b.rotation.get().mine)) continue;
@@ -10828,7 +10889,7 @@ public class HighwayBuilderTHM extends Module {
                     if (!multiBreak) break;
                 }
 
-                if (!it.hasNext() && b.safeCanInstaBreak(mcPos)) finishedBreaking = true;
+                if (!it.hasNext() && b.safeCanInstaBreakForBreaking(mcPos)) finishedBreaking = true;
             }
 
             // we quickly jump to the next state, to remove micro delays in the process and allow us to break blocks
