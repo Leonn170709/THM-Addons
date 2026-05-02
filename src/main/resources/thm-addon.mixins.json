@@ -32,7 +32,6 @@
     "meteor.MeteorGuiThemeMixin",
     "meteor.NametagsMixin",
     "meteor.NoSlowMixin",
-    "meteor.NukerMixin",
     "meteor.NotifierMixin",
     "accessor.LogoutSpotsEntryAccessor",
     "meteor.LogoutSpotsEntryPoseMixin",
