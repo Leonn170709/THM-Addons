@@ -321,6 +321,7 @@ public final class ThmMembers {
             case "Apprentice" -> new Color(95, 70, 53, 255); // Brown
             case "Retired" -> new Color(0, 1, 1, 255); // Black
             case "Novice" -> new Color(76, 173, 208, 255); // Cyan
+            case "PVP Novice" -> new Color(	156, 60, 62, 255); // Red
             case "Bot" -> new Color(52, 152, 219, 255); // Blue
             case "Kill on Sight", "Kill-on-Sight", "KOS" -> new Color(255, 0, 0, 255); // Red
             default -> new Color(255, 255, 255, 255); // White fallback

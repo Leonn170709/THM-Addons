@@ -42,6 +42,7 @@ import xyz.thm.addon.mixin.accessor.ExplosionS2CPacketAccessor;
 import xyz.thm.addon.utils.PacketPlaceUtils;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class SurroundPlus extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -51,49 +52,49 @@ public class SurroundPlus extends Module {
     private final SettingGroup sgRender = settings.createGroup("Render");
 
     private final Setting<List<Block>> blocks = sgGeneral.add(new BlockListSetting.Builder()
-            .name("blocks")
-            .description("Blocks to use for surrounding.")
-            .defaultValue(Blocks.OBSIDIAN, Blocks.CRYING_OBSIDIAN, Blocks.NETHERITE_BLOCK)
-            .build()
+        .name("blocks")
+        .description("Blocks to use for surrounding.")
+        .defaultValue(Blocks.OBSIDIAN, Blocks.CRYING_OBSIDIAN, Blocks.NETHERITE_BLOCK)
+        .build()
     );
 
     private final Setting<Boolean> packet = sgPlace.add(new BoolSetting.Builder()
-            .name("packet")
-            .description("Only place via packets (no client-side block set).")
-            .defaultValue(false)
-            .build()
+        .name("packet")
+        .description("Only place via packets (no client-side block set).")
+        .defaultValue(false)
+        .build()
     );
 
     private final Setting<Boolean> tagSwitch = sgGeneral.add(new BoolSetting.Builder()
-            .name("tag-switch")
-            .description("Disables the module immediately after placing missing blocks.")
-            .defaultValue(false)
-            .build()
+        .name("tag-switch")
+        .description("Disables the module immediately after placing missing blocks.")
+        .defaultValue(false)
+        .build()
     );
 
     private final Setting<Integer> delay = sgPlace.add(new IntSetting.Builder()
-            .name("place-delay")
-            .description("Tick delay between block placements.")
-            .defaultValue(0)
-            .min(0)
-            .sliderMax(10)
-            .build()
+        .name("place-delay")
+        .description("Tick delay between block placements.")
+        .defaultValue(0)
+        .min(0)
+        .sliderMax(10)
+        .build()
     );
 
     private final Setting<Integer> blocksPerTick = sgPlace.add(new IntSetting.Builder()
-            .name("blocks-per-tick")
-            .description("Maximum blocks to place per tick.")
-            .defaultValue(4)
-            .min(1)
-            .sliderMax(8)
-            .build()
+        .name("blocks-per-tick")
+        .description("Maximum blocks to place per tick.")
+        .defaultValue(4)
+        .min(1)
+        .sliderMax(8)
+        .build()
     );
 
     private final Setting<Boolean> rotate = sgPlace.add(new BoolSetting.Builder()
-            .name("rotate")
-            .description("Sends rotation packets when placing (Crucial for GrimAC).")
-            .defaultValue(false)
-            .build()
+        .name("rotate")
+        .description("Sends rotation packets when placing (Crucial for GrimAC).")
+        .defaultValue(false)
+        .build()
     );
 
     private final Setting<Boolean> extend = sgPlace.add(new BoolSetting.Builder()
@@ -104,17 +105,17 @@ public class SurroundPlus extends Module {
     );
 
     private final Setting<Boolean> strict = sgPlace.add(new BoolSetting.Builder()
-            .name("strict-directions")
-            .description("Only places on visible block faces to bypass strict anti-cheats.")
-            .defaultValue(false)
-            .build()
+        .name("strict-directions")
+        .description("Only places on visible block faces to bypass strict anti-cheats.")
+        .defaultValue(false)
+        .build()
     );
 
     private final Setting<Boolean> support = sgPlace.add(new BoolSetting.Builder()
-            .name("support")
-            .description("Places a block under your feet if open air.")
-            .defaultValue(true)
-            .build()
+        .name("support")
+        .description("Places a block under your feet if open air.")
+        .defaultValue(true)
+        .build()
     );
     private final Setting<Boolean> attackCrystals = sgPlace.add(new BoolSetting.Builder()
         .name("attack-crystals")
@@ -177,85 +178,87 @@ public class SurroundPlus extends Module {
     );
 
     private final Setting<Boolean> onlyOnGround = sgPlace.add(new BoolSetting.Builder()
-            .name("only-on-ground")
-            .description("Only activates when you are on the ground.")
-            .defaultValue(false)
-            .build()
+        .name("only-on-ground")
+        .description("Only activates when you are on the ground.")
+        .defaultValue(false)
+        .build()
     );
 
     private final Setting<Boolean> disableOnJump = sgPlace.add(new BoolSetting.Builder()
-            .name("disable-on-jump")
-            .description("Automatically disables the module if you jump.")
-            .defaultValue(true)
-            .build()
+        .name("disable-on-jump")
+        .description("Automatically disables the module if you jump.")
+        .defaultValue(true)
+        .build()
     );
 
     private final Setting<Boolean> disableOnYChange = sgPlace.add(new BoolSetting.Builder()
-            .name("disable-on-y-change")
-            .description("Disables if your Y level changes.")
-            .defaultValue(true)
-            .build()
+        .name("disable-on-y-change")
+        .description("Disables if your Y level changes.")
+        .defaultValue(true)
+        .build()
     );
 
     private final Setting<CenterMode> centerMode = sgCenter.add(new EnumSetting.Builder<CenterMode>()
-            .name("center-mode")
-            .description("Method used to center the player.")
-            .defaultValue(CenterMode.NCP)
-            .build()
+        .name("center-mode")
+        .description("Method used to center the player.")
+        .defaultValue(CenterMode.NCP)
+        .build()
     );
 
     private final Setting<Boolean> render = sgRender.add(new BoolSetting.Builder()
-            .name("render")
-            .description("Renders the block placements.")
-            .defaultValue(true)
-            .build()
+        .name("render")
+        .description("Renders the block placements.")
+        .defaultValue(true)
+        .build()
     );
 
     private final Setting<ShapeMode> shapeMode = sgRender.add(new EnumSetting.Builder<ShapeMode>()
-            .name("shape-mode")
-            .description("How the shapes are rendered.")
-            .defaultValue(ShapeMode.Both)
-            .visible(render::get)
-            .build()
+        .name("shape-mode")
+        .description("How the shapes are rendered.")
+        .defaultValue(ShapeMode.Both)
+        .visible(render::get)
+        .build()
     );
 
     private final Setting<SettingColor> sideColor = sgRender.add(new ColorSetting.Builder()
-            .name("side-color")
-            .description("The side color.")
-            .defaultValue(new SettingColor(THMAddon.THMSideColor.r, THMAddon.THMSideColor.g, THMAddon.THMSideColor.b, THMAddon.THMSideColor.a))
-            .visible(render::get)
-            .build()
+        .name("side-color")
+        .description("The side color.")
+        .defaultValue(new SettingColor(THMAddon.THMSideColor.r, THMAddon.THMSideColor.g, THMAddon.THMSideColor.b, THMAddon.THMSideColor.a))
+        .visible(render::get)
+        .build()
     );
 
     private final Setting<SettingColor> lineColor = sgRender.add(new ColorSetting.Builder()
-            .name("line-color")
-            .description("The line color.")
-            .defaultValue(new SettingColor(THMAddon.THMColor.r, THMAddon.THMColor.g, THMAddon.THMColor.b, THMAddon.THMColor.a))
-            .visible(render::get)
-            .build()
+        .name("line-color")
+        .description("The line color.")
+        .defaultValue(new SettingColor(THMAddon.THMColor.r, THMAddon.THMColor.g, THMAddon.THMColor.b, THMAddon.THMColor.a))
+        .visible(render::get)
+        .build()
     );
 
     private final Setting<Boolean> fade = sgRender.add(new BoolSetting.Builder()
-            .name("fade")
-            .description("Fades the rendered block over time.")
-            .defaultValue(true)
-            .visible(render::get)
-            .build()
+        .name("fade")
+        .description("Fades the rendered block over time.")
+        .defaultValue(true)
+        .visible(render::get)
+        .build()
     );
 
     private final Setting<Double> fadeTime = sgRender.add(new DoubleSetting.Builder()
-            .name("fade-time")
-            .description("How long the fade lasts in seconds.")
-            .defaultValue(0.5)
-            .min(0.1)
-            .sliderMax(2)
-            .visible(() -> render.get() && fade.get())
-            .build()
+        .name("fade-time")
+        .description("How long the fade lasts in seconds.")
+        .defaultValue(0.5)
+        .min(0.1)
+        .sliderMax(2)
+        .visible(() -> render.get() && fade.get())
+        .build()
     );
 
     private final Map<BlockPos, Long> renderMap = new HashMap<>();
     private final Map<BlockPos, Long> packetPlacedAt = new HashMap<>();
     private final List<BlockPos> surroundCache = new ArrayList<>();
+    // Thread-safe queue for placements triggered from the packet (Netty) thread
+    private final Queue<BlockPos> fallbackQueue = new ConcurrentLinkedQueue<>();
     private int delayTimer;
     private BlockPos initialPos;
 
@@ -269,6 +272,7 @@ public class SurroundPlus extends Module {
         renderMap.clear();
         packetPlacedAt.clear();
         surroundCache.clear();
+        fallbackQueue.clear();
         if (mc.player == null) return;
         initialPos = mc.player.getBlockPos();
 
@@ -290,6 +294,13 @@ public class SurroundPlus extends Module {
         if (onlyOnGround.get() && !mc.player.isOnGround()) return;
 
         handleCentering();
+
+        // Process fallback placements queued from the packet (Netty) thread — must run on main thread
+        BlockPos fallback;
+        while ((fallback = fallbackQueue.poll()) != null) {
+            FindItemResult fallbackItem = InvUtils.findInHotbar(itemStack -> blocks.get().contains(Block.getBlockFromItem(itemStack.getItem())));
+            if (fallbackItem.found()) placeBlock(fallback, fallbackItem);
+        }
 
         if (delayTimer > 0) {
             delayTimer--;
@@ -526,10 +537,10 @@ public class SurroundPlus extends Module {
         }
     }
 
+    // Queue the position for placement on the main thread instead of placing directly
+    // (BlockUtils.place triggers a chunk rebuild which must run on the render/main thread)
     private void placeFallbackDirect(BlockPos pos) {
-        FindItemResult block = InvUtils.findInHotbar(itemStack -> blocks.get().contains(Block.getBlockFromItem(itemStack.getItem())));
-        if (!block.found()) return;
-        placeBlock(pos, block);
+        fallbackQueue.add(pos);
     }
 
     private void attackCrystals(List<BlockPos> positions) {

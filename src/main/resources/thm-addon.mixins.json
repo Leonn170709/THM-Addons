@@ -33,6 +33,7 @@
     "meteor.NametagsMixin",
     "meteor.NoSlowMixin",
     "meteor.NotifierMixin",
+    "accessor.LogoutSpotsAccessor",
     "accessor.LogoutSpotsEntryAccessor",
     "meteor.LogoutSpotsEntryPoseMixin",
     "meteor.LogoutSpotsMixin",
