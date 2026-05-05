@@ -951,6 +951,7 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
     public HorizontalDirection dir, leftDir, rightDir;
+    private String activationWorkingDirectionSource = "unknown";
 
     private Input prevInput;
     private CustomPlayerInput input;
@@ -1455,9 +1456,22 @@ public class HighwayBuilderTHM extends Module {
 
         updateVariables();
         updateSignBreakRegex();
-        HorizontalDirection activationDirection = reconnectActivation ? reconnectResume.direction() : resolveActivationWorkingDirection();
-        if (!reconnectActivation) applyActivationWorkingYaw(activationDirection);
+        HorizontalDirection activationDirection;
+        if (reconnectActivation) {
+            activationWorkingDirectionSource = "reconnect-locked";
+            activationDirection = reconnectResume.direction();
+        } else {
+            activationDirection = resolveActivationWorkingDirection();
+            applyActivationWorkingYaw(activationDirection);
+        }
         dir = activationDirection != null ? activationDirection : HorizontalDirection.get(mc.player.getYaw());
+        if (debugLog.get()) {
+            info("Activation working direction source=%s direction=%s manage-thm-hwy-monitor=%s.",
+                activationWorkingDirectionSource,
+                dir.name,
+                manageThmHwyMonitor.get()
+            );
+        }
         leftDir = dir.rotateLeftSkipOne();
         rightDir = leftDir.opposite();
 
@@ -1759,10 +1773,21 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private HorizontalDirection resolveActivationWorkingDirection() {
-        if (mc.player == null) return null;
+        if (mc.player == null) {
+            activationWorkingDirectionSource = "player-missing";
+            return null;
+        }
+
+        if (!manageThmHwyMonitor.get()) {
+            activationWorkingDirectionSource = "manual-player-yaw";
+            return HorizontalDirection.get(mc.player.getYaw());
+        }
 
         HorizontalDirection cachedDirection = peekCachedWorkingDirectionForActivation();
-        if (cachedDirection != null) return cachedDirection;
+        if (cachedDirection != null) {
+            activationWorkingDirectionSource = "managed-cached-stats";
+            return cachedDirection;
+        }
 
         THMHwyMonitor monitor = Modules.get().get(THMHwyMonitor.class);
         boolean useTrueCenterMode = monitor == null || monitor.usesTrueCenterMode();
@@ -1772,7 +1797,13 @@ public class HighwayBuilderTHM extends Module {
             mc.player.getYaw(),
             useTrueCenterMode
         );
-        return inferredDirection != null ? inferredDirection : HorizontalDirection.get(mc.player.getYaw());
+        if (inferredDirection != null) {
+            activationWorkingDirectionSource = "managed-line-inference";
+            return inferredDirection;
+        }
+
+        activationWorkingDirectionSource = "managed-yaw-fallback";
+        return HorizontalDirection.get(mc.player.getYaw());
     }
 
     private void applyActivationWorkingYaw(HorizontalDirection direction) {
