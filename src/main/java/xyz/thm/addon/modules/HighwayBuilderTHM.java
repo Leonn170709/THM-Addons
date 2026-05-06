@@ -3552,10 +3552,13 @@ public class HighwayBuilderTHM extends Module {
 
         return true;
     }
-
+    //Weird ahh fix
     private boolean isSignBlock(BlockState state) {
         Block block = state.getBlock();
-        return block instanceof SignBlock || block instanceof HangingSignBlock;
+        return block instanceof SignBlock
+            || block instanceof WallSignBlock
+            || block instanceof HangingSignBlock
+            || block instanceof WallHangingSignBlock;
     }
 
     private String getSignText(BlockPos pos) {
