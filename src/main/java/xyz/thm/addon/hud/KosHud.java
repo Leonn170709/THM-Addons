@@ -77,7 +77,7 @@ public class KosHud extends HudElement {
 
     // Reset cache on world join
     public void onWorldJoin() {
-        ThmMembers.resetCache();
+        // Keep startup-loaded members cached. Only manual refresh should reload member API.
     }
 
     @Override

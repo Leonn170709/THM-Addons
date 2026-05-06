@@ -34,6 +34,7 @@ import xyz.thm.addon.utils.JoinPayload;
 import xyz.thm.addon.utils.KitbotChatRouter;
 import xyz.thm.addon.utils.ServerReconnectService;
 import xyz.thm.addon.utils.ServerStatusHandler;
+import xyz.thm.addon.utils.ThmMembers;
 import xyz.thm.addon.utils.THMUtils;
 
 import java.io.File;
@@ -79,6 +80,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         ServerStatusHandler.getInstance();
         ServerReconnectService.getInstance();
         KitbotChatRouter.getInstance();
+        ThmMembers.initialize();
 
         // Modules
         Modules.get().add(new HighwayBuilderTHM());
@@ -86,7 +88,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new AxisViewer());
         Modules.get().add(new BlockCounter());
         Modules.get().add(new DiscordNotifs());
-        //Modules.get().add(new WebhookEncrypt());
+        addOptionalModule("xyz.thm.addon.modules.WebhookEncrypt");
         Modules.get().add(new AntiDrop());
         Modules.get().add(new ScaffoldTHM());
         Modules.get().add(new Nuker());

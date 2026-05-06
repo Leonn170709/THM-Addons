@@ -94,6 +94,13 @@ public class MemberHud extends HudElement {
         .build()
     );
 
+    public final Setting<Boolean> showHighwayStatus = sgGeneral.add(new BoolSetting.Builder()
+        .name("show-highway-status")
+        .description("Shows the highway assignment after the player name in brackets.")
+        .defaultValue(false)
+        .build()
+    );
+
     // Color settings for text display
     public final Setting<SettingColor> colorHeader = sgColors.add(new ColorSetting.Builder()
         .name("header-color")
@@ -119,7 +126,7 @@ public class MemberHud extends HudElement {
 
     // Reset cache on world join
     public void onWorldJoin() {
-        ThmMembers.resetCache();
+        // Keep startup-loaded members cached. Only manual refresh should reload member API.
     }
 
     @Override
@@ -193,7 +200,9 @@ public class MemberHud extends HudElement {
             Color rankColor = ThmMembers.getRankColor(member.rank);
 
             // Build complete display text for width calculation
-            String displayText = String.format("[%s] %s", member.rank, player);
+            String highwayStatus = showHighwayStatus.get() ? ThmMembers.getHighwayStatusByMcName(player) : null;
+            String highwaySuffix = highwayStatus != null && !highwayStatus.isBlank() ? String.format(" (%s)", highwayStatus) : "";
+            String displayText = String.format("[%s] %s%s", member.rank, player, highwaySuffix);
 
             // Render opening bracket
             renderer.text("[", x, screenY.get(), colorMemberInfo.get(), true, textScale);
@@ -204,7 +213,7 @@ public class MemberHud extends HudElement {
             xOffset += renderer.textWidth(member.rank, true) * textScale;
 
             // Render closing bracket and player name
-            renderer.text(String.format("] %s", player), xOffset, screenY.get(), colorMemberInfo.get(), true, textScale);
+            renderer.text(String.format("] %s%s", player, highwaySuffix), xOffset, screenY.get(), colorMemberInfo.get(), true, textScale);
 
             // Calculate total width for background
             double totalWidth = renderer.textWidth(displayText, true) * textScale;

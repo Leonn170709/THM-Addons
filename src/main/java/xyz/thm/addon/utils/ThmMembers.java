@@ -16,6 +16,7 @@ import java.security.MessageDigest;
 import java.util.*;
 
 import static xyz.thm.addon.utils.password.getAPIMemberHud;
+import static xyz.thm.addon.utils.password.getAPIHighwayStatus;
 import static xyz.thm.addon.utils.password.getPassword;
 
 public final class ThmMembers {
@@ -36,13 +37,18 @@ public final class ThmMembers {
     }
 
     private static final String API_URL = getAPIMemberHud();
+    private static final String API_HIGHWAY_STATUS_URL = getAPIHighwayStatus();
 
     private static List<Member> cachedMembers = null;
     private static Map<String, Member> cachedByMcName = null;
-    private static long lastCacheTime = 0;
-    private static final long CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
     private static boolean fetchInProgress = false;
     private static Thread fetchThread = null;
+    private static boolean startupFetchStarted = false;
+
+    private static final long HIGHWAY_STATUS_REFRESH_MS = 10 * 60 * 1000; // 10 minutes
+    private static Map<String, String> cachedHighwayByMcName = new HashMap<>();
+    private static long lastHighwayStatusFetchTime = 0;
+    private static boolean highwayStatusPollingStarted = false;
 
     private ThmMembers() {
     }
@@ -132,17 +138,16 @@ public final class ThmMembers {
     }
 
     private static void refreshIfNeeded() {
-        long currentTime = System.currentTimeMillis();
-        if (cachedMembers != null && (currentTime - lastCacheTime) < CACHE_DURATION) return;
-        startFetch(false);
+        if (cachedMembers == null) startFetch(false);
     }
 
     private static void startFetch(boolean force) {
         synchronized (ThmMembers.class) {
             if (fetchInProgress) return;
-            if (!force && cachedMembers != null && (System.currentTimeMillis() - lastCacheTime) < CACHE_DURATION) return;
+            if (!force && startupFetchStarted) return;
 
             fetchInProgress = true;
+            startupFetchStarted = true;
             fetchThread = new Thread(() -> runFetchLoop(force), "THM-MemberFetch");
             fetchThread.setDaemon(true);
             fetchThread.start();
@@ -172,14 +177,7 @@ public final class ThmMembers {
             }
 
             delayMs = Math.min(delayMs * 2, 30000);
-            if (!force) {
-                synchronized (ThmMembers.class) {
-                    if (cachedMembers != null && (System.currentTimeMillis() - lastCacheTime) < CACHE_DURATION) {
-                        fetchInProgress = false;
-                        return;
-                    }
-                }
-            }
+            if (!force && startupFetchStarted && cachedMembers != null) return;
         }
     }
 
@@ -196,7 +194,6 @@ public final class ThmMembers {
                 }
             }
         }
-        lastCacheTime = System.currentTimeMillis();
     }
 
     public static synchronized List<Member> getCachedMembers() {
@@ -297,12 +294,104 @@ public final class ThmMembers {
     public static synchronized void resetCache() {
         cachedMembers = null;
         cachedByMcName = null;
-        lastCacheTime = 0;
+        startupFetchStarted = false;
     }
 
     public static synchronized void refreshNow() {
         resetCache();
         startFetch(true);
+    }
+
+    public static synchronized void initialize() {
+        startFetch(false);
+        startHighwayStatusPollingIfNeeded();
+    }
+
+    private static Map<String, String> fetchHighwayStatusFromApi() {
+        try {
+            String apiUrl = decryptAPI(API_HIGHWAY_STATUS_URL, getPassword());
+            if (apiUrl == null) return null;
+
+            HttpURLConnection connection = (HttpURLConnection) new URI(apiUrl).toURL().openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+
+            if (connection.getResponseCode() != 200) {
+                THMAddon.LOG.error("Failed to fetch highway status from API. Response code: {}", connection.getResponseCode());
+                return null;
+            }
+
+            StringBuilder response = new StringBuilder();
+            try (Scanner scanner = new Scanner(connection.getInputStream())) {
+                while (scanner.hasNextLine()) {
+                    response.append(scanner.nextLine());
+                }
+            }
+
+            Gson gson = new Gson();
+            JsonObject root = gson.fromJson(response.toString(), JsonObject.class);
+            Map<String, String> highwayByName = new HashMap<>();
+            Map<String, Long> newestTimestampByName = new HashMap<>();
+
+            if (root != null) {
+                for (Map.Entry<String, com.google.gson.JsonElement> entry : root.entrySet()) {
+                    String highway = entry.getKey();
+                    JsonObject value = entry.getValue().getAsJsonObject();
+                    if (value == null || !value.has("username")) continue;
+
+                    String username = normalizeMcName(value.get("username").getAsString());
+                    if (username == null) continue;
+
+                    long timestamp = value.has("timestamp") ? value.get("timestamp").getAsLong() : Long.MIN_VALUE;
+                    Long existingTimestamp = newestTimestampByName.get(username);
+                    if (existingTimestamp == null || timestamp >= existingTimestamp) {
+                        newestTimestampByName.put(username, timestamp);
+                        highwayByName.put(username, highway);
+                    }
+                }
+            }
+
+            connection.disconnect();
+            return highwayByName;
+        } catch (Exception e) {
+            THMAddon.LOG.warn("Error fetching highway status from API: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private static void startHighwayStatusPollingIfNeeded() {
+        synchronized (ThmMembers.class) {
+            if (highwayStatusPollingStarted) return;
+            highwayStatusPollingStarted = true;
+        }
+
+        Thread thread = new Thread(() -> {
+            while (!Thread.currentThread().isInterrupted()) {
+                Map<String, String> fetched = fetchHighwayStatusFromApi();
+                if (fetched != null) {
+                    synchronized (ThmMembers.class) {
+                        cachedHighwayByMcName = fetched;
+                        lastHighwayStatusFetchTime = System.currentTimeMillis();
+                    }
+                }
+
+                try {
+                    Thread.sleep(HIGHWAY_STATUS_REFRESH_MS);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }, "THM-HighwayStatusFetch");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    public static synchronized String getHighwayStatusByMcName(String mcName) {
+        startHighwayStatusPollingIfNeeded();
+        String normalized = normalizeMcName(mcName);
+        if (normalized == null || cachedHighwayByMcName == null) return null;
+        return cachedHighwayByMcName.get(normalized);
     }
 
     public static Color getRankColor(String rankName) {
