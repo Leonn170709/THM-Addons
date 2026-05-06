@@ -209,7 +209,7 @@ public class THMHwyMonitor extends Module {
     private RecoveryCause recoveryCause = RecoveryCause.None;
     private boolean recoveryModulesPaused;
     private final List<Module> recoveryPausedModules = new ArrayList<>();
-    private WorkLine trackedLine;
+    private HighwaySegment trackedSegment;
     private String trackedDirection;
     private float recoveryYawBeforeMove = Float.NaN;
     // Restart automation subsystem. This code stays in the file but must remain fully dormant
@@ -309,8 +309,21 @@ public class THMHwyMonitor extends Module {
         }
     }
 
-    private record ReconnectLineResolution(
-        WorkLine line,
+    private record HighwaySegment(
+        String highway,
+        int roadValue,
+        String segmentLabel,
+        WorkLine line
+    ) {
+        private boolean isRingOrDiamond() {
+            return "Ring".equals(highway) || "Diamond".equals(highway);
+        }
+    }
+
+    private record SegmentProjection(
+        HighwaySegment segment,
+        double targetX,
+        double targetZ,
         double distance
     ) {}
 
@@ -452,7 +465,7 @@ public class THMHwyMonitor extends Module {
         recoveryPhase = RecoveryPhase.None;
         recoveryModulesPaused = false;
         recoveryPausedModules.clear();
-        trackedLine = null;
+        trackedSegment = null;
         trackedDirection = "";
         recoveryYawBeforeMove = Float.NaN;
         resetForwardProgressWatch();
@@ -476,12 +489,16 @@ public class THMHwyMonitor extends Module {
 
     public static HorizontalDirection inferClosestWorkingDirection(double playerX, double playerZ, float yaw, boolean trueCenterMode) {
         if (Float.isNaN(yaw)) return null;
+        SegmentProjection projection = selectBestSegmentProjection(
+            collectSegmentProjections(playerX, playerZ, true, true, true, true, trueCenterMode),
+            null,
+            "",
+            yaw,
+            0.0
+        );
+        if (projection == null) return null;
 
-        double centerOffset = trueCenterMode ? 0.5 : 0.0;
-        WorkLine line = nearestWorkLine(playerX, playerZ, centerOffset, trueCenterMode);
-        if (line == null) return null;
-
-        return parseDirectionCode(inferDirectionForLine(line, yaw));
+        return parseDirectionCode(chooseSegmentTravelDirection(projection.segment(), yaw, ""));
     }
 
     @Override
@@ -496,7 +513,7 @@ public class THMHwyMonitor extends Module {
         baritoneTimeoutTicks = 0;
         recoveryPhase = RecoveryPhase.None;
         resumePausedModulesAfterRecovery();
-        trackedLine = null;
+        trackedSegment = null;
         trackedDirection = "";
         recoveryYawBeforeMove = Float.NaN;
         resetForwardProgressWatch();
@@ -1124,7 +1141,7 @@ public class THMHwyMonitor extends Module {
         HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
         if (builder == null || !builder.isActive()) {
             if (mc.player != null) lastReliableRecoveryYaw = mc.player.getYaw();
-            trackedLine = null;
+            trackedSegment = null;
             trackedDirection = "";
             resetForwardProgressWatch();
             clearPendingAlignmentGateRequest();
@@ -1172,7 +1189,7 @@ public class THMHwyMonitor extends Module {
 
             builder = Modules.get().get(HighwayBuilderTHM.class);
             if (builder == null || !builder.isActive()) {
-                trackedLine = null;
+                trackedSegment = null;
                 trackedDirection = "";
                 resetForwardProgressWatch();
                 clearPendingAlignmentGateRequest();
@@ -1250,29 +1267,29 @@ public class THMHwyMonitor extends Module {
             recoveryDirectionYaw,
             recoveryGoalY,
             trueCenterMode.get(),
-            trackedLine,
+            trackedSegment,
             preferredDirection
         );
         if (target == null) return null;
 
-        if (trackedLine == null && target.distance() <= WORKING_LINE_TOLERANCE) {
-            trackedLine = target.line();
+        if (trackedSegment == null && target.distance() <= WORKING_LINE_TOLERANCE) {
+            trackedSegment = target.segment();
         }
 
-        if (trackedLine != null) {
+        if (trackedSegment != null) {
             target = determineRecoveryTarget(
                 mc.player.getX(),
                 mc.player.getZ(),
                 recoveryDirectionYaw,
                 recoveryGoalY,
                 trueCenterMode.get(),
-                trackedLine,
+                trackedSegment,
                 preferredDirection
             );
             if (target == null) return null;
         }
 
-        trackedDirection = target.direction();
+        trackedDirection = target.travelDirection();
         return target;
     }
 
@@ -1379,8 +1396,8 @@ public class THMHwyMonitor extends Module {
         pendingLocalStallEscapeTarget = localStallEscapeTarget;
         this.recoveryCause = recoveryCause;
         if (updateTracking) {
-            trackedLine = target.line();
-            trackedDirection = target.direction();
+            trackedSegment = target.segment();
+            trackedDirection = target.travelDirection();
         }
         recoveryYawBeforeMove = recoveryDirectionYaw;
         recoveryTicks = RECOVERY_DELAY_TICKS;
@@ -1921,9 +1938,32 @@ public class THMHwyMonitor extends Module {
     }
 
     private HorizontalDirection resolveWorkingDirectionForAlignment(HighwayBuilderTHM builder, float fallbackYaw) {
-        HorizontalDirection direction = builder == null ? null : builder.getWorkingDirection();
-        if (direction != null) return direction;
-        if (mc == null || mc.player == null) return null;
+        HorizontalDirection builderDirection = builder == null ? null : builder.getWorkingDirection();
+        if (mc == null || mc.player == null) return builderDirection;
+
+        String preferredDirection = normalizeDirection(directionCode(builderDirection));
+        if (preferredDirection.isEmpty()) preferredDirection = normalizeDirection(trackedDirection);
+
+        SegmentProjection projection = selectBestSegmentProjection(
+            collectSegmentProjections(mc.player.getX(), mc.player.getZ(), true, true, true, true, trueCenterMode.get()),
+            trackedSegment,
+            preferredDirection,
+            fallbackYaw,
+            WORKING_LINE_TOLERANCE
+        );
+        if (projection != null) {
+            String detectedDirection = chooseSegmentTravelDirection(projection.segment(), fallbackYaw, preferredDirection);
+            HorizontalDirection detected = parseDirectionCode(detectedDirection);
+            if (projection.segment().isRingOrDiamond()) {
+                if (detected != null) return detected;
+            } else if (builderDirection != null && isDirectionCompatible(projection.segment(), preferredDirection)) {
+                return builderDirection;
+            } else if (detected != null) {
+                return detected;
+            }
+        }
+
+        if (builderDirection != null) return builderDirection;
         return inferClosestWorkingDirection(mc.player.getX(), mc.player.getZ(), fallbackYaw, trueCenterMode.get());
     }
 
@@ -2182,128 +2222,21 @@ public class THMHwyMonitor extends Module {
 
     public AlignmentResult IsAlignedResult(double playerX, double playerZ, float playerYaw, boolean cardinal, boolean diagonal, boolean ring, boolean diamond, boolean trueCenterMode) {
         double centerOffset = trueCenterMode ? 0.5 : 0.0;
+        SegmentProjection bestProjection = selectBestSegmentProjection(
+            collectSegmentProjections(playerX, playerZ, cardinal, diagonal, ring, diamond, trueCenterMode),
+            null,
+            "",
+            playerYaw,
+            0.0
+        );
+        if (bestProjection == null) return AlignmentResult.notAligned();
 
-        String bestHighway = "None";
-        String bestDirection = "None";
-        double bestDistance = HUGE_DISTANCE;
-
-        if (cardinal) {
-            // z = offset (east-west highway), portion is W/E relative to origin.
-            double dXAxis = Math.abs(playerZ - centerOffset);
-            if (dXAxis < bestDistance) {
-                bestDistance = dXAxis;
-                bestHighway = "Cardinal";
-                bestDirection = resolveDirectionForAlignmentResult(WorkLine.CardinalEW, playerX, playerZ, playerYaw, centerOffset);
-            }
-
-            // x = offset (north-south highway), portion is N/S relative to origin.
-            double dZAxis = Math.abs(playerX - centerOffset);
-            if (dZAxis < bestDistance) {
-                bestDistance = dZAxis;
-                bestHighway = "Cardinal";
-                bestDirection = resolveDirectionForAlignmentResult(WorkLine.CardinalNS, playerX, playerZ, playerYaw, centerOffset);
-            }
-        }
-
-        if (diagonal) {
-            // AxisViewer diagonal 1: x - z = 0, corresponds to NW <-> SE.
-            double d1 = distanceToLine(playerX, playerZ, 1.0, -1.0, 0.0);
-            if (d1 < bestDistance) {
-                bestDistance = d1;
-                bestHighway = "Diagonal";
-                bestDirection = resolveDirectionForAlignmentResult(WorkLine.DiagonalNWSE, playerX, playerZ, playerYaw, centerOffset);
-            }
-
-            // AxisViewer diagonal 2: x + z = 0 (or 1 in true-center mode), corresponds to NE <-> SW.
-            double c = trueCenterMode ? 1.0 : 0.0;
-            double d2 = distanceToLine(playerX, playerZ, 1.0, 1.0, c);
-            if (d2 < bestDistance) {
-                bestDistance = d2;
-                bestHighway = "Diagonal";
-                bestDirection = resolveDirectionForAlignmentResult(WorkLine.DiagonalNESW, playerX, playerZ, playerYaw, centerOffset);
-            }
-        }
-
-        if (ring) {
-            for (int r : RING_ROADS) {
-                double left = -r + centerOffset;
-                double right = r + centerOffset;
-                double bottom = -r + centerOffset;
-                double top = r + centerOffset;
-
-                double dBottom = distancePointToSegment(playerX, playerZ, left, bottom, right, bottom);
-                if (dBottom < bestDistance) {
-                    bestDistance = dBottom;
-                    bestHighway = "Ring";
-                    bestDirection = "N";
-                }
-
-                double dTop = distancePointToSegment(playerX, playerZ, left, top, right, top);
-                if (dTop < bestDistance) {
-                    bestDistance = dTop;
-                    bestHighway = "Ring";
-                    bestDirection = "S";
-                }
-
-                double dLeft = distancePointToSegment(playerX, playerZ, left, bottom, left, top);
-                if (dLeft < bestDistance) {
-                    bestDistance = dLeft;
-                    bestHighway = "Ring";
-                    bestDirection = "W";
-                }
-
-                double dRight = distancePointToSegment(playerX, playerZ, right, bottom, right, top);
-                if (dRight < bestDistance) {
-                    bestDistance = dRight;
-                    bestHighway = "Ring";
-                    bestDirection = "E";
-                }
-            }
-        }
-
-        if (diamond) {
-            for (int d : DIAMONDS) {
-                double x1 = d + centerOffset;
-                double z1 = centerOffset;
-                double x2 = centerOffset;
-                double z2 = d + centerOffset;
-                double x3 = -d + centerOffset;
-                double z3 = centerOffset;
-                double x4 = centerOffset;
-                double z4 = -d + centerOffset;
-
-                double dSE = distancePointToSegment(playerX, playerZ, x1, z1, x2, z2);
-                if (dSE < bestDistance) {
-                    bestDistance = dSE;
-                    bestHighway = "Diamond";
-                    bestDirection = "SE";
-                }
-
-                double dSW = distancePointToSegment(playerX, playerZ, x2, z2, x3, z3);
-                if (dSW < bestDistance) {
-                    bestDistance = dSW;
-                    bestHighway = "Diamond";
-                    bestDirection = "SW";
-                }
-
-                double dNW = distancePointToSegment(playerX, playerZ, x3, z3, x4, z4);
-                if (dNW < bestDistance) {
-                    bestDistance = dNW;
-                    bestHighway = "Diamond";
-                    bestDirection = "NW";
-                }
-
-                double dNE = distancePointToSegment(playerX, playerZ, x4, z4, x1, z1);
-                if (dNE < bestDistance) {
-                    bestDistance = dNE;
-                    bestHighway = "Diamond";
-                    bestDirection = "NE";
-                }
-            }
-        }
+        String bestHighway = bestProjection.segment().highway();
+        String bestDirection = resolveAlignmentDirectionLabel(bestProjection.segment(), playerX, playerZ, playerYaw, centerOffset);
+        double bestDistance = bestProjection.distance();
 
         if (bestDistance <= WORKING_LINE_TOLERANCE) {
-            if ("Ring".equals(bestHighway) || "Diamond".equals(bestHighway)) {
+            if (bestProjection.segment().isRingOrDiamond()) {
                 String facing = yawToDirection(playerYaw);
                 bestDirection = bestDirection + "->" + facing;
             }
@@ -2319,41 +2252,295 @@ public class THMHwyMonitor extends Module {
         float playerYaw,
         int recoveryGoalY,
         boolean trueCenterMode,
-        WorkLine preferredLine,
+        HighwaySegment preferredSegment,
         String preferredDirection
     ) {
-        double centerOffset = trueCenterMode ? 0.5 : 0.0;
-        WorkLine line = preferredLine != null ? preferredLine : nearestWorkLine(playerX, playerZ, centerOffset, trueCenterMode);
-        if (line == null) return null;
+        List<SegmentProjection> candidates = collectSegmentProjections(playerX, playerZ, true, true, true, true, trueCenterMode);
+        SegmentProjection projection = preferredSegment != null
+            ? findProjectionForSegment(candidates, preferredSegment)
+            : selectBestSegmentProjection(candidates, null, preferredDirection, playerYaw, WORKING_LINE_TOLERANCE);
+        if (projection == null) return null;
 
-        double targetX = playerX;
-        double targetZ = playerZ;
-        switch (line) {
-            case CardinalNS -> targetX = centerOffset;
-            case CardinalEW -> targetZ = centerOffset;
-            case DiagonalNWSE -> {
-                double[] point = closestPointOnLine(playerX, playerZ, 1.0, -1.0, 0.0);
-                targetX = point[0];
-                targetZ = point[1];
-            }
-            case DiagonalNESW -> {
-                double c = trueCenterMode ? 1.0 : 0.0;
-                double[] point = closestPointOnLine(playerX, playerZ, 1.0, 1.0, c);
-                targetX = point[0];
-                targetZ = point[1];
+        String travelDirection = chooseSegmentTravelDirection(projection.segment(), playerYaw, preferredDirection);
+        if (travelDirection.isEmpty()) return null;
+
+        String direction = displayDirectionForSegment(projection.segment(), travelDirection);
+        return new RecoveryTarget(
+            projection.segment().highway(),
+            direction,
+            travelDirection,
+            projection.targetX(),
+            projection.targetZ(),
+            floorToBlock(projection.targetX()),
+            recoveryGoalY,
+            floorToBlock(projection.targetZ()),
+            yawForWorkingDirection(travelDirection),
+            projection.distance(),
+            projection.segment()
+        );
+    }
+
+    private static String resolveAlignmentDirectionLabel(HighwaySegment segment, double playerX, double playerZ, float playerYaw, double centerOffset) {
+        if (segment == null) return "None";
+        if (segment.line() != null) {
+            return resolveDirectionForAlignmentResult(segment.line(), playerX, playerZ, playerYaw, centerOffset);
+        }
+        return segment.segmentLabel();
+    }
+
+    private static String displayDirectionForSegment(HighwaySegment segment, String travelDirection) {
+        if (segment == null) return normalizeDirection(travelDirection);
+        return segment.line() != null ? normalizeDirection(travelDirection) : segment.segmentLabel();
+    }
+
+    private static SegmentProjection findProjectionForSegment(List<SegmentProjection> projections, HighwaySegment segment) {
+        if (segment == null) return null;
+        for (SegmentProjection projection : projections) {
+            if (segment.equals(projection.segment())) return projection;
+        }
+        return null;
+    }
+
+    private static List<SegmentProjection> collectSegmentProjections(
+        double playerX,
+        double playerZ,
+        boolean cardinal,
+        boolean diagonal,
+        boolean ring,
+        boolean diamond,
+        boolean trueCenterMode
+    ) {
+        List<SegmentProjection> projections = new ArrayList<>();
+        double centerOffset = trueCenterMode ? 0.5 : 0.0;
+
+        if (cardinal) {
+            addProjection(projections, new HighwaySegment("Cardinal", 0, "NS", WorkLine.CardinalNS), centerOffset, playerZ, playerX, playerZ);
+            addProjection(projections, new HighwaySegment("Cardinal", 0, "EW", WorkLine.CardinalEW), playerX, centerOffset, playerX, playerZ);
+        }
+
+        if (diagonal) {
+            double[] nwsePoint = closestPointOnLine(playerX, playerZ, 1.0, -1.0, 0.0);
+            addProjection(projections, new HighwaySegment("Diagonal", 0, "NWSE", WorkLine.DiagonalNWSE), nwsePoint[0], nwsePoint[1], playerX, playerZ);
+
+            double diagonalOffset = trueCenterMode ? 1.0 : 0.0;
+            double[] neswPoint = closestPointOnLine(playerX, playerZ, 1.0, 1.0, diagonalOffset);
+            addProjection(projections, new HighwaySegment("Diagonal", 0, "NESW", WorkLine.DiagonalNESW), neswPoint[0], neswPoint[1], playerX, playerZ);
+        }
+
+        if (ring) {
+            for (int r : RING_ROADS) {
+                double left = -r + centerOffset;
+                double right = r + centerOffset;
+                double bottom = -r + centerOffset;
+                double top = r + centerOffset;
+
+                addSegmentProjection(projections, "Ring", r, "N", left, bottom, right, bottom, playerX, playerZ);
+                addSegmentProjection(projections, "Ring", r, "S", left, top, right, top, playerX, playerZ);
+                addSegmentProjection(projections, "Ring", r, "W", left, bottom, left, top, playerX, playerZ);
+                addSegmentProjection(projections, "Ring", r, "E", right, bottom, right, top, playerX, playerZ);
             }
         }
 
-        String direction = normalizeDirection(preferredDirection);
-        if (!isDirectionCompatible(line, direction)) return null;
+        if (diamond) {
+            for (int d : DIAMONDS) {
+                double x1 = d + centerOffset;
+                double z1 = centerOffset;
+                double x2 = centerOffset;
+                double z2 = d + centerOffset;
+                double x3 = -d + centerOffset;
+                double z3 = centerOffset;
+                double x4 = centerOffset;
+                double z4 = -d + centerOffset;
 
-        double distance = Math.hypot(playerX - targetX, playerZ - targetZ);
-        int goalX = floorToBlock(targetX);
-        int goalY = recoveryGoalY;
-        int goalZ = floorToBlock(targetZ);
-        String highway = (line == WorkLine.CardinalNS || line == WorkLine.CardinalEW) ? "Cardinal" : "Diagonal";
+                addSegmentProjection(projections, "Diamond", d, "SE", x1, z1, x2, z2, playerX, playerZ);
+                addSegmentProjection(projections, "Diamond", d, "SW", x2, z2, x3, z3, playerX, playerZ);
+                addSegmentProjection(projections, "Diamond", d, "NW", x3, z3, x4, z4, playerX, playerZ);
+                addSegmentProjection(projections, "Diamond", d, "NE", x4, z4, x1, z1, playerX, playerZ);
+            }
+        }
 
-        return new RecoveryTarget(highway, direction, targetX, targetZ, goalX, goalY, goalZ, directionToYaw(direction), distance, line);
+        return projections;
+    }
+
+    private static void addProjection(List<SegmentProjection> projections, HighwaySegment segment, double targetX, double targetZ, double playerX, double playerZ) {
+        projections.add(new SegmentProjection(segment, targetX, targetZ, Math.hypot(playerX - targetX, playerZ - targetZ)));
+    }
+
+    private static void addSegmentProjection(
+        List<SegmentProjection> projections,
+        String highway,
+        int roadValue,
+        String segmentLabel,
+        double x1,
+        double z1,
+        double x2,
+        double z2,
+        double playerX,
+        double playerZ
+    ) {
+        double[] point = closestPointOnSegment(playerX, playerZ, x1, z1, x2, z2);
+        addProjection(projections, new HighwaySegment(highway, roadValue, segmentLabel, null), point[0], point[1], playerX, playerZ);
+    }
+
+    private static SegmentProjection selectBestSegmentProjection(
+        List<SegmentProjection> candidates,
+        HighwaySegment trackedSegment,
+        String preferredDirection,
+        float referenceYaw,
+        double ambiguityThreshold
+    ) {
+        if (candidates == null || candidates.isEmpty()) return null;
+
+        double bestDistance = HUGE_DISTANCE;
+        for (SegmentProjection candidate : candidates) {
+            if (candidate.distance() < bestDistance) bestDistance = candidate.distance();
+        }
+
+        double threshold = Math.max(ambiguityThreshold, 0.0) + 1.0e-9;
+        List<SegmentProjection> ambiguous = new ArrayList<>();
+        for (SegmentProjection candidate : candidates) {
+            if (candidate.distance() <= bestDistance + threshold) ambiguous.add(candidate);
+        }
+        if (ambiguous.isEmpty()) return null;
+        if (ambiguous.size() == 1) return ambiguous.get(0);
+
+        SegmentProjection trackedProjection = findProjectionForSegment(ambiguous, trackedSegment);
+        if (trackedProjection != null) return trackedProjection;
+
+        String normalizedPreferredDirection = normalizeDirection(preferredDirection);
+        if (!normalizedPreferredDirection.isEmpty()) {
+            List<SegmentProjection> compatible = new ArrayList<>();
+            for (SegmentProjection candidate : ambiguous) {
+                if (isDirectionCompatible(candidate.segment(), normalizedPreferredDirection)) compatible.add(candidate);
+            }
+            if (!compatible.isEmpty()) {
+                return chooseProjectionByYawThenFallback(compatible, referenceYaw, normalizedPreferredDirection);
+            }
+        }
+
+        SegmentProjection yawPreferred = chooseProjectionByYawThenFallback(ambiguous, referenceYaw, normalizedPreferredDirection);
+        if (yawPreferred != null) return yawPreferred;
+
+        return chooseNearestProjection(ambiguous);
+    }
+
+    private static SegmentProjection chooseProjectionByYawThenFallback(List<SegmentProjection> candidates, float referenceYaw, String preferredDirection) {
+        if (candidates == null || candidates.isEmpty()) return null;
+        if (Float.isNaN(referenceYaw)) return chooseNearestProjection(candidates);
+
+        SegmentProjection best = null;
+        float bestYawDistance = Float.MAX_VALUE;
+        for (SegmentProjection candidate : candidates) {
+            String chosenDirection = chooseSegmentTravelDirection(candidate.segment(), referenceYaw, preferredDirection);
+            if (chosenDirection.isEmpty()) continue;
+
+            float candidateYawDistance = yawDistance(referenceYaw, yawForWorkingDirection(chosenDirection));
+            if (best == null || candidateYawDistance < bestYawDistance - 1.0e-4f ||
+                (Math.abs(candidateYawDistance - bestYawDistance) <= 1.0e-4f && compareProjectionTieBreak(candidate, best) < 0)) {
+                best = candidate;
+                bestYawDistance = candidateYawDistance;
+            }
+        }
+
+        return best != null ? best : chooseNearestProjection(candidates);
+    }
+
+    private static SegmentProjection chooseNearestProjection(List<SegmentProjection> candidates) {
+        SegmentProjection best = null;
+        for (SegmentProjection candidate : candidates) {
+            if (best == null || compareProjectionTieBreak(candidate, best) < 0) best = candidate;
+        }
+        return best;
+    }
+
+    private static int compareProjectionTieBreak(SegmentProjection left, SegmentProjection right) {
+        if (left == right) return 0;
+        int distanceCompare = Double.compare(left.distance(), right.distance());
+        if (distanceCompare != 0) return distanceCompare;
+        return Integer.compare(segmentFallbackOrder(left.segment()), segmentFallbackOrder(right.segment()));
+    }
+
+    private static int segmentFallbackOrder(HighwaySegment segment) {
+        if (segment == null) return Integer.MAX_VALUE;
+        if (segment.line() != null) {
+            return switch (segment.line()) {
+                case CardinalNS -> 0;
+                case CardinalEW -> 1;
+                case DiagonalNWSE -> 2;
+                case DiagonalNESW -> 3;
+            };
+        }
+
+        int labelOrder = switch (segment.segmentLabel()) {
+            case "N", "SE" -> 0;
+            case "S", "SW" -> 1;
+            case "W", "NW" -> 2;
+            case "E", "NE" -> 3;
+            default -> 9;
+        };
+
+        int roadValueOrder = Math.max(segment.roadValue(), 0) * 10;
+        if ("Ring".equals(segment.highway())) return 1000 + roadValueOrder + labelOrder;
+        if ("Diamond".equals(segment.highway())) return 2000 + roadValueOrder + labelOrder;
+        return 3000 + roadValueOrder + labelOrder;
+    }
+
+    private static boolean isDirectionCompatible(HighwaySegment segment, String direction) {
+        if (segment == null) return false;
+        String normalizedDirection = normalizeDirection(direction);
+        if (normalizedDirection.isEmpty()) return false;
+        if (segment.line() != null) return isDirectionCompatible(segment.line(), normalizedDirection);
+
+        String[] parallelDirections = parallelDirectionCodesForSegment(segment);
+        return parallelDirections != null &&
+            (normalizedDirection.equals(parallelDirections[0]) || normalizedDirection.equals(parallelDirections[1]));
+    }
+
+    private static String chooseSegmentTravelDirection(HighwaySegment segment, float referenceYaw, String preferredDirection) {
+        if (segment == null) return "";
+
+        String[] parallelDirections = parallelDirectionCodesForSegment(segment);
+        if (parallelDirections == null) return "";
+
+        String normalizedPreferredDirection = normalizeDirection(preferredDirection);
+        boolean preferredMatchesFirst = normalizedPreferredDirection.equals(parallelDirections[0]);
+        boolean preferredMatchesSecond = normalizedPreferredDirection.equals(parallelDirections[1]);
+        if (preferredMatchesFirst ^ preferredMatchesSecond) return normalizedPreferredDirection;
+
+        if (!Float.isNaN(referenceYaw)) {
+            float firstDistance = yawDistance(referenceYaw, yawForWorkingDirection(parallelDirections[0]));
+            float secondDistance = yawDistance(referenceYaw, yawForWorkingDirection(parallelDirections[1]));
+            if (firstDistance < secondDistance) return parallelDirections[0];
+            if (secondDistance < firstDistance) return parallelDirections[1];
+        }
+
+        return parallelDirections[0];
+    }
+
+    private static String[] parallelDirectionCodesForSegment(HighwaySegment segment) {
+        if (segment == null) return null;
+        if (segment.line() != null) {
+            return switch (segment.line()) {
+                case CardinalNS -> new String[] {"N", "S"};
+                case CardinalEW -> new String[] {"E", "W"};
+                case DiagonalNWSE -> new String[] {"NW", "SE"};
+                case DiagonalNESW -> new String[] {"NE", "SW"};
+            };
+        }
+
+        return switch (segment.highway()) {
+            case "Ring" -> switch (segment.segmentLabel()) {
+                case "N", "S" -> new String[] {"E", "W"};
+                case "E", "W" -> new String[] {"N", "S"};
+                default -> null;
+            };
+            case "Diamond" -> switch (segment.segmentLabel()) {
+                case "NE", "SW" -> new String[] {"NW", "SE"};
+                case "NW", "SE" -> new String[] {"NE", "SW"};
+                default -> null;
+            };
+            default -> null;
+        };
     }
 
     private RecoveryTarget applyRepairMisalignmentBackstepForGoto(RecoveryTarget target) {
@@ -2367,8 +2554,8 @@ public class THMHwyMonitor extends Module {
     }
 
     private RecoveryTarget applyDirectionalBackstepForGoto(RecoveryTarget target) {
-        int directionOffsetX = workingDirectionOffsetX(target.direction());
-        int directionOffsetZ = workingDirectionOffsetZ(target.direction());
+        int directionOffsetX = workingDirectionOffsetX(target.travelDirection());
+        int directionOffsetZ = workingDirectionOffsetZ(target.travelDirection());
         if (directionOffsetX == 0 && directionOffsetZ == 0) return target;
 
         double correctedTargetX = target.targetX() - directionOffsetX * 2.0;
@@ -2383,6 +2570,7 @@ public class THMHwyMonitor extends Module {
         return new RecoveryTarget(
             target.highway(),
             target.direction(),
+            target.travelDirection(),
             correctedTargetX,
             correctedTargetZ,
             correctedGoalX,
@@ -2390,7 +2578,7 @@ public class THMHwyMonitor extends Module {
             correctedGoalZ,
             target.yaw(),
             correctedDistance,
-            target.line()
+            target.segment()
         );
     }
 
@@ -2402,13 +2590,15 @@ public class THMHwyMonitor extends Module {
 
         double targetX = mc.player.getX() - direction.offsetX * 2.0;
         double targetZ = mc.player.getZ() - direction.offsetZ * 2.0;
-        String directionLabel = normalizeDirection(directionCode(direction));
-        if (directionLabel.isEmpty() && inferredTarget != null) directionLabel = inferredTarget.direction();
-        if (directionLabel.isEmpty()) directionLabel = "Unknown";
+        String travelDirection = normalizeDirection(directionCode(direction));
+        if (travelDirection.isEmpty() && inferredTarget != null) travelDirection = inferredTarget.travelDirection();
+        if (travelDirection.isEmpty()) travelDirection = "Unknown";
+        String directionLabel = inferredTarget != null ? inferredTarget.direction() : travelDirection;
 
         return new RecoveryTarget(
             inferredTarget != null ? inferredTarget.highway() : "Local",
             directionLabel,
+            travelDirection,
             targetX,
             targetZ,
             floorToBlock(targetX),
@@ -2416,7 +2606,7 @@ public class THMHwyMonitor extends Module {
             floorToBlock(targetZ),
             direction.yaw,
             Math.hypot(mc.player.getX() - targetX, mc.player.getZ() - targetZ),
-            null
+            inferredTarget != null ? inferredTarget.segment() : null
         );
     }
 
@@ -2593,26 +2783,28 @@ public class THMHwyMonitor extends Module {
 
         HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
         HorizontalDirection cachedDirection = builder == null ? null : builder.getCachedWorkingDirectionForMonitorReconnect(activeReconnectCycleId);
-        if (cachedDirection != null) {
-            postRejoinLastCompleteProbeWinner = cachedDirection;
-            return PostRejoinDirectionResult.success(cachedDirection, "cached-direction=" + cachedDirection.name);
+        String cachedDirectionCode = normalizeDirection(directionCode(cachedDirection));
+        SegmentProjection reconnectSegment = resolveReconnectLineFromCurrentPosition(cachedDirectionCode);
+        if (reconnectSegment == null) {
+            postRejoinLastCompleteProbeWinner = null;
+            return PostRejoinDirectionResult.blocked("axis-unresolved", "segment=unresolved");
         }
 
-        HorizontalDirection inferredDirection = inferClosestWorkingDirection(
-            mc.player.getX(),
-            mc.player.getZ(),
-            mc.player.getYaw(),
-            trueCenterMode.get()
+        String segmentSummary = String.format(Locale.ROOT, "%s %s dist=%.2f",
+            reconnectSegment.segment().highway(),
+            reconnectSegment.segment().segmentLabel(),
+            reconnectSegment.distance()
         );
-        if (inferredDirection != null) {
-            postRejoinLastCompleteProbeWinner = inferredDirection;
-            return PostRejoinDirectionResult.success(inferredDirection, "line-yaw-inference=" + inferredDirection.name);
+
+        if (cachedDirection != null && isDirectionCompatible(reconnectSegment.segment(), cachedDirectionCode)) {
+            postRejoinLastCompleteProbeWinner = cachedDirection;
+            return PostRejoinDirectionResult.success(cachedDirection, "cached-direction=" + cachedDirection.name + " " + segmentSummary);
         }
 
-        HorizontalDirection[] axisDirections = resolvePostRejoinAxisDirections();
+        HorizontalDirection[] axisDirections = resolvePostRejoinAxisDirections(reconnectSegment.segment());
         if (axisDirections == null) {
             postRejoinLastCompleteProbeWinner = null;
-            return PostRejoinDirectionResult.blocked("axis-unresolved", "line=unresolved");
+            return PostRejoinDirectionResult.blocked("axis-unresolved", segmentSummary);
         }
 
         HorizontalDirection dirA = axisDirections[0];
@@ -2622,7 +2814,8 @@ public class THMHwyMonitor extends Module {
             ? probeAxis(dirA, dirB, 119, true)
             : probeAxis(dirA, dirB, 122, false);
 
-        String summary = String.format(Locale.ROOT, "%s=%d %s=%d",
+        String summary = String.format(Locale.ROOT, "%s %s=%d %s=%d",
+            segmentSummary,
             probe.dirA().name,
             probe.dirAScore(),
             probe.dirB().name,
@@ -2634,46 +2827,73 @@ public class THMHwyMonitor extends Module {
             return PostRejoinDirectionResult.blocked("probe-unloaded", summary);
         }
 
-        if (!probe.strongWinner() || probe.selectedDirection() == null) {
-            postRejoinLastCompleteProbeWinner = null;
+        if (probe.strongWinner() && probe.selectedDirection() != null) {
+            if (postRejoinLastCompleteProbeWinner == probe.selectedDirection()) {
+                postRejoinLastCompleteProbeWinner = probe.selectedDirection();
+                return PostRejoinDirectionResult.success(probe.selectedDirection(), summary);
+            }
+
+            postRejoinLastCompleteProbeWinner = probe.selectedDirection();
             return PostRejoinDirectionResult.blocked("probe-ambiguous", summary);
         }
 
-        if (postRejoinLastCompleteProbeWinner == probe.selectedDirection()) {
-            postRejoinLastCompleteProbeWinner = probe.selectedDirection();
-            return PostRejoinDirectionResult.success(probe.selectedDirection(), summary);
+        String yawPreferredCode = normalizeDirection(directionCode(postRejoinLastCompleteProbeWinner));
+        HorizontalDirection yawPreferred = parseDirectionCode(chooseSegmentTravelDirection(
+            reconnectSegment.segment(),
+            mc.player.getYaw(),
+            yawPreferredCode
+        ));
+        if (yawPreferred != null) {
+            postRejoinLastCompleteProbeWinner = yawPreferred;
+            return PostRejoinDirectionResult.success(yawPreferred, summary + " yaw-fallback=" + yawPreferred.name);
         }
 
-        postRejoinLastCompleteProbeWinner = probe.selectedDirection();
+        postRejoinLastCompleteProbeWinner = null;
         return PostRejoinDirectionResult.blocked("probe-ambiguous", summary);
     }
 
-    private HorizontalDirection[] resolvePostRejoinAxisDirections() {
-        if (mc.player == null) return null;
-
-        WorkLine line = resolveReconnectLineFromCurrentPosition();
-        if (line == null) return null;
-
-        return switch (line) {
-            case CardinalNS -> new HorizontalDirection[] {HorizontalDirection.South, HorizontalDirection.North};
-            case CardinalEW -> new HorizontalDirection[] {HorizontalDirection.East, HorizontalDirection.West};
-            case DiagonalNWSE -> new HorizontalDirection[] {HorizontalDirection.NorthWest, HorizontalDirection.SouthEast};
-            case DiagonalNESW -> new HorizontalDirection[] {HorizontalDirection.NorthEast, HorizontalDirection.SouthWest};
-        };
+    private HorizontalDirection[] resolvePostRejoinAxisDirections(HighwaySegment segment) {
+        return parallelDirectionsForSegment(segment);
     }
 
-    private WorkLine resolveReconnectLineFromCurrentPosition() {
+    private SegmentProjection resolveReconnectLineFromCurrentPosition(String preferredDirection) {
         if (mc == null || mc.player == null) return null;
-        double centerOffset = trueCenterMode.get() ? 0.5 : 0.0;
-        ReconnectLineResolution resolved = nearestWorkLineWithAmbiguityBlock(
-            mc.player.getX(),
-            mc.player.getZ(),
-            centerOffset,
-            trueCenterMode.get(),
+
+        String resolvedPreferredDirection = normalizeDirection(preferredDirection);
+        if (resolvedPreferredDirection.isEmpty()) {
+            resolvedPreferredDirection = normalizeDirection(directionCode(postRejoinLastCompleteProbeWinner));
+        }
+        if (resolvedPreferredDirection.isEmpty()) {
+            resolvedPreferredDirection = normalizeDirection(trackedDirection);
+        }
+
+        SegmentProjection resolved = selectBestSegmentProjection(
+            collectSegmentProjections(
+                mc.player.getX(),
+                mc.player.getZ(),
+                true,
+                true,
+                true,
+                true,
+                trueCenterMode.get()
+            ),
+            trackedSegment,
+            resolvedPreferredDirection,
+            mc.player.getYaw(),
             RECONNECT_LINE_AMBIGUITY_THRESHOLD
         );
         if (resolved == null || resolved.distance() > RECONNECT_LINE_MAX_DISTANCE) return null;
-        return resolved.line();
+        return resolved;
+    }
+
+    private static HorizontalDirection[] parallelDirectionsForSegment(HighwaySegment segment) {
+        String[] directionCodes = parallelDirectionCodesForSegment(segment);
+        if (directionCodes == null || directionCodes.length != 2) return null;
+
+        HorizontalDirection first = parseDirectionCode(directionCodes[0]);
+        HorizontalDirection second = parseDirectionCode(directionCodes[1]);
+        if (first == null || second == null) return null;
+        return new HorizontalDirection[] {first, second};
     }
 
     private AxisProbeResult probeAxis(HorizontalDirection dirA, HorizontalDirection dirB, int y, boolean obsidianProbe) {
@@ -2821,65 +3041,6 @@ public class THMHwyMonitor extends Module {
         return hasLiveServerConnection() && !(mc.currentScreen instanceof DisconnectedScreen);
     }
 
-    private static WorkLine nearestWorkLine(double playerX, double playerZ, double centerOffset, boolean trueCenterMode) {
-        double best = HUGE_DISTANCE;
-        WorkLine line = null;
-
-        double dCardinalNs = Math.abs(playerX - centerOffset);
-        if (dCardinalNs < best) {
-            best = dCardinalNs;
-            line = WorkLine.CardinalNS;
-        }
-
-        double dCardinalEw = Math.abs(playerZ - centerOffset);
-        if (dCardinalEw < best) {
-            best = dCardinalEw;
-            line = WorkLine.CardinalEW;
-        }
-
-        double dDiagNwSe = distanceToLine(playerX, playerZ, 1.0, -1.0, 0.0);
-        if (dDiagNwSe < best) {
-            best = dDiagNwSe;
-            line = WorkLine.DiagonalNWSE;
-        }
-
-        double c = trueCenterMode ? 1.0 : 0.0;
-        double dDiagNeSw = distanceToLine(playerX, playerZ, 1.0, 1.0, c);
-        if (dDiagNeSw < best) {
-            line = WorkLine.DiagonalNESW;
-        }
-
-        return line;
-    }
-
-    private static ReconnectLineResolution nearestWorkLineWithAmbiguityBlock(double playerX, double playerZ, double centerOffset, boolean trueCenterMode, double ambiguityThreshold) {
-        double dCardinalNs = Math.abs(playerX - centerOffset);
-        double dCardinalEw = Math.abs(playerZ - centerOffset);
-        double dDiagNwSe = distanceToLine(playerX, playerZ, 1.0, -1.0, 0.0);
-        double c = trueCenterMode ? 1.0 : 0.0;
-        double dDiagNeSw = distanceToLine(playerX, playerZ, 1.0, 1.0, c);
-
-        double best = dCardinalNs;
-        double second = HUGE_DISTANCE;
-        WorkLine line = WorkLine.CardinalNS;
-
-        double[] distances = new double[] {dCardinalEw, dDiagNwSe, dDiagNeSw};
-        WorkLine[] lines = new WorkLine[] {WorkLine.CardinalEW, WorkLine.DiagonalNWSE, WorkLine.DiagonalNESW};
-        for (int i = 0; i < distances.length; i++) {
-            double distance = distances[i];
-            if (distance < best) {
-                second = best;
-                best = distance;
-                line = lines[i];
-            } else if (distance < second) {
-                second = distance;
-            }
-        }
-
-        if (Math.abs(second - best) <= ambiguityThreshold) return null;
-        return new ReconnectLineResolution(line, best);
-    }
-
     private static String inferDirectionForLine(WorkLine line, float yaw) {
         double radians = Math.toRadians(yaw);
         double vx = -Math.sin(radians);
@@ -2986,11 +3147,7 @@ public class THMHwyMonitor extends Module {
 
     private void applyWorkingYaw() {
         if (pendingCorrectionTarget == null || mc.player == null || recoveryBuilder == null || !isHighwayRecoveryAllowedOnCurrentServer()) return;
-
-        HorizontalDirection direction = recoveryBuilder.getWorkingDirection();
-        if (direction == null) return;
-
-        float yaw = direction.yaw;
+        float yaw = pendingCorrectionTarget.yaw();
         mc.player.setYaw(yaw);
         mc.player.setPitch(20.0f);
 
@@ -3036,6 +3193,19 @@ public class THMHwyMonitor extends Module {
         double cx = x1 + t * dx;
         double cz = z1 + t * dz;
         return Math.hypot(px - cx, pz - cz);
+    }
+
+    private static double[] closestPointOnSegment(double px, double pz, double x1, double z1, double x2, double z2) {
+        double dx = x2 - x1;
+        double dz = z2 - z1;
+
+        if (dx == 0.0 && dz == 0.0) {
+            return new double[] {x1, z1};
+        }
+
+        double t = ((px - x1) * dx + (pz - z1) * dz) / (dx * dx + dz * dz);
+        t = Math.max(0.0, Math.min(1.0, t));
+        return new double[] {x1 + t * dx, z1 + t * dz};
     }
 
     private static String resolveWorkingDirection(double playerX, double playerZ, double centerOffset) {
@@ -3110,74 +3280,6 @@ public class THMHwyMonitor extends Module {
         };
     }
 
-    private static float closestParallelYawForSegment(float referenceYaw, String highway, String direction, WorkLine line) {
-        float[] pair = parallelYawPairForSegment(highway, direction, line);
-        if (pair == null) return yawForWorkingDirection(direction);
-
-        float reference = Float.isNaN(referenceYaw) ? yawForWorkingDirection(direction) : referenceYaw;
-        float yawA = pair[0];
-        float yawB = pair[1];
-        float distanceA = yawDistance(reference, yawA);
-        float distanceB = yawDistance(reference, yawB);
-        if (distanceA < distanceB) return yawA;
-        if (distanceB < distanceA) return yawB;
-
-        String preferred = normalizeDirection(direction);
-        float preferredYaw = yawForWorkingDirection(preferred);
-        float preferredDistanceA = yawDistance(preferredYaw, yawA);
-        float preferredDistanceB = yawDistance(preferredYaw, yawB);
-        if (preferredDistanceA < preferredDistanceB) return yawA;
-        if (preferredDistanceB < preferredDistanceA) return yawB;
-
-        return yawA;
-    }
-
-    private static float[] parallelYawPairForSegment(String highway, String direction, WorkLine line) {
-        float[] linePair = parallelYawPairForLine(line);
-        if (linePair != null) return linePair;
-
-        String dir = normalizeDirection(direction);
-
-        if ("Ring".equals(highway)) {
-            return switch (dir) {
-                case "N", "S" -> yawPair("E", "W");
-                case "E", "W" -> yawPair("N", "S");
-                default -> null;
-            };
-        }
-
-        if ("Diamond".equals(highway)) {
-            return switch (dir) {
-                case "NE", "SW" -> yawPair("NW", "SE");
-                case "NW", "SE" -> yawPair("NE", "SW");
-                default -> null;
-            };
-        }
-
-        return switch (dir) {
-            case "N", "S" -> yawPair("N", "S");
-            case "E", "W" -> yawPair("E", "W");
-            case "NE", "SW" -> yawPair("NE", "SW");
-            case "NW", "SE" -> yawPair("NW", "SE");
-            default -> null;
-        };
-    }
-
-    private static float[] parallelYawPairForLine(WorkLine line) {
-        if (line == null) return null;
-
-        return switch (line) {
-            case CardinalNS -> yawPair("N", "S");
-            case CardinalEW -> yawPair("E", "W");
-            case DiagonalNWSE -> yawPair("NW", "SE");
-            case DiagonalNESW -> yawPair("NE", "SW");
-        };
-    }
-
-    private static float[] yawPair(String directionA, String directionB) {
-        return new float[] {yawForWorkingDirection(directionA), yawForWorkingDirection(directionB)};
-    }
-
     private static float yawDistance(float fromYaw, float toYaw) {
         return Math.abs(wrapYaw(toYaw - fromYaw));
     }
@@ -3217,6 +3319,7 @@ public class THMHwyMonitor extends Module {
     private record RecoveryTarget(
         String highway,
         String direction,
+        String travelDirection,
         double targetX,
         double targetZ,
         int goalX,
@@ -3224,7 +3327,7 @@ public class THMHwyMonitor extends Module {
         int goalZ,
         float yaw,
         double distance,
-        WorkLine line
+        HighwaySegment segment
     ) {}
 
     private enum RecoveryPhase {
