@@ -97,7 +97,7 @@ public class MemberHud extends HudElement {
     public final Setting<Boolean> showHighwayStatus = sgGeneral.add(new BoolSetting.Builder()
         .name("show-highway-status")
         .description("Shows the highway assignment after the player name in brackets.")
-        .defaultValue(false)
+        .defaultValue(true)
         .build()
     );
 
