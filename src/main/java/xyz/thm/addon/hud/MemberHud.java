@@ -38,6 +38,7 @@ public class MemberHud extends HudElement {
         "Apprentice",
         "Retired",
         "Novice",
+        "PVP Novice",
         "Bot"
     );
 

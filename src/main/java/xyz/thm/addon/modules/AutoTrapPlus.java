@@ -10,10 +10,12 @@ import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.friends.Friends;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.entity.EntityUtils;
 import meteordevelopment.meteorclient.utils.entity.SortPriority;
 import meteordevelopment.meteorclient.utils.entity.TargetUtils;
 import meteordevelopment.meteorclient.utils.entity.fakeplayer.FakePlayerEntity;
+import meteordevelopment.meteorclient.utils.misc.Keybind;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.PlayerUtils;
@@ -33,12 +35,16 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 import net.minecraft.world.RaycastContext;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.interfaces.LogoutSpotsPoseData;
+import xyz.thm.addon.mixin.accessor.LogoutSpotsAccessor;
+import xyz.thm.addon.mixin.accessor.LogoutSpotsEntryAccessor;
 import xyz.thm.addon.utils.PacketPlaceUtils;
 
 import java.util.*;
 
 public class AutoTrapPlus extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
+    private final SettingGroup sgLogoutTrap = settings.createGroup("Logout Trap");
     private final SettingGroup sgRender = settings.createGroup("Render");
 
     private final Setting<List<Block>> blocks = sgGeneral.add(new BlockListSetting.Builder()
@@ -155,6 +161,37 @@ public class AutoTrapPlus extends Module {
         .build()
     );
 
+    private final Setting<Boolean> logoutTrap = sgLogoutTrap.add(new BoolSetting.Builder()
+        .name("logout-trap")
+        .description("Enables trapping of player logout spots.")
+        .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<LogoutTrapMode> logoutTrapMode = sgLogoutTrap.add(new EnumSetting.Builder<LogoutTrapMode>()
+        .name("mode")
+        .description("How logout spots are trapped.")
+        .defaultValue(LogoutTrapMode.Auto)
+        .visible(logoutTrap::get)
+        .build()
+    );
+
+    private final Setting<Keybind> logoutTrapKeybind = sgLogoutTrap.add(new KeybindSetting.Builder()
+        .name("manual-keybind")
+        .description("In Manual mode, press to trap known logout spots.")
+        .defaultValue(Keybind.none())
+        .visible(() -> logoutTrap.get() && logoutTrapMode.get() == LogoutTrapMode.Manual)
+        .build()
+    );
+
+    private final Setting<Boolean> logoutOnly = sgLogoutTrap.add(new BoolSetting.Builder()
+        .name("logout-only")
+        .description("Only use logout-trapping logic and ignore normal auto-trap targets.")
+        .defaultValue(false)
+        .visible(logoutTrap::get)
+        .build()
+    );
+
     private final Setting<Boolean> render = sgRender.add(new BoolSetting.Builder()
         .name("render")
         .description("Renders queued and recently placed blocks.")
@@ -210,6 +247,10 @@ public class AutoTrapPlus extends Module {
     private int timer;
     private BlockPos gapPos;
     private final Map<BlockPos, Long> renderMap = new HashMap<>();
+    private final Map<UUID, LogoutSpotData> trackedPlayers = new HashMap<>();
+    private final List<LogoutSpotData> pendingLogoutSpots = new ArrayList<>();
+    private boolean logoutManualPressed;
+    private boolean logoutTrapWasEnabled;
 
     public AutoTrapPlus() {
         super(THMAddon.PVP, "auto-trap+", "Traps a target player. Adds an optional anti-cheat friendly support placement mode.");
@@ -223,17 +264,35 @@ public class AutoTrapPlus extends Module {
         placedAny = false;
         gapPos = null;
         renderMap.clear();
+        trackedPlayers.clear();
+        pendingLogoutSpots.clear();
+        logoutManualPressed = false;
+        logoutTrapWasEnabled = logoutTrap.get();
+
+        if (logoutTrap.get()) seedPendingFromExistingLogoutSpots();
     }
 
     @Override
     public void onDeactivate() {
         placePositions.clear();
         renderMap.clear();
+        trackedPlayers.clear();
+        pendingLogoutSpots.clear();
+        logoutManualPressed = false;
+        logoutTrapWasEnabled = false;
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (selfToggle.get() && placedAny && placePositions.isEmpty()) {
+        if (logoutTrap.get() && !logoutTrapWasEnabled) {
+            seedPendingFromExistingLogoutSpots();
+        }
+        logoutTrapWasEnabled = logoutTrap.get();
+
+        if (logoutTrap.get()) updateLogoutTracking();
+
+        boolean hasPendingLogoutWork = logoutTrap.get() && !pendingLogoutSpots.isEmpty();
+        if (selfToggle.get() && placedAny && placePositions.isEmpty() && !hasPendingLogoutWork) {
             placedAny = false;
             toggle();
             return;
@@ -242,6 +301,14 @@ public class AutoTrapPlus extends Module {
         // Find blocks in hotbar
         FindItemResult block = InvUtils.findInHotbar(itemStack -> blocks.get().contains(Block.getBlockFromItem(itemStack.getItem())));
         if (!block.found()) return;
+
+        if (logoutTrap.get() && runLogoutTrapTick(block)) {
+            if (logoutOnly.get()) return;
+        } else if (logoutOnly.get()) {
+            target = null;
+            placePositions.clear();
+            return;
+        }
 
         // Find targets
         List<PlayerEntity> targets = getTargets();
@@ -290,6 +357,148 @@ public class AutoTrapPlus extends Module {
 
         if (doPlace) timer = 0;
         else timer++;
+    }
+
+    private boolean runLogoutTrapTick(FindItemResult block) {
+        List<LogoutSpotData> spotsToProcess = new ArrayList<>();
+
+        if (logoutTrapMode.get() == LogoutTrapMode.Auto) {
+            if (!pendingLogoutSpots.isEmpty()) spotsToProcess.addAll(pendingLogoutSpots);
+        } else {
+            if (logoutTrapKeybind.get().isPressed() && mc.currentScreen == null) {
+                if (!logoutManualPressed) {
+                    logoutManualPressed = true;
+                    if (!pendingLogoutSpots.isEmpty()) spotsToProcess.addAll(pendingLogoutSpots);
+                }
+            } else {
+                logoutManualPressed = false;
+            }
+        }
+
+        if (spotsToProcess.isEmpty()) return false;
+
+        boolean doPlace = timer >= delay.get();
+        if (!doPlace) {
+            fillPlaceArrayForLogoutSpot(spotsToProcess.getFirst());
+            timer++;
+            return true;
+        }
+
+        int placedCount = 0;
+        LinkedHashSet<BlockPos> allPositions = new LinkedHashSet<>();
+        List<LogoutSpotData> remaining = new ArrayList<>();
+
+        for (int i = 0; i < spotsToProcess.size(); i++) {
+            LogoutSpotData spot = spotsToProcess.get(i);
+            target = null;
+            gapPos = null;
+            fillPlaceArrayForLogoutSpot(spot);
+            allPositions.addAll(placePositions);
+
+            if (!placePositions.isEmpty()) {
+                for (BlockPos placePos : placePositions) {
+                    if (placedCount >= blocksPerTick.get()) break;
+                    if (tryPlaceWithSupports(placePos, block)) {
+                        placedAny = true;
+                        placedCount++;
+                    }
+                }
+            }
+
+            // Recompute after placements; keep queued until the spot is actually fully trapped.
+            fillPlaceArrayForLogoutSpot(spot);
+            if (!placePositions.isEmpty() || hasUnfilledLogoutTrapPositions(spot)) remaining.add(spot);
+
+            if (placedCount >= blocksPerTick.get()) {
+                int nextIndex = i + 1;
+                for (int j = nextIndex; j < spotsToProcess.size(); j++) remaining.add(spotsToProcess.get(j));
+                break;
+            }
+        }
+
+        pendingLogoutSpots.clear();
+        pendingLogoutSpots.addAll(remaining);
+
+        placePositions.clear();
+        placePositions.addAll(allPositions);
+
+        timer = 0;
+
+        return true;
+    }
+
+    private void updateLogoutTracking() {
+        if (!isLogoutSpotsModuleActive()) return;
+
+        Set<UUID> aliveNow = new HashSet<>();
+        List<PlayerEntity> currentPlayers = getTargets();
+        for (PlayerEntity player : currentPlayers) {
+            aliveNow.add(player.getUuid());
+            trackedPlayers.put(player.getUuid(), new LogoutSpotData(
+                player.getUuid(),
+                EntityUtils.getName(player),
+                BlockPos.ofFloored(player.getX(), Math.floor(player.getBoundingBox().minY), player.getZ()),
+                player.getEyeY()
+            ));
+        }
+
+        Iterator<Map.Entry<UUID, LogoutSpotData>> it = trackedPlayers.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<UUID, LogoutSpotData> entry = it.next();
+            if (aliveNow.contains(entry.getKey())) continue;
+            queueLogoutSpot(entry.getValue());
+            it.remove();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void seedPendingFromExistingLogoutSpots() {
+        try {
+            Class<?> clazz = Class.forName("meteordevelopment.meteorclient.systems.modules.render.LogoutSpots");
+            if (!Module.class.isAssignableFrom(clazz)) return;
+
+            Module module = Modules.get().get((Class<? extends Module>) clazz);
+            if (!(module instanceof LogoutSpotsAccessor accessor) || !module.isActive()) return;
+
+            for (Object entryObj : accessor.thm$getPlayers()) {
+                if (!(entryObj instanceof LogoutSpotsEntryAccessor entry)) continue;
+
+                String name = entryObj instanceof LogoutSpotsPoseData poseData
+                    ? poseData.thm$getName()
+                    : "logout-spot";
+
+                double centerX = entry.thm$getX() + entry.thm$getXWidth() / 2.0;
+                double centerZ = entry.thm$getZ() + entry.thm$getZWidth() / 2.0;
+                double feetY = entry.thm$getY();
+                double eyeY = feetY + Math.max(1.0, entry.thm$getHeight() - 0.18);
+
+                queueLogoutSpot(new LogoutSpotData(
+                    entry.thm$getUuid(),
+                    name,
+                    BlockPos.ofFloored(centerX, feetY, centerZ),
+                    eyeY
+                ));
+            }
+        } catch (ClassNotFoundException ignored) {
+        }
+    }
+
+    private void queueLogoutSpot(LogoutSpotData spot) {
+        for (LogoutSpotData queued : pendingLogoutSpots) {
+            if (queued.playerId.equals(spot.playerId)) return;
+        }
+        pendingLogoutSpots.add(spot);
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean isLogoutSpotsModuleActive() {
+        try {
+            Class<?> clazz = Class.forName("meteordevelopment.meteorclient.systems.modules.render.LogoutSpots");
+            if (!Module.class.isAssignableFrom(clazz)) return false;
+            return Modules.get().isActive((Class<? extends Module>) clazz);
+        } catch (ClassNotFoundException ignored) {
+            return false;
+        }
     }
 
     private List<PlayerEntity> getTargets() {
@@ -453,6 +662,94 @@ public class AutoTrapPlus extends Module {
         placePositions.add(blockPos);
     }
 
+    private void fillPlaceArrayForLogoutSpot(LogoutSpotData spot) {
+        placePositions.clear();
+
+        BlockPos base = spot.feetPos;
+        if (heightMode.get() == HeightMode.Eye) {
+            int eyeY = (int) Math.floor(spot.eyeY);
+            BlockPos eyeBase = new BlockPos(base.getX(), eyeY, base.getZ());
+            add(eyeBase.add(1, 0, 0));
+            add(eyeBase.add(-1, 0, 0));
+            add(eyeBase.add(0, 0, -1));
+            add(eyeBase.add(0, 0, 1));
+            add(eyeBase.add(0, 1, 0));
+        } else {
+            switch (topPlacement.get()) {
+                case Full -> {
+                    add(base.add(0, 2, 0));
+                    add(base.add(1, 1, 0));
+                    add(base.add(-1, 1, 0));
+                    add(base.add(0, 1, 1));
+                    add(base.add(0, 1, -1));
+                }
+                case Face -> {
+                    add(base.add(1, 1, 0));
+                    add(base.add(-1, 1, 0));
+                    add(base.add(0, 1, 1));
+                    add(base.add(0, 1, -1));
+                }
+                case Top -> add(base.add(0, 2, 0));
+                case None -> {}
+            }
+            add(base.add(0, -1, 0));
+            add(base.add(1, -1, 0));
+            add(base.add(-1, -1, 0));
+            add(base.add(0, -1, 1));
+            add(base.add(0, -1, -1));
+
+            add(base.add(1, 0, 0));
+            add(base.add(-1, 0, 0));
+            add(base.add(0, 0, -1));
+            add(base.add(0, 0, 1));
+        }
+
+        boolean bottomToTop = buildOrder.get() == BuildOrder.BottomToTop;
+        placePositions.sort((a, b) -> {
+            if (a.getX() != b.getX()) return Integer.compare(a.getX(), b.getX());
+            if (a.getZ() != b.getZ()) return Integer.compare(a.getZ(), b.getZ());
+            return bottomToTop ? Integer.compare(a.getY(), b.getY()) : Integer.compare(b.getY(), a.getY());
+        });
+    }
+
+    private boolean hasUnfilledLogoutTrapPositions(LogoutSpotData spot) {
+        BlockPos base = spot.feetPos;
+
+        if (heightMode.get() == HeightMode.Eye) {
+            int eyeY = (int) Math.floor(spot.eyeY);
+            BlockPos eyeBase = new BlockPos(base.getX(), eyeY, base.getZ());
+            return isTrapPosUnfilled(eyeBase.add(1, 0, 0))
+                || isTrapPosUnfilled(eyeBase.add(-1, 0, 0))
+                || isTrapPosUnfilled(eyeBase.add(0, 0, -1))
+                || isTrapPosUnfilled(eyeBase.add(0, 0, 1))
+                || isTrapPosUnfilled(eyeBase.add(0, 1, 0));
+        }
+
+        if (topPlacement.get() == TopMode.Full || topPlacement.get() == TopMode.Top) {
+            if (isTrapPosUnfilled(base.add(0, 2, 0))) return true;
+        }
+        if (topPlacement.get() == TopMode.Full || topPlacement.get() == TopMode.Face) {
+            if (isTrapPosUnfilled(base.add(1, 1, 0))) return true;
+            if (isTrapPosUnfilled(base.add(-1, 1, 0))) return true;
+            if (isTrapPosUnfilled(base.add(0, 1, 1))) return true;
+            if (isTrapPosUnfilled(base.add(0, 1, -1))) return true;
+        }
+
+        return isTrapPosUnfilled(base.add(0, -1, 0))
+            || isTrapPosUnfilled(base.add(1, -1, 0))
+            || isTrapPosUnfilled(base.add(-1, -1, 0))
+            || isTrapPosUnfilled(base.add(0, -1, 1))
+            || isTrapPosUnfilled(base.add(0, -1, -1))
+            || isTrapPosUnfilled(base.add(1, 0, 0))
+            || isTrapPosUnfilled(base.add(-1, 0, 0))
+            || isTrapPosUnfilled(base.add(0, 0, -1))
+            || isTrapPosUnfilled(base.add(0, 0, 1));
+    }
+
+    private boolean isTrapPosUnfilled(BlockPos pos) {
+        return mc.world.getBlockState(pos).isReplaceable();
+    }
+
     private boolean canQueue(BlockPos pos) {
         // Allow positions without neighbors; supports/air-place handle those later.
         if (!mc.world.getBlockState(pos).isReplaceable()) return false;
@@ -581,5 +878,13 @@ public class AutoTrapPlus extends Module {
     public enum BuildOrder {
         BottomToTop,
         TopToBottom
+    }
+
+    public enum LogoutTrapMode {
+        Auto,
+        Manual
+    }
+
+    private record LogoutSpotData(UUID playerId, String playerName, BlockPos feetPos, double eyeY) {
     }
 }

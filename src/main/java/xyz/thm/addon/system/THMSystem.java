@@ -8,6 +8,7 @@ import net.minecraft.block.Blocks;
 import net.minecraft.nbt.NbtCompound;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.modules.HighwayBuilderTHM;
+import xyz.thm.addon.utils.KitbotChatRouter;
 
 public class THMSystem extends System<THMSystem> {
     public final Settings settings = new Settings();
@@ -16,6 +17,7 @@ public class THMSystem extends System<THMSystem> {
     private final SettingGroup sgProfiles = settings.createGroup("Highway Profiles");
     private final SettingGroup sgPvp = settings.createGroup("PVP");
     private final SettingGroup sgRender = settings.createGroup("THM Rendering");
+    private final SettingGroup sgKitbot = settings.createGroup("KitBot");
 
     // Hash Settings
     private final Setting<String> hash = sgPrefix.add(new StringSetting.Builder()
@@ -101,6 +103,14 @@ public class THMSystem extends System<THMSystem> {
         .defaultValue(true)
         .build()
     );
+
+    public final Setting<Boolean> kitbotChatRouterEnabled = sgKitbot.add(new BoolSetting.Builder()
+        .name("kitbot-chat-router")
+        .description("Routes recognized $kitbot chat commands through Kitbot Frontend.")
+        .defaultValue(true)
+        .onChanged(KitbotChatRouter::setEnabled)
+        .build()
+    );
     public final Setting<Type> nametagType = sgRender.add(new EnumSetting.Builder<Type>()
         .name("Icon Type")
         .description("Select the nametag rendering style")
@@ -118,6 +128,7 @@ public class THMSystem extends System<THMSystem> {
 
     public THMSystem() {
         super("THM-Addon");
+        KitbotChatRouter.setEnabled(kitbotChatRouterEnabled.get());
     }
 
     public static THMSystem get() {
@@ -204,6 +215,7 @@ public class THMSystem extends System<THMSystem> {
         if (tag.contains("settings")) {
             settings.fromTag(tag.getCompound("settings").orElse(new NbtCompound()));
         }
+        KitbotChatRouter.setEnabled(kitbotChatRouterEnabled.get());
         return this;
     }
 

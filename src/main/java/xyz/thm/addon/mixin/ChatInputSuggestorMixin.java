@@ -15,6 +15,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import xyz.thm.addon.utils.KitbotChatCommandParser;
+import xyz.thm.addon.utils.KitbotChatRouter;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -34,6 +35,8 @@ public abstract class ChatInputSuggestorMixin {
 
     @Inject(method = "refresh", at = @At("HEAD"), cancellable = true)
     private void thm$refreshKitbotSuggestions(CallbackInfo ci) {
+        if (!KitbotChatRouter.isEnabled()) return;
+
         String text = textField.getText();
         if (text == null || text.isEmpty() || text.charAt(0) != '$') return;
 

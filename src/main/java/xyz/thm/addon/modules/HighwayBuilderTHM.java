@@ -564,6 +564,23 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+    private final Setting<Boolean> advertise = sgGeneral.add(new BoolSetting.Builder()
+        .name("advertise")
+        .description("Sends THM Advertisements in chat")
+        .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Integer> advertiseIntervalMinutes = sgGeneral.add(new IntSetting.Builder()
+        .name("advertise-interval")
+        .description("Advertisment delay between messages in minutes")
+        .defaultValue(5)
+        .range(1, 60)
+        .sliderRange(1, 15)
+        .visible(advertise::get)
+        .build()
+    );
+
     private final Setting<Boolean> debugLog = sgDebugging.add(new BoolSetting.Builder()
         .name("debug")
         .description("Logs state transitions and movement input for debugging.")
@@ -1065,9 +1082,44 @@ public class HighwayBuilderTHM extends Module {
 
     private int debugStateLastAge = -1;
     private List<Pattern> signBreakPatterns = Collections.emptyList();
+    private int nextAdvertisementIndex;
+    private long nextAdvertisementAtTick;
     private static final String KITBOT_NAME = "KitBot1";
     private static final double CENTER_SPEED_OVERRIDE = 0.6;
     private static final int CENTER_SPEED_RESTORE_RETRY_WINDOW_TICKS = 60;
+    private static final String[] THMAdvertisements = {
+        "Want to get rewarded with kits for building highways?! Join our discord: https://discord.gg/thm",
+        "Only working Kitbot right now. Join: https://discord.gg/thm",
+        "Need to get to the end of a highway? Join our Discord to use this bot! https://discord.gg/thm",
+        "Lowkey yall should join the THM because we bouta do some crazy. https://discord.gg/thm",
+        "Join now to be part of history! https://discord.gg/thm",
+        "We have our own Kitbot! join https://discord.gg/thm",
+        "Fastest growing server! Join https://discord.gg/thm",
+        "Doing Highway work for free? Join https://discord.gg/thm and get kits for your work",
+        "Let the Highways shine! join https://discord.gg/thm",
+        "Help the community and get rewarded! https://discord.gg/thm",
+        "Applications are open! join now https://discord.gg/thm",
+        "Wanna build highways and earn rewards? Join THM https://discord.gg/thm",
+        "We are recruiting! Apply now https://discord.gg/thm",
+        "Teleport to highway ends easily with our bot! https://discord.gg/thm",
+        "Skip the long walk to highway ends join https://discord.gg/thm",
+        "Need a TP to the end of a highway? Join our Discord https://discord.gg/thm",
+        "Highway grind too long? Use our TP bot via https://discord.gg/thm",
+        "Reach highway ends faster than ever join https://discord.gg/thm",
+        "Don’t walk for hours, TP to the highway end! https://discord.gg/thm",
+        "Highway ends are just one command away. Join https://discord.gg/thm",
+        "Want quick access to highway ends? Join now https://discord.gg/thm",
+        "Travel smarter, not harder. TP to highway ends https://discord.gg/thm",
+        "Why walk when you can TP? Join https://discord.gg/thm",
+        "Get to the end faster and get rewarded https://discord.gg/thm",
+        "Work on highways and get kits https://discord.gg/thm",
+        "Join THM for fast highway travel and rewards https://discord.gg/thm",
+        "Your shortcut to every highway end starts here https://discord.gg/thm",
+        "Active community, real rewards. Join https://discord.gg/thm",
+        "Don’t miss out. Everyone’s joining https://discord.gg/thm",
+        "Earn rewards just for playing smart https://discord.gg/thm",
+        "This is where the real players are https://discord.gg/thm"
+    };
     private static final String[] ADVERTISEMENT_SIGN_REGEXES = {
         "invite",
         "discord\\.gg",
@@ -1505,6 +1557,8 @@ public class HighwayBuilderTHM extends Module {
         sentLagMessage = false;
         suspended = reconnectActivation;
         statusLogTimer = 6000;
+        nextAdvertisementIndex = 0;
+        nextAdvertisementAtTick = 0L;
         forwardSchedulerDebugFileErrorLogged = false;
         mineActionsThisTick = Math.max(1, (int) Math.floor(blocksPerTick.get()));
         mineFractionCarry = 0.0;
@@ -3008,6 +3062,8 @@ public class HighwayBuilderTHM extends Module {
             }
         }
 
+        tickAdvertisement();
+
         if (dir == null) {
             onActivate();
             return;
@@ -3082,6 +3138,27 @@ public class HighwayBuilderTHM extends Module {
 
         if (breakTimer > 0) breakTimer--;
         if (placeTimer > 0) placeTimer--;
+    }
+
+    private void tickAdvertisement() {
+        if (!advertise.get() || THMAdvertisements.length == 0 || mc.world == null) {
+            nextAdvertisementAtTick = 0L;
+            return;
+        }
+
+        long now = mc.world.getTime();
+        if (nextAdvertisementAtTick <= 0L) {
+            nextAdvertisementAtTick = now + advertiseIntervalMinutes.get() * 20L * 60L;
+            return;
+        }
+
+        if (now < nextAdvertisementAtTick) return;
+
+        String message = THMAdvertisements[nextAdvertisementIndex % THMAdvertisements.length];
+        if (message != null && !message.isBlank()) ChatUtils.sendPlayerMsg(message);
+
+        nextAdvertisementIndex = (nextAdvertisementIndex + 1) % THMAdvertisements.length;
+        nextAdvertisementAtTick = now + advertiseIntervalMinutes.get() * 20L * 60L;
     }
 
     @EventHandler
