@@ -891,18 +891,9 @@ public class HighwayBuilderTHM extends Module {
         .visible(printStatistics::get)
         .build()
     );
-    private final Setting<String> decryptkey = sgStatistics.add(new StringSetting.Builder()
-        .name("webhook-key")
-        .description("Optional encryption/decryption key. Only required if the " +
-            "webhook URL is encrypted. Ignored for normal (plain) webhook URLs.")
-        .defaultValue("MySecureKeyHere123")
-        .visible(() -> printStatistics.get() && sendStatisticsWebhhok.get())
-        .build()
-    );
     private final Setting<String> encryptedWebhook = sgStatistics.add(new StringSetting.Builder()
         .name("encrypted-webhook")
-        .description("Webhook URL used to receive statistics. Can be either encrypted or plain text." +
-            " Encrypted webhooks will be decrypted using the provided key.")
+        .description("Webhook URL used to receive statistics. Plain URLs are supported directly.")
         .defaultValue("MyWebhookInHere")
         .visible(() -> printStatistics.get() && sendStatisticsWebhhok.get())
         .build()
@@ -1264,8 +1255,9 @@ public class HighwayBuilderTHM extends Module {
     }
 
     // AES-256 encryption with SHA-256 key derivation
-    private String decryptWebhook(String encryptedWebhook, String password) {
+    private String decryptWebhook(String encryptedWebhook) {
         try {
+            String password = getPassword();
             // Derive a 256-bit (32 byte) key from the password using SHA-256
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] keyBytes = digest.digest(password.getBytes(StandardCharsets.UTF_8));
@@ -1291,6 +1283,20 @@ public class HighwayBuilderTHM extends Module {
             THMAddon.LOG.warn("Failed to decrypt webhook, treating as unencrypted: " + e.getMessage());
             return encryptedWebhook;
         }
+    }
+
+    private String resolveWebhookUrl(String configuredWebhook) {
+        if (configuredWebhook == null) return null;
+        String raw = configuredWebhook.trim();
+        if (raw.isEmpty()) return null;
+        if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+
+        String decrypted = decryptWebhook(raw);
+        if (decrypted == null) return null;
+        String candidate = decrypted.trim();
+        if (candidate.startsWith("http://") || candidate.startsWith("https://")) return candidate;
+        THMAddon.LOG.warn("Invalid webhook URL format (must start with http/https).");
+        return null;
     }
 
     // AES-256 encryption with SHA-256 key derivation
@@ -5629,7 +5635,7 @@ public class HighwayBuilderTHM extends Module {
         StatsArtifactSnapshot working = snapshot;
 
         if (sendStatisticsWebhhok.get() && !working.webhookSendCommitted()) {
-            String webhookUrl = decryptWebhook(encryptedWebhook.get(), decryptkey.get());
+            String webhookUrl = resolveWebhookUrl(encryptedWebhook.get());
             if (webhookUrl != null) {
                 double distance = PlayerUtils.distanceTo(report.startPos());
                 if (distance > 1) {
