@@ -28,14 +28,8 @@ import xyz.thm.addon.commands.UUIDCommand;
 import xyz.thm.addon.gui.themes.*;
 import xyz.thm.addon.hud.*;
 import xyz.thm.addon.modules.*;
-import xyz.thm.addon.modules.chesttracker.ChestTrackerModule;
 import xyz.thm.addon.system.THMTab;
-import xyz.thm.addon.utils.JoinPayload;
-import xyz.thm.addon.utils.KitbotChatRouter;
-import xyz.thm.addon.utils.ServerReconnectService;
-import xyz.thm.addon.utils.ServerStatusHandler;
-import xyz.thm.addon.utils.ThmMembers;
-import xyz.thm.addon.utils.THMUtils;
+import xyz.thm.addon.utils.*;
 
 import java.io.File;
 
@@ -86,7 +80,6 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new HighwayBuilderTHM());
         Modules.get().add(new ModuleManager());
         Modules.get().add(new AxisViewer());
-        Modules.get().add(new BlockCounter());
         Modules.get().add(new DiscordNotifs());
         addOptionalModule("xyz.thm.addon.modules.WebhookEncrypt");
         Modules.get().add(new AntiDrop());
@@ -114,11 +107,9 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new ElytraRoute());
         Modules.get().add(new SignRender());
         Modules.get().add(new AfkLogout());
-        //Modules.get().add(new PingSpeed());
         //addOptionalModule("xyz.thm.addon.modules.BoatNoclip");
         Modules.get().add(new FlightBypass());
         Modules.get().add(new KitbotFrontend());
-        Modules.get().add(new ChestTrackerModule());
         //addOptionalModule("xyz.thm.addon.modules.ElytraUAV"); // Still WIP and may be excluded from release jars.
         if (BaritoneUtils.IS_AVAILABLE) {
             LOG.info("Baritone detected. Enabling Baritone-dependent THM modules.");

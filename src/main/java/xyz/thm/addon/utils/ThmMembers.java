@@ -15,9 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
 
-import static xyz.thm.addon.utils.password.getAPIMemberHud;
-import static xyz.thm.addon.utils.password.getAPIHighwayStatus;
-import static xyz.thm.addon.utils.password.getPassword;
+import static xyz.thm.addon.utils.password.*;
 
 public final class ThmMembers {
     public static final class Member {

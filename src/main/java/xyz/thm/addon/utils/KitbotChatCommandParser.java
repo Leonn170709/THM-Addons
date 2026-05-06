@@ -6,13 +6,7 @@ import meteordevelopment.meteorclient.MeteorClient;
 import net.minecraft.client.network.PlayerListEntry;
 import xyz.thm.addon.modules.KitbotFrontend;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
+import java.util.*;
 
 public final class KitbotChatCommandParser {
     private static final List<String> COMMANDS = List.of("goto", "update", "kit", "send", "token", "claim");

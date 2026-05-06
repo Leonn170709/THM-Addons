@@ -20,18 +20,9 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import xyz.thm.addon.interfaces.LogoutSpotsPoseData;
-import xyz.thm.addon.mixin.accessor.EntityPositionAccessor;
-import xyz.thm.addon.mixin.accessor.LimbAnimatorAccessor;
-import xyz.thm.addon.mixin.accessor.LivingEntityAccessor;
-import xyz.thm.addon.mixin.accessor.LivingEntityRotationAccessor;
-import xyz.thm.addon.mixin.accessor.LogoutSpotsEntryAccessor;
+import xyz.thm.addon.mixin.accessor.*;
 
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 
