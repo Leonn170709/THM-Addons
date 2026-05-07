@@ -32,7 +32,6 @@ bin/
 
 run/
 src/main/java/xyz/thm/addon/modules/WebhookEncrypt.java
-src/main/java/xyz/thm/addon/modules/WebhookEncrypt.java
 src/main/java/xyz/thm/addon/modules/HighwayBuilder.java
 src/main/java/xyz/thm/addon/utils/password.java
 /meteordevelopment
@@ -41,3 +40,5 @@ src/main/java/xyz/thm/addon/utils/password.java
 docs/autoeat-highwaybuilder-regression-test.md
 src/main/java/xyz/thm/addon/modules/BoatNoclip.java
 updated(1).txt
+/sourcecodes
+/screenshots
