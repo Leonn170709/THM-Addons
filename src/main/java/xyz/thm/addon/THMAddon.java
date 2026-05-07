@@ -148,14 +148,6 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         GuiThemes.add(MidnightTheme.INSTANCE);
         GuiThemes.add(MonochromeTheme.INSTANCE);
         GuiThemes.add(Nether.INSTANCE);
-        GuiThemes.add(FutureOldTheme.INSTANCE);
-        GuiThemes.add(FutureNewTheme.INSTANCE);
-        GuiThemes.add(MioTheme.INSTANCE);
-        GuiThemes.add(RusherHackTheme.INSTANCE);
-        GuiThemes.add(NovolineTheme.INSTANCE);
-        GuiThemes.add(ImpactTheme.INSTANCE);
-        GuiThemes.add(VapeTheme.INSTANCE);
-        GuiThemes.add(WurstTheme.INSTANCE);
 
         //System/Tab
         Tabs.add(new THMTab());
