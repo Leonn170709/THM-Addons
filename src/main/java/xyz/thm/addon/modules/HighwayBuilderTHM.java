@@ -4129,7 +4129,7 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private boolean passesForwardMineDurabilityGuard(ItemStack stack) {
-        return !dontBreakTools.get() || stack.getMaxDamage() - stack.getDamage() > (stack.getMaxDamage() * (breakDurability.get() / 100));
+        return !dontBreakTools.get() || stack.getMaxDamage() - stack.getDamage() > (stack.getMaxDamage() * (breakDurability.get() / 100.0));
     }
 
     private boolean shouldRejectForwardLatchedMineStackForPickaxeShortage(ItemStack stack) {
@@ -11326,7 +11326,7 @@ public class HighwayBuilderTHM extends Module {
             for (int i = 0; i < b.mc.player.getInventory().getMainStacks().size(); i++) {
                 double score = AutoTool.getScore(b.mc.player.getInventory().getStack(i), blockState, false, false, AutoTool.EnchantPreference.None, itemStack -> {
                     if (noSilkTouch && Utils.hasEnchantment(itemStack, Enchantments.SILK_TOUCH)) return false;
-                    return !b.dontBreakTools.get() || itemStack.getMaxDamage() - itemStack.getDamage() > (itemStack.getMaxDamage() * (b.breakDurability.get() / 100));
+                    return !b.dontBreakTools.get() || itemStack.getMaxDamage() - itemStack.getDamage() > (itemStack.getMaxDamage() * (b.breakDurability.get() / 100.0));
                 });
 
                 if (score > bestScore) {
@@ -11343,7 +11343,7 @@ public class HighwayBuilderTHM extends Module {
 
                 // If we are in the process of restocking pickaxes and happen to need one, we should allow using it
                 // as long as it has enough durability, since we will obtain more shortly thereafter
-                if (count <= b.savePickaxes.get() && !(b.restockTask.pickaxes && bestStack.getMaxDamage() - bestStack.getDamage() > (bestStack.getMaxDamage() * (b.breakDurability.get() / 100)))) {
+                if (count <= b.savePickaxes.get() && !(b.restockTask.pickaxes && bestStack.getMaxDamage() - bestStack.getDamage() > (bestStack.getMaxDamage() * (b.breakDurability.get() / 100.0)))) {
                     if (!b.restockTask.pickaxes && (b.searchEnderChest.get() || b.searchShulkers.get())) {
                         b.restockTask.setPickaxes();
                     }
