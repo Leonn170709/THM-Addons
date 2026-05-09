@@ -86,6 +86,7 @@ import xyz.thm.addon.accessor.StuckEatingRetryBridge;
 import xyz.thm.addon.accessor.StuckEatingRetryResult;
 import xyz.thm.addon.system.THMSystem;
 import xyz.thm.addon.utils.InventoryManager;
+import xyz.thm.addon.utils.PacketPlaceUtils;
 import xyz.thm.addon.utils.ServerStatusHandler;
 import xyz.thm.addon.utils.ServerStatusHandler.ServerState;
 import xyz.thm.addon.utils.THMUtils;
@@ -554,6 +555,13 @@ public class HighwayBuilderTHM extends Module {
         .description("The delay between placing blocks.")
         .defaultValue(0)
         .min(0)
+        .build()
+    );
+
+    private final Setting<Boolean> paketMode = sgPaving.add(new BoolSetting.Builder()
+        .name("paket-mode")
+        .description("Only place via packets (no client-side block set), like Surround's packet setting.")
+        .defaultValue(false)
         .build()
     );
 
@@ -4077,7 +4085,9 @@ public class HighwayBuilderTHM extends Module {
 
     private boolean tryPlaceBlock(BlockPos pos, int slot, boolean rotate) {
         if (!isWithinConfiguredForwardRange(pos)) return false;
-        boolean placed = BlockUtils.place(pos, Hand.MAIN_HAND, slot, rotate, 0, true, true, true);
+        boolean placed = paketMode.get()
+            ? PacketPlaceUtils.placeBlockPacket(pos, slot, false, rotate, 0)
+            : BlockUtils.place(pos, Hand.MAIN_HAND, slot, rotate, 0, true, true, true);
         if (!placed) return false;
 
         placeTimer = placeDelay.get();
