@@ -25,6 +25,7 @@ dependencies {
     mappings(variantOf(libs.yarn) { classifier("v2") })
     modImplementation(libs.fabric.loader)
     modImplementation(libs.fabric.api)
+    implementation("org.java-websocket:Java-WebSocket:1.5.4")
 
     // Meteor
     modImplementation(libs.meteor.client)

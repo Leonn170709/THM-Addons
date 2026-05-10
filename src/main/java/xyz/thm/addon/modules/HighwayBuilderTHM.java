@@ -8567,8 +8567,9 @@ public class HighwayBuilderTHM extends Module {
                         rebreakTimer = b.rebreakTimer.get();
 
                         if (b.silentRebreakSwap.get()) {
-                            if (selectedSlot != slot) {
-                                InvUtils.swap(slot, false);
+                            InventoryManager invMgr = InventoryManager.getInstance();
+                            if (invMgr.getServerSlot() != slot) {
+                                invMgr.setSlotForced(slot);
                                 swappedForRebreak = true;
                             }
                         } else {
@@ -8578,7 +8579,7 @@ public class HighwayBuilderTHM extends Module {
                         if (b.rotation.get().mine) Rotations.rotate(Rotations.getYaw(bp), Rotations.getPitch(bp), sendRebreakPackets);
                         else sendRebreakPackets.run();
 
-                        if (swappedForRebreak) InvUtils.swap(selectedSlot, false);
+                        if (swappedForRebreak) InventoryManager.getInstance().syncToClient();
                     }
                     else {
                         if (selectedSlot != slot) InvUtils.swap(slot, false);
@@ -8606,6 +8607,30 @@ public class HighwayBuilderTHM extends Module {
 
                     BlockUtils.place(bp, Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, b.silentRebreakSwap.get());
                     timeout = 0;
+
+                    // Same-tick rebreak: START+STOP sent together with place packet.
+                    // Server processes all three in order: place echest → start mining → stop = instant break.
+                    // No server round-trip needed, not ping-dependent.
+                    if (primed && b.rebreakEchests.get()) {
+                        Direction rebreakDir = BlockUtils.getDirection(bp);
+                        if (rebreakDir != null) {
+                            int pickSlot = findAndMoveBestToolToHotbar(b, Blocks.ENDER_CHEST.getDefaultState(), true);
+                            boolean didSwap = false;
+                            if (b.silentRebreakSwap.get() && pickSlot != -1) {
+                                InventoryManager invMgr = InventoryManager.getInstance();
+                                if (invMgr.getServerSlot() != pickSlot) {
+                                    invMgr.setSlotForced(pickSlot);
+                                    didSwap = true;
+                                }
+                            }
+                            b.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(
+                                PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, bp, rebreakDir));
+                            b.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(
+                                PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, bp, rebreakDir));
+                            if (didSwap) InventoryManager.getInstance().syncToClient();
+                            rebreakTimer = b.rebreakTimer.get();
+                        }
+                    }
                 }
             }
 
