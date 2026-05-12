@@ -1052,6 +1052,7 @@ public class HighwayBuilderTHM extends Module {
     private volatile boolean statsDisconnectScreenshotScheduled;
     private String lastPrintedStatsSessionId;
     private SpeedMineSettingsSnapshot speedMineSettingsSnapshot;
+    private boolean paketLimiterActivatedByBuilder = false;
     private boolean previousPauseOnLostFocus;
     private boolean pauseOnLostFocusChanged;
     private boolean pauseOnLostFocusForcedOff;
@@ -3327,7 +3328,7 @@ public class HighwayBuilderTHM extends Module {
 
     @EventHandler
     private void onRender3D(Render3DEvent event) {
-        if (suspended || blockPosProvider == null) return; // prevents a fascinating crash
+        if (suspended || blockPosProvider == null || mc.player == null || mc.world == null) return;
 
         if (renderMine.get()) {
             render(event, blockPosProvider.getFront(), mBlockPos -> canMine(mBlockPos, true), true);
@@ -3499,6 +3500,12 @@ public class HighwayBuilderTHM extends Module {
 
         Setting<Boolean> grimBypassSetting = (Setting<Boolean>) speedMine.settings.get("grim-bypass");
         if (grimBypassSetting != null) grimBypassSetting.set(false);
+
+        PaketLimiter paketLimiter = Modules.get().get(PaketLimiter.class);
+        if (paketLimiter != null && !paketLimiter.isActive()) {
+            paketLimiter.toggle();
+            paketLimiterActivatedByBuilder = true;
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -3529,6 +3536,12 @@ public class HighwayBuilderTHM extends Module {
         if (snapshot.wasActive() != speedMine.isActive()) speedMine.toggle();
 
         speedMineSettingsSnapshot = null;
+
+        if (paketLimiterActivatedByBuilder) {
+            PaketLimiter paketLimiter = Modules.get().get(PaketLimiter.class);
+            if (paketLimiter != null && paketLimiter.isActive()) paketLimiter.toggle();
+            paketLimiterActivatedByBuilder = false;
+        }
     }
 
     private boolean shouldOwnManagedSpeedMine() {
@@ -3570,6 +3583,7 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private String getSignText(BlockPos pos) {
+        if (mc.world == null) return "";
         BlockEntity blockEntity = mc.world.getBlockEntity(pos);
         if (blockEntity == null) return "";
 

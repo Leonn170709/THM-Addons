@@ -2175,7 +2175,7 @@ public class THMHwyMonitor extends Module {
 
         internalTimerSpeedToggleInProgress = true;
         try {
-            for (Module module : recoveryPausedModules) {
+            for (Module module : new ArrayList<>(recoveryPausedModules)) {
                 if (module == null) continue;
                 module.enable();
             }
