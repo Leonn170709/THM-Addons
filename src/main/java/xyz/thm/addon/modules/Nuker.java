@@ -159,6 +159,9 @@ public class Nuker extends Module {
         normalMining = null;
         packetMining = null;
         activeBedrockPos = null;
+        if (swapMode.get() == Enums.NukerSwapModes.Silent) {
+            inventoryManager.syncToClient();
+        }
     }
 
     @EventHandler
