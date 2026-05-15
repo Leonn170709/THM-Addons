@@ -342,8 +342,15 @@ public class Nuker extends Module {
             return;
         }
 
+        boolean doInvSwap = swapMode.get() == Enums.NukerSwapModes.InventoryNormal
+            || swapMode.get() == Enums.NukerSwapModes.InventorySilent;
+        boolean invSwapSilent = swapMode.get() == Enums.NukerSwapModes.InventorySilent;
+
         if (swapMode.get() != Enums.NukerSwapModes.None) {
-            int bestSlot = getBestToolSlot(mc.world.getBlockState(blockPos));
+            int bestSlot = doInvSwap
+                ? getBestToolSlotFull(mc.world.getBlockState(blockPos))
+                : getBestToolSlot(mc.world.getBlockState(blockPos));
+
             if (swapMode.get() == Enums.NukerSwapModes.Normal) {
                 int selected = ((PlayerInventoryAccessor) mc.player.getInventory()).getSelectedSlot();
                 if (selected != bestSlot) {
@@ -356,6 +363,8 @@ public class Nuker extends Module {
                     inventoryManager.setSlotForced(bestSlot);
                     silentSyncTicks = 1;
                 }
+            } else if (doInvSwap) {
+                InventoryManager.swapTo(bestSlot, invSwapSilent, true);
             }
         }
 
@@ -367,6 +376,10 @@ public class Nuker extends Module {
             mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, blockPos, dir));
         } else {
             BlockUtils.breakBlock(blockPos, swing.get());
+        }
+
+        if (doInvSwap) {
+            InventoryManager.swapBack(invSwapSilent);
         }
     }
 
@@ -489,6 +502,24 @@ public class Nuker extends Module {
         float bestSpeed = 0f;
 
         for (int i = 0; i < 9; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.isEmpty()) continue;
+            float speed = stack.getMiningSpeedMultiplier(state);
+            if (speed > bestSpeed) {
+                bestSpeed = speed;
+                bestSlot = i;
+            }
+        }
+
+        return bestSlot;
+    }
+
+    private int getBestToolSlotFull(BlockState state) {
+        int selected = ((PlayerInventoryAccessor) mc.player.getInventory()).getSelectedSlot();
+        int bestSlot = selected;
+        float bestSpeed = 0f;
+
+        for (int i = 0; i < 36; i++) {
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (stack.isEmpty()) continue;
             float speed = stack.getMiningSpeedMultiplier(state);

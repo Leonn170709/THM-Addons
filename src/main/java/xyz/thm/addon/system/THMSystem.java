@@ -182,10 +182,10 @@ public class THMSystem extends System<THMSystem> {
                 savedBuildRailings = hwBuilder.railings.get();
 
                 hwBuilder.blocksToPlace.set(java.util.List.of(Blocks.NETHERRACK, Blocks.BASALT, Blocks.BLACKSTONE));
-                hwBuilder.width.set(7);
+                hwBuilder.width.set(5);
                 hwBuilder.height.set(4);
-                hwBuilder.mineAboveRailings.set(false);
-                hwBuilder.railings.set(false);
+                hwBuilder.mineAboveRailings.set(true);
+                hwBuilder.railings.set(true);
                 hwBuilder.kitbotRestockKit.set(HighwayBuilderTHM.KitbotRestockKit.Pickaxe);
             }
         }

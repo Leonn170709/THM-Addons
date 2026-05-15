@@ -11,6 +11,7 @@ import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.*;
 import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import net.minecraft.network.packet.s2c.common.CommonPingS2CPacket;
+import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
 import net.minecraft.network.packet.s2c.play.UpdateSelectedSlotS2CPacket;
 import xyz.thm.addon.accessor.InputAccessor;
@@ -42,6 +43,11 @@ public class InventoryManager {
         public static final int SURROUND = 20;
         public static final int PEARL_PHASE = 30;
     }
+    private int lastSwapOriginalSlot = -1;
+    private int lastSwapBufferSlot = -1;
+    private int lastSwapOriginalServerSlot = -1;
+    private int lastSwapOriginalClientSlot = -1;
+
     private InventoryManager() {
         MeteorClient.EVENT_BUS.subscribe(this);
         Arrays.fill(transactions, -1);
@@ -266,6 +272,117 @@ public class InventoryManager {
         if (slot >= 0 && slot < 9) {
             ((PlayerInventoryAccessor) mc.player.getInventory()).setSelectedSlot( slot);
         }
+    }
+
+    /**
+     * Finds the item in inventory and swaps to it. Call {@link #swapBack} afterward to restore.
+     *
+     * @param item      item to search for (searches hotbar 0–8 if inventory=false, full 0–35 if true)
+     * @param silent    true = server-side only (held item on client is unchanged); false = client + server both update
+     * @param inventory true = uses SWAP-action into a buffer hotbar slot so the visually held item does not change;
+     *                  false = plain UpdateSelectedSlot (hotbar only)
+     */
+    public static void swapTo(Item item, boolean silent, boolean inventory) {
+        if (mc.player == null || mc.getNetworkHandler() == null) return;
+        int limit = inventory ? 36 : 9;
+        int slot = -1;
+        for (int i = 0; i < limit; i++) {
+            if (mc.player.getInventory().getStack(i).getItem() == item) {
+                slot = i;
+                break;
+            }
+        }
+        if (slot == -1) return;
+        swapTo(slot, silent, inventory);
+    }
+
+    /**
+     * Swaps to the given inventory slot. Call {@link #swapBack} afterward to restore.
+     *
+     * For main-inventory slots (9–35) uses a single SlotActionType.SWAP packet — no cursor involved,
+     * one state-revision increment, and calling the same SWAP again in swapBack reverses it exactly.
+     *   silent=false (InventoryNormal)  → target = current client hotbar slot; held item visibly changes.
+     *   silent=true  (InventorySilent)  → target = buffer hotbar slot (8 or 7); held item does not change.
+     *
+     * @param slot      0–8 hotbar, 9–35 main inventory
+     * @param silent    true = server-side only (held item on client unchanged); false = client + server update
+     * @param inventory true = full-inventory SWAP; false = plain UpdateSelectedSlot (hotbar only)
+     */
+    public static void swapTo(int slot, boolean silent, boolean inventory) {
+        InventoryManager mgr = getInstance();
+        if (mc.player == null || mc.getNetworkHandler() == null) return;
+        mgr.lastSwapOriginalSlot = -1;
+
+        if (inventory) {
+            int clientSlot = ((PlayerInventoryAccessor) mc.player.getInventory()).getSelectedSlot();
+            mgr.lastSwapOriginalServerSlot = mgr.getServerSlot();
+            mgr.lastSwapOriginalClientSlot = clientSlot;
+
+            if (slot < 9) {
+                // Item is already in hotbar — just change selection, no inventory packets needed
+                mgr.lastSwapOriginalSlot = slot;
+                mgr.lastSwapBufferSlot = -1;
+                if (silent) {
+                    mgr.setSlotForced(slot);
+                } else {
+                    ((PlayerInventoryAccessor) mc.player.getInventory()).setSelectedSlot(slot);
+                    mgr.setSlotForced(slot);
+                }
+            } else {
+                // Silent: swap into buffer slot so the visually held item does not change.
+                // Normal: swap into the currently held slot so the item is visibly in hand.
+                int targetHotbar = silent ? (clientSlot == 8 ? 7 : 8) : clientSlot;
+                mgr.lastSwapOriginalSlot = slot;
+                mgr.lastSwapBufferSlot = targetHotbar;
+
+                // Single SWAP packet: swaps screen-handler slot `slot` with hotbar slot `targetHotbar` (0-8).
+                // Calling the same packet again in swapBack self-reverses the swap.
+                int syncId = mc.player.currentScreenHandler.syncId;
+                mc.interactionManager.clickSlot(syncId, slot, targetHotbar, SlotActionType.SWAP, mc.player);
+
+                if (silent) {
+                    mgr.setSlotForced(targetHotbar);
+                } else {
+                    ((PlayerInventoryAccessor) mc.player.getInventory()).setSelectedSlot(targetHotbar);
+                    mgr.setSlotForced(targetHotbar);
+                }
+            }
+        } else if (silent) {
+            mgr.setSlot(slot);
+        } else {
+            if (!PlayerInventory.isValidHotbarIndex(slot)) return;
+            ((PlayerInventoryAccessor) mc.player.getInventory()).setSelectedSlot(slot);
+            mgr.setSlotForced(slot);
+        }
+    }
+
+    /**
+     * Restores the state saved by the last {@link #swapTo} call that used inventory=true.
+     * No-op if no inventory swap is pending.
+     *
+     * @param silent true = only restore server slot; false = restore client + server
+     */
+    public static void swapBack(boolean silent) {
+        InventoryManager mgr = getInstance();
+        if (mc.player == null || mc.getNetworkHandler() == null || mgr.lastSwapOriginalSlot == -1) return;
+
+        if (mgr.lastSwapBufferSlot != -1) {
+            // Same SWAP packet as swapTo — calling it again reverses the swap exactly.
+            int syncId = mc.player.currentScreenHandler.syncId;
+            mc.interactionManager.clickSlot(syncId, mgr.lastSwapOriginalSlot, mgr.lastSwapBufferSlot, SlotActionType.SWAP, mc.player);
+        }
+
+        if (silent) {
+            mgr.setSlotForced(mgr.lastSwapOriginalServerSlot);
+        } else {
+            ((PlayerInventoryAccessor) mc.player.getInventory()).setSelectedSlot(mgr.lastSwapOriginalClientSlot);
+            mgr.setSlotForced(mgr.lastSwapOriginalClientSlot);
+        }
+
+        mgr.lastSwapOriginalSlot = -1;
+        mgr.lastSwapBufferSlot = -1;
+        mgr.lastSwapOriginalServerSlot = -1;
+        mgr.lastSwapOriginalClientSlot = -1;
     }
     public static double getAttackSpeed(ItemStack weapon) {
         if (weapon.isEmpty()) return 4.0;

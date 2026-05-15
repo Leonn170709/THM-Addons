@@ -5,7 +5,9 @@ public class Enums {
     public enum NukerSwapModes {
         None,
         Normal,
-        Silent
+        Silent,
+        InventoryNormal,
+        InventorySilent
     }
 
 }
