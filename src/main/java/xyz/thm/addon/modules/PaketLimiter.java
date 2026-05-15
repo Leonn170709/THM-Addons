@@ -18,7 +18,7 @@ import java.util.Set;
 public class PaketLimiter extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
-    private final Setting<Integer> limit = sgGeneral.add(new IntSetting.Builder()
+    public final Setting<Integer> limit = sgGeneral.add(new IntSetting.Builder()
         .name("packet-limit")
         .description("Max packets per tick (0 = no limit).")
         .defaultValue(23)
@@ -27,13 +27,13 @@ public class PaketLimiter extends Module {
         .build()
     );
 
-    private final Setting<Set<Class<? extends Packet<?>>>> bypass = sgGeneral.add(new PacketListSetting.Builder()
+    public final Setting<Set<Class<? extends Packet<?>>>> bypass = sgGeneral.add(new PacketListSetting.Builder()
         .name("bypass")
         .description("C2S packets that bypass the limiter.")
         .filter(aClass -> PacketUtils.getC2SPackets().contains(aClass))
         .build()
     );
-    private final Setting<Set<Class<? extends Packet<?>>>> alwaysBlock = sgGeneral.add(new PacketListSetting.Builder()
+    public final Setting<Set<Class<? extends Packet<?>>>> alwaysBlock = sgGeneral.add(new PacketListSetting.Builder()
         .name("always-block")
         .description("C2S packets that are always cancelled, even if in bypass.")
         .filter(aClass -> PacketUtils.getC2SPackets().contains(aClass))
@@ -48,22 +48,25 @@ public class PaketLimiter extends Module {
 
     @Override
     public void onActivate() {
-        if (bypass.get().isEmpty()) {
-            // Movement
-            bypass.get().add(net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket.class);
-            bypass.get().add(net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket.PositionAndOnGround.class);
-            bypass.get().add(net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket.LookAndOnGround.class);
-            bypass.get().add(net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket.Full.class);
-            bypass.get().add(net.minecraft.network.packet.c2s.play.VehicleMoveC2SPacket.class);
-            // Connection keeping
-            bypass.get().add(net.minecraft.network.packet.c2s.play.TeleportConfirmC2SPacket.class);
-            bypass.get().add(net.minecraft.network.packet.c2s.common.KeepAliveC2SPacket.class);
-            bypass.get().add(net.minecraft.network.packet.c2s.common.CommonPongC2SPacket.class);
-            bypass.get().add(net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket.class);
+        if (bypass.get().isEmpty() && alwaysBlock.get().isEmpty()) {
+            applyPresets();
         }
-        if (alwaysBlock.get().isEmpty()) {
-            alwaysBlock.get().add(net.minecraft.network.packet.c2s.play.HandSwingC2SPacket.class);
-        }
+    }
+
+    public void applyPresets() {
+        bypass.get().clear();
+        bypass.get().add(net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket.class);
+        bypass.get().add(net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket.PositionAndOnGround.class);
+        bypass.get().add(net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket.LookAndOnGround.class);
+        bypass.get().add(net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket.Full.class);
+        bypass.get().add(net.minecraft.network.packet.c2s.play.VehicleMoveC2SPacket.class);
+        bypass.get().add(net.minecraft.network.packet.c2s.play.TeleportConfirmC2SPacket.class);
+        bypass.get().add(net.minecraft.network.packet.c2s.common.KeepAliveC2SPacket.class);
+        bypass.get().add(net.minecraft.network.packet.c2s.common.CommonPongC2SPacket.class);
+        bypass.get().add(net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket.class);
+        alwaysBlock.get().clear();
+        alwaysBlock.get().add(net.minecraft.network.packet.c2s.play.HandSwingC2SPacket.class);
+        if (!isActive()) toggle();
     }
 
     @EventHandler
