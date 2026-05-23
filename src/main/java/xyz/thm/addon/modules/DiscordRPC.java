@@ -35,8 +35,16 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class DiscordRPC extends Module {
+    private final SettingGroup sgHighway = settings.createGroup("Highway");
     private final SettingGroup sgLine1 = settings.createGroup("Line 1");
     private final SettingGroup sgLine2 = settings.createGroup("Line 2");
+
+    private final Setting<Boolean> showHighwayStats = sgHighway.add(new BoolSetting.Builder()
+        .name("highway-stats")
+        .description("Overrides both lines with live HighwayBuilderTHM stats when active.")
+        .defaultValue(true)
+        .build()
+    );
 
     // Line 1
 
@@ -196,6 +204,21 @@ public class DiscordRPC extends Module {
         } else ticks++;
 
         if (Utils.canUpdate()) {
+            boolean highwayOverride = false;
+            if (showHighwayStats.get()) {
+                HighwayBuilderTHM hb = Modules.get().get(HighwayBuilderTHM.class);
+                if (hb != null && hb.isActive()) {
+                    String dir = hb.dir != null ? hb.dir.name : "?";
+                    double dist = mc.player != null && hb.start != null
+                        ? mc.player.getEyePos().distanceTo(hb.start) : 0;
+                    rpc.setDetails("Building " + dir + " highway");
+                    rpc.setState(String.format("P: %d | B: %d | %.0fm", hb.blocksPlaced, hb.blocksBroken, dist));
+                    update = true;
+                    highwayOverride = true;
+                }
+            }
+
+            if (!highwayOverride) {
             // Line 1
             if (line1Ticks >= line1UpdateDelay.get() || forceUpdate) {
                 if (!line1Scripts.isEmpty()) {
@@ -229,6 +252,7 @@ public class DiscordRPC extends Module {
 
                 line2Ticks = 0;
             } else line2Ticks++;
+            } // end !highwayOverride
         } else {
             if (!lastWasInMainMenu) {
                 rpc.setDetails("THM Addon " + THMAddon.VERSION);

@@ -175,6 +175,13 @@ public class Speedmine extends Module {
         .visible(() -> grimConfig.get() && grimNewConfig.get())
         .build()
     );
+    private final Setting<Boolean> queueModeConfig = sgGeneral.add(new BoolSetting.Builder()
+        .name("queue")
+        .description("Queue blocks for sequential mining; left-click to add blocks to the pending queue")
+        .defaultValue(false)
+        .visible(() -> modeConfig.get() == SpeedmineMode.PACKET)
+        .build()
+    );
     private final Setting<Keybind> autoMineKey = sgAutoMine.add(new KeybindSetting.Builder()
         .name("auto-mine-key")
         .description("Key to toggle auto-mining enemies")
@@ -264,6 +271,20 @@ public class Speedmine extends Module {
         .visible(() -> modeConfig.get() == SpeedmineMode.PACKET && instantRebreakConfig.get())
         .build()
     );
+    private final Setting<SettingColor> queueColorConfig = sgRender.add(new ColorSetting.Builder()
+        .name("queue-color")
+        .description("Fill color for blocks in the mining queue")
+        .defaultValue(new SettingColor(255, 200, 0, 50))
+        .visible(() -> queueModeConfig.get() && modeConfig.get() == SpeedmineMode.PACKET)
+        .build()
+    );
+    private final Setting<SettingColor> queueLineColorConfig = sgRender.add(new ColorSetting.Builder()
+        .name("queue-line-color")
+        .description("Line color for blocks in the mining queue and connecting lines")
+        .defaultValue(new SettingColor(255, 200, 0, 200))
+        .visible(() -> queueModeConfig.get() && modeConfig.get() == SpeedmineMode.PACKET)
+        .build()
+    );
     private final Setting<Integer> fadeTimeConfig = sgRender.add(new IntSetting.Builder()
         .name("fade-time")
         .description("Time to fade")
@@ -276,6 +297,7 @@ public class Speedmine extends Module {
     private final Map<MiningData, Animation> fadeList = new HashMap<>();
     private final Map<BlockPos, Long> rebreakTracker = new HashMap<>();
     private final Map<BlockPos, Direction> rebreakDirections = new HashMap<>();
+    private final List<MiningData> blockQueue = new ArrayList<>();
     private FirstOutQueue<MiningData> miningQueue;
     private long lastBreak;
     private boolean instantTogglePressed = false;
@@ -335,6 +357,7 @@ public class Speedmine extends Module {
         lastAntiCrawlTime = 0;
         rebreakTracker.clear();
         rebreakDirections.clear();
+        blockQueue.clear();
     }
     @Override
     public void onDeactivate() {
@@ -358,6 +381,7 @@ public class Speedmine extends Module {
         currentTarget = null;
         rebreakTracker.clear();
         rebreakDirections.clear();
+        blockQueue.clear();
     }
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
@@ -375,6 +399,7 @@ public class Speedmine extends Module {
         currentTarget = null;
         rebreakTracker.clear();
         rebreakDirections.clear();
+        blockQueue.clear();
     }
     @EventHandler
     public void onPlayerTick(final TickEvent.Pre event) {
@@ -476,6 +501,7 @@ public class Speedmine extends Module {
                 lastAutoMineBlock = null;
             }
         }
+        processBlockQueue();
         if (miningQueue.isEmpty()) {
             return;
         }
@@ -535,6 +561,13 @@ public class Speedmine extends Module {
         event.cancel();
         BlockState blockState = mc.world.getBlockState(event.blockPos);
         if (blockState.getHardness(mc.world, event.blockPos) == -1.0f || blockState.isAir()) {
+            return;
+        }
+        if (queueModeConfig.get()) {
+            if (!isMiningBlock(event.blockPos) && !isQueuedBlock(event.blockPos)) {
+                blockQueue.add(new MiningData(event.blockPos, event.direction));
+            }
+            mc.player.swingHand(Hand.MAIN_HAND);
             return;
         }
         startManualMine(event.blockPos, event.direction);
@@ -682,6 +715,20 @@ public class Speedmine extends Module {
                     pos.getX() + b.minX, pos.getY() + b.minY, pos.getZ() + b.minZ,
                     pos.getX() + b.maxX, pos.getY() + b.maxY, pos.getZ() + b.maxZ,
                     rebreakColorConfig.get(), rebreakColorConfig.get(), shapeMode.get(), 0);
+            }
+        }
+        if (queueModeConfig.get() && !blockQueue.isEmpty()) {
+            for (MiningData data : new ArrayList<>(blockQueue)) {
+                BlockPos pos = data.getPos();
+                BlockState state = mc.world.getBlockState(pos);
+                if (state.isAir()) continue;
+                VoxelShape outlineShape = state.getOutlineShape(mc.world, pos);
+                outlineShape = outlineShape.isEmpty() ? VoxelShapes.fullCube() : outlineShape;
+                Box b = outlineShape.getBoundingBox();
+                event.renderer.box(
+                    pos.getX() + b.minX, pos.getY() + b.minY, pos.getZ() + b.minZ,
+                    pos.getX() + b.maxX, pos.getY() + b.maxY, pos.getZ() + b.maxZ,
+                    queueColorConfig.get(), queueLineColorConfig.get(), ShapeMode.Lines, 0);
             }
         }
     }
@@ -1227,6 +1274,28 @@ public class Speedmine extends Module {
             }
         }
         return null;
+    }
+    private void processBlockQueue() {
+        if (!queueModeConfig.get() || modeConfig.get() != SpeedmineMode.PACKET) return;
+        // Remove already-mined (air) blocks from the pending queue
+        blockQueue.removeIf(data -> mc.world.getBlockState(data.getPos()).isAir());
+        if (blockQueue.isEmpty()) return;
+        int maxQueueSize = doubleBreakConfig.get() ? 2 : 1;
+        while (miningQueue.size() < maxQueueSize && !blockQueue.isEmpty()) {
+            MiningData next = blockQueue.remove(0);
+            BlockState state = mc.world.getBlockState(next.getPos());
+            if (state.isAir()) continue;
+            double dist = mc.player.getEyePos().distanceTo(next.getPos().toCenterPos());
+            if (dist > 5.2) continue; // out of range — unqueue
+            if (isMiningBlock(next.getPos())) continue;
+            queueMiningData(next);
+        }
+    }
+    private boolean isQueuedBlock(BlockPos pos) {
+        for (MiningData data : blockQueue) {
+            if (data.getPos().equals(pos)) return true;
+        }
+        return false;
     }
     private boolean isMiningBlock(BlockPos pos) {
         if (miningQueue == null) return false;

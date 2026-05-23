@@ -10,20 +10,20 @@ import java.util.*;
 
 public final class KitbotChatCommandParser {
     private static final List<String> COMMANDS = List.of("goto", "update", "kit", "send", "token", "claim");
-    private static final List<String> FAMILIES = List.of("dug", "paved");
-    private static final List<String> PAVED_DIRECTIONS = List.of("N", "NE", "E", "SE", "S", "SW", "W", "NW");
-    private static final List<String> DUG_DIRECTIONS = List.of("dugN", "dugNE", "dugE", "dugSE", "dugS", "dugSW", "dugW", "dugNW");
+    private static final List<String> ALL_DIRECTIONS = List.of(
+        "N", "NE", "E", "SE", "S", "SW", "W", "NW",
+        "dugN", "dugNE", "dugE", "dugSE", "dugS", "dugSW", "dugW", "dugNW"
+    );
     private static final List<String> AMOUNTS = List.of(
         "1", "2", "3", "4", "5", "6", "7", "8",
         "9", "10", "11", "12", "13", "14", "15", "16"
     );
-    private static final String GOTO_USAGE = "Usage: $goto dug <dug-direction> or $goto paved <paved-direction>.";
-    private static final String UPDATE_USAGE = "Usage: $update dug <dug-direction> or $update paved <paved-direction>.";
+    private static final String GOTO_USAGE = "Usage: $goto <direction> (e.g. dugN, N).";
+    private static final String UPDATE_USAGE = "Usage: $update <direction> (e.g. dugN, N).";
     private static final String KIT_USAGE = "Usage: $kit <kit> [amount].";
     private static final String SEND_USAGE = "Usage: $send <player> <kit> [amount].";
 
-    private static final Map<String, KitbotFrontend.Direction> PAVED_DIRECTION_MAP = buildDirectionMap(false);
-    private static final Map<String, KitbotFrontend.Direction> DUG_DIRECTION_MAP = buildDirectionMap(true);
+    private static final Map<String, KitbotFrontend.Direction> ALL_DIRECTION_MAP = buildAllDirectionMap();
 
     private KitbotChatCommandParser() {}
 
@@ -125,18 +125,9 @@ public final class KitbotChatCommandParser {
     }
 
     private static ParseResult parseDirectional(CommandType type, KitbotFrontend.Mode mode, String[] tokens, String usage) {
-        if (tokens.length != 3) return new ParseResult(ParseStatus.INVALID, null, usage);
+        if (tokens.length != 2) return new ParseResult(ParseStatus.INVALID, null, usage);
 
-        String family = tokens[1].toLowerCase(Locale.ROOT);
-        Map<String, KitbotFrontend.Direction> directionMap = switch (family) {
-            case "dug" -> DUG_DIRECTION_MAP;
-            case "paved" -> PAVED_DIRECTION_MAP;
-            default -> null;
-        };
-
-        if (directionMap == null) return new ParseResult(ParseStatus.INVALID, null, usage);
-
-        KitbotFrontend.Direction direction = directionMap.get(tokens[2].toLowerCase(Locale.ROOT));
+        KitbotFrontend.Direction direction = ALL_DIRECTION_MAP.get(tokens[1].toLowerCase(Locale.ROOT));
         if (direction == null) return new ParseResult(ParseStatus.INVALID, null, usage);
 
         return new ParseResult(ParseStatus.VALID, new CommandRequest(type, mode, direction, null, null, 1), null);
@@ -201,13 +192,10 @@ public final class KitbotChatCommandParser {
         return false;
     }
 
-    private static Map<String, KitbotFrontend.Direction> buildDirectionMap(boolean dug) {
+    private static Map<String, KitbotFrontend.Direction> buildAllDirectionMap() {
         Map<String, KitbotFrontend.Direction> map = new LinkedHashMap<>();
         for (KitbotFrontend.Direction direction : KitbotFrontend.Direction.values()) {
-            boolean isDug = direction.command.startsWith("dug");
-            if (dug == isDug) {
-                map.put(direction.command.toLowerCase(Locale.ROOT), direction);
-            }
+            map.put(direction.command.toLowerCase(Locale.ROOT), direction);
         }
         return map;
     }
@@ -240,14 +228,7 @@ public final class KitbotChatCommandParser {
         List<String> complete = state.completeTokens();
         String current = state.currentToken();
 
-        if (complete.size() == 1) return matchIgnoreCasePrefix(FAMILIES, current);
-
-        String family = complete.get(1).toLowerCase(Locale.ROOT);
-        if (!FAMILIES.contains(family)) return Collections.emptyList();
-
-        if (complete.size() == 2) {
-            return matchIgnoreCasePrefix(family.equals("dug") ? DUG_DIRECTIONS : PAVED_DIRECTIONS, current);
-        }
+        if (complete.size() == 1) return matchIgnoreCasePrefix(ALL_DIRECTIONS, current);
 
         return Collections.emptyList();
     }
