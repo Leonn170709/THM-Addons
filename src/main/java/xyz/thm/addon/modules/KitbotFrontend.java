@@ -973,7 +973,8 @@ public class KitbotFrontend extends Module {
         Stash("Stash", 1),
         Bricks("Bricks", 1),
         Gapples("Gapples", 1),
-        Concrete("Concrete", 1);
+        Concrete("Concrete", 1),
+        Totems("Totems", 5);
 
         public final String label;
         public final double tokens;

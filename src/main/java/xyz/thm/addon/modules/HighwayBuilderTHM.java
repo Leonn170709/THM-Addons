@@ -349,7 +349,14 @@ public class HighwayBuilderTHM extends Module {
     private final Setting<Boolean> kitbotUpdateOnFinish = sgKitBotIntegration.add(new BoolSetting.Builder()
         .name("kitbot-update-on-finish")
         .description("Sends $update to KitBot1 with the current highway direction when the module finishes, waits for KitBot to teleport, then disconnects.")
-        .defaultValue(false)
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> kitbotPeriodicUpdate = sgKitBotIntegration.add(new BoolSetting.Builder()
+        .name("kitbot-periodic-update")
+        .description("Sends $update to KitBot1 every 30 minutes while building without stopping. Deferred until after restock completes.")
+        .defaultValue(true)
         .build()
     );
 
@@ -999,6 +1006,11 @@ public class HighwayBuilderTHM extends Module {
     private boolean kitbotUpdateOnFinishActive;
     private long kitbotUpdateOnFinishStartTick;
     private boolean kitbotUpdateOnFinishTpAccepted;
+    private boolean kitbotPeriodicUpdateActive;
+    private long kitbotPeriodicUpdateStartTick;
+    private boolean kitbotPeriodicUpdateTpAccepted;
+    private boolean kitbotPeriodicUpdatePending;
+    private long kitbotPeriodicUpdateNextTick;
     private boolean kitbotOrderInFlight;
     private boolean kitbotOrderFrontendSucceeded;
     private boolean kitbotEnclosureActive;
@@ -1085,6 +1097,7 @@ public class HighwayBuilderTHM extends Module {
     private int nextAdvertisementIndex;
     private long nextAdvertisementAtTick;
     private static final String KITBOT_NAME = "KitBot1";
+    private static final long KITBOT_PERIODIC_UPDATE_INTERVAL_TICKS = 36000L; // 30 min at 20 tps
     private static final double CENTER_SPEED_OVERRIDE = 0.6;
     private static final int CENTER_SPEED_RESTORE_RETRY_WINDOW_TICKS = 60;
     private static final String[] THMAdvertisements = {
@@ -1574,6 +1587,9 @@ public class HighwayBuilderTHM extends Module {
         statusLogTimer = 6000;
         nextAdvertisementIndex = 0;
         nextAdvertisementAtTick = 0L;
+        kitbotPeriodicUpdateActive = false;
+        kitbotPeriodicUpdatePending = false;
+        kitbotPeriodicUpdateNextTick = mc.world.getTime() + KITBOT_PERIODIC_UPDATE_INTERVAL_TICKS;
         forwardSchedulerDebugFileErrorLogged = false;
         mineActionsThisTick = Math.max(1, (int) Math.floor(blocksPerTick.get()));
         mineFractionCarry = 0.0;
@@ -2176,6 +2192,49 @@ public class HighwayBuilderTHM extends Module {
         }
 
         return playerY <= HIGHWAY_FLOOR_Y;
+    }
+
+    private void tickKitbotPeriodicUpdate() {
+        if (!kitbotPeriodicUpdate.get() || mc.world == null || dir == null) return;
+
+        if (kitbotPeriodicUpdateActive) {
+            if (mc.world.getTime() - kitbotPeriodicUpdateStartTick >= 1200) {
+                info("No response from KitBot1 after 60s (periodic update). Continuing build.");
+                kitbotPeriodicUpdateActive = false;
+            }
+            return;
+        }
+
+        if (mc.world.getTime() < kitbotPeriodicUpdateNextTick) return;
+
+        if (isRestockState(state)) {
+            kitbotPeriodicUpdatePending = true;
+            kitbotPeriodicUpdateNextTick = mc.world.getTime() + KITBOT_PERIODIC_UPDATE_INTERVAL_TICKS;
+            return;
+        }
+
+        sendKitbotPeriodicUpdate();
+    }
+
+    private void sendKitbotPeriodicUpdate() {
+        if (!isOnOfficialHighway() || dir == null || mc.world == null) {
+            kitbotPeriodicUpdatePending = false;
+            kitbotPeriodicUpdateNextTick = mc.world.getTime() + KITBOT_PERIODIC_UPDATE_INTERVAL_TICKS;
+            return;
+        }
+        String kitbotDir = directionToKitbotCommand(dir);
+        if (kitbotDir == null) {
+            kitbotPeriodicUpdatePending = false;
+            kitbotPeriodicUpdateNextTick = mc.world.getTime() + KITBOT_PERIODIC_UPDATE_INTERVAL_TICKS;
+            return;
+        }
+        ChatUtils.sendPlayerMsg("/msg KitBot1 $update " + kitbotDir);
+        info("Sent periodic $update %s to KitBot1. Waiting up to 60s for teleport...", kitbotDir);
+        kitbotPeriodicUpdateActive = true;
+        kitbotPeriodicUpdateStartTick = mc.world.getTime();
+        kitbotPeriodicUpdateTpAccepted = false;
+        kitbotPeriodicUpdatePending = false;
+        kitbotPeriodicUpdateNextTick = mc.world.getTime() + KITBOT_PERIODIC_UPDATE_INTERVAL_TICKS;
     }
 
     private void buildKitbotUpdateEnclosure() {
@@ -3078,6 +3137,7 @@ public class HighwayBuilderTHM extends Module {
         }
 
         tickAdvertisement();
+        tickKitbotPeriodicUpdate();
 
         if (dir == null) {
             onActivate();
@@ -3206,6 +3266,19 @@ public class HighwayBuilderTHM extends Module {
                 disconnect("KitBot update complete");
             }
             return;
+        }
+
+        if (kitbotPeriodicUpdateActive) {
+            if (msg.contains(KITBOT_NAME + " wants to teleport to you")) {
+                ChatUtils.sendPlayerMsg("/tpy " + KITBOT_NAME);
+                kitbotPeriodicUpdateTpAccepted = true;
+                info("Accepted " + KITBOT_NAME + " teleport request (periodic update).");
+            }
+            if (msg.contains(KITBOT_NAME + " whispers: Bot has arrived at highway")
+                || msg.contains("you may teleport")) {
+                info("KitBot1 has arrived (periodic update). Continuing build.");
+                kitbotPeriodicUpdateActive = false;
+            }
         }
     }
 
@@ -3682,6 +3755,10 @@ public class HighwayBuilderTHM extends Module {
 
         this.lastState = lastState;
         this.state = state;
+
+        if (state == State.Forward && isRestockState(previousState) && kitbotPeriodicUpdatePending && kitbotPeriodicUpdate.get()) {
+            kitbotPeriodicUpdateNextTick = mc.world.getTime() + 600; // 30s after returning to Forward
+        }
 
         if (shouldLogRestockStateTransition(previousState, state, lastState)) {
             restockDebug("state %s -> %s (last=%s, active=%s, pending=%s, blockadeReady=%s, sequence=%s)",
