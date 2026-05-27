@@ -209,6 +209,12 @@ public class HighwayBuilderTHM extends Module {
         Roof
     }
 
+    public enum AirPlaceMode {
+        Never,
+        Smart,
+        Always
+    }
+
     private static final class KitbotFootprint {
         private final LinkedHashMap<BlockPos, KitbotStructureBlockType> requiredBlocks = new LinkedHashMap<>();
         private final LinkedHashSet<BlockPos> requiredAir = new LinkedHashSet<>();
@@ -569,6 +575,21 @@ public class HighwayBuilderTHM extends Module {
         .name("paket-mode")
         .description("Only place via packets (no client-side block set), like Surround's packet setting.")
         .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Boolean> packetBuild = sgPaving.add(new BoolSetting.Builder()
+        .name("packet-build")
+        .description("Sends forward placement packets directly for maximum throughput. Automatically enables Packet Limiter on activation. Holds position until the full current row is placed and server-confirmed.")
+        .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<AirPlaceMode> packetBuildAirPlace = sgPaving.add(new EnumSetting.Builder<AirPlaceMode>()
+        .name("air-place-mode")
+        .description("Controls air placement behavior in Packet Build mode. Never: skip if no adjacent face. Smart: normal interaction when face exists, air-place packet when not. Always: always packet air place.")
+        .defaultValue(AirPlaceMode.Never)
+        .visible(packetBuild::get)
         .build()
     );
 
@@ -1511,6 +1532,11 @@ public class HighwayBuilderTHM extends Module {
         boolean reconnectActivation = reconnectResume != null;
         KitbotFrontend.addLifecycleListener(kitbotRestockLifecycleListener);
         clearKitbotRuntimeState("module-activate");
+
+        if (packetBuild.get()) {
+            PaketLimiter limiter = Modules.get().get(PaketLimiter.class);
+            if (limiter != null && !limiter.isActive()) limiter.toggle();
+        }
 
         if (centerSpeedMonitorRecoveryOwned && !resumeStatsSessionOnNextActivate) {
             restockDebug("Center/Speed stale monitor recovery baseline cleared on activate (lastReason=%s).", centerSpeedLastReason);
@@ -4129,6 +4155,7 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private int currentPlaceActionsThisTick() {
+        if (packetBuild.get()) return Integer.MAX_VALUE;
         return Math.max(1, placeActionsThisTick);
     }
 
@@ -4282,6 +4309,10 @@ public class HighwayBuilderTHM extends Module {
         if (!(stack.getItem() instanceof BlockItem blockItem)) return false;
         if (!BlockUtils.canPlaceBlock(pos, true, blockItem.getBlock())) return false;
 
+        if (packetBuild.get()) {
+            return tryForwardPlaceBlockPacket(pos, slot, stack);
+        }
+
         Vec3d hitPos = Vec3d.ofCenter(pos);
         Direction side = BlockUtils.getPlaceSide(pos);
         BlockPos neighbour;
@@ -4305,6 +4336,43 @@ public class HighwayBuilderTHM extends Module {
             RenderUtils.renderTickingBlock(pos.toImmutable(), renderPlaceSideColor.get(), renderPlaceLineColor.get(), renderPlaceShape.get(), 0, 5, true, false);
         }
 
+        return true;
+    }
+
+    private boolean tryForwardPlaceBlockPacket(BlockPos pos, int slot, ItemStack stack) {
+        Direction side = BlockUtils.getPlaceSide(pos);
+        FindItemResult item = new FindItemResult(slot, stack.getCount());
+        AirPlaceMode mode = packetBuildAirPlace.get();
+
+        boolean placed;
+        switch (mode) {
+            case Never -> {
+                if (side == null) return false;
+                placed = PacketPlaceUtils.placeBlockPacket(pos, item, false, 0, false);
+            }
+            case Always -> placed = PacketPlaceUtils.placeBlockPacket(pos, item, false, 0, true);
+            case Smart -> {
+                if (side != null) {
+                    // Normal interaction when a face is available — gives immediate client-side confirmation.
+                    if (mc.player.getInventory().getSelectedSlot() != slot) InvUtils.swap(slot, false);
+                    Vec3d hitPos = Vec3d.ofCenter(pos).add(
+                        side.getOffsetX() * 0.5, side.getOffsetY() * 0.5, side.getOffsetZ() * 0.5
+                    );
+                    BlockUtils.interact(new BlockHitResult(hitPos, side.getOpposite(), pos.offset(side), false), Hand.MAIN_HAND, true);
+                    placed = true;
+                } else {
+                    placed = PacketPlaceUtils.placeBlockPacket(pos, item, false, 0, true);
+                }
+            }
+            default -> placed = false;
+        }
+
+        if (!placed) return false;
+        placeTimer = placeDelay.get();
+        count++;
+        if (renderPlace.get()) {
+            RenderUtils.renderTickingBlock(pos.toImmutable(), renderPlaceSideColor.get(), renderPlaceLineColor.get(), renderPlaceShape.get(), 0, 5, true, false);
+        }
         return true;
     }
 
