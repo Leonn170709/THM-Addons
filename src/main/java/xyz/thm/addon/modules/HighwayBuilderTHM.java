@@ -571,13 +571,6 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Boolean> paketMode = sgPaving.add(new BoolSetting.Builder()
-        .name("paket-mode")
-        .description("Only place via packets (no client-side block set), like Surround's packet setting.")
-        .defaultValue(false)
-        .build()
-    );
-
     private final Setting<Boolean> packetBuild = sgPaving.add(new BoolSetting.Builder()
         .name("packet-build")
         .description("Sends forward placement packets directly for maximum throughput. Automatically enables Packet Limiter on activation. Holds position until the full current row is placed and server-confirmed.")
@@ -4203,9 +4196,7 @@ public class HighwayBuilderTHM extends Module {
 
     private boolean tryPlaceBlock(BlockPos pos, int slot, boolean rotate) {
         if (!isWithinConfiguredForwardRange(pos)) return false;
-        boolean placed = paketMode.get()
-            ? PacketPlaceUtils.placeBlockPacket(pos, slot, false, rotate, 0)
-            : BlockUtils.place(pos, Hand.MAIN_HAND, slot, rotate, 0, true, true, true);
+        boolean placed = BlockUtils.place(pos, Hand.MAIN_HAND, slot, rotate, 0, true, true, true);
         if (!placed) return false;
 
         placeTimer = placeDelay.get();
@@ -4339,7 +4330,13 @@ public class HighwayBuilderTHM extends Module {
         return true;
     }
 
+    private boolean getRotateForMine() {
+        if (rotation.get().mine) return true;
+        return false;
+    }
+
     private boolean tryForwardPlaceBlockPacket(BlockPos pos, int slot, ItemStack stack) {
+        if (!isForwardPlaceableBlock(stack) && !isForwardTrashPlacementStack(stack)) return false;
         Direction side = BlockUtils.getPlaceSide(pos);
         FindItemResult item = new FindItemResult(slot, stack.getCount());
         AirPlaceMode mode = packetBuildAirPlace.get();
@@ -4348,20 +4345,15 @@ public class HighwayBuilderTHM extends Module {
         switch (mode) {
             case Never -> {
                 if (side == null) return false;
-                placed = PacketPlaceUtils.placeBlockPacket(pos, item, false, 0, false);
+                placed = PacketPlaceUtils.placeBlockPacket(pos, item, getRotateForMine(), 0, false);
             }
-            case Always -> placed = PacketPlaceUtils.placeBlockPacket(pos, item, false, 0, true);
+            case Always -> placed = PacketPlaceUtils.placeBlockPacket(pos, item, getRotateForMine(), 0, true);
             case Smart -> {
                 if (side != null) {
-                    // Normal interaction when a face is available — gives immediate client-side confirmation.
-                    if (mc.player.getInventory().getSelectedSlot() != slot) InvUtils.swap(slot, false);
-                    Vec3d hitPos = Vec3d.ofCenter(pos).add(
-                        side.getOffsetX() * 0.5, side.getOffsetY() * 0.5, side.getOffsetZ() * 0.5
-                    );
-                    BlockUtils.interact(new BlockHitResult(hitPos, side.getOpposite(), pos.offset(side), false), Hand.MAIN_HAND, true);
-                    placed = true;
+                    //without airplace if a side is there
+                    placed = PacketPlaceUtils.placeBlockPacket(pos, item, getRotateForMine(), 0, false);
                 } else {
-                    placed = PacketPlaceUtils.placeBlockPacket(pos, item, false, 0, true);
+                    placed = PacketPlaceUtils.placeBlockPacket(pos, item, getRotateForMine(), 0, true);
                 }
             }
             default -> placed = false;
@@ -7409,6 +7401,15 @@ public class HighwayBuilderTHM extends Module {
         if (state != State.Forward) return;
         boolean placedChangedWorld = runForwardPlaceWork(activeRow);
         if (placedChangedWorld) logForwardSchedulerStatus("place", activeRow, "place changed world", true);
+        if (state != State.Forward) return;
+        if (packetBuild.get()) {
+            boolean skippedActive = false;
+            for (ForwardRowSchedule lookaheadRow : forwardSchedulerRuntime.rows) {
+                if (!skippedActive) { skippedActive = true; continue; }
+                if (state != State.Forward) break;
+                runForwardPlaceWork(lookaheadRow);
+            }
+        }
         if (state != State.Forward) return;
         boolean conflictChangedWorld = runForwardConflictWork(activeRow);
         if (conflictChangedWorld) logForwardSchedulerStatus("conflict", activeRow, "conflict changed world", true);
