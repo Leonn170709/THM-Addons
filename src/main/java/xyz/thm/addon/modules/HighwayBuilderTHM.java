@@ -116,6 +116,8 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+
 import static xyz.thm.addon.utils.THMUtils.*;
 import static xyz.thm.addon.utils.password.*;
 
@@ -1104,7 +1106,7 @@ public class HighwayBuilderTHM extends Module {
     public boolean drawingBow;
     public DoubleMineBlock normalMining, packetMining;
     private final MBlockPos posRender2 = new MBlockPos();
-    private final MBlockPos posRender3 = new MBlockPos();
+    private final LongOpenHashSet renderPosSet = new LongOpenHashSet();
 
     private int debugStateLastAge = -1;
     private List<Pattern> signBreakPatterns = Collections.emptyList();
@@ -3493,24 +3495,30 @@ public class HighwayBuilderTHM extends Module {
         Color lineColor = mine ? renderMineLineColor.get() : renderPlaceLineColor.get();
         ShapeMode shapeMode = mine ? renderMineShape.get() : renderPlaceShape.get();
 
+        // Collect all qualifying positions for O(1) neighbour lookup (avoids O(n²) nested iteration)
+        renderPosSet.clear();
         for (MBlockPos pos : it) {
-            posRender2.set(pos);
+            if (predicate.test(pos)) renderPosSet.add(BlockPos.asLong(pos.x, pos.y, pos.z));
+        }
 
-            if (predicate.test(posRender2)) {
-                int excludeDir = 0;
+        if (renderPosSet.isEmpty()) return;
 
-                for (Direction side : Direction.values()) {
-                    posRender3.set(posRender2).add(side.getOffsetX(), side.getOffsetY(), side.getOffsetZ());
+        var iter = renderPosSet.longIterator();
+        while (iter.hasNext()) {
+            long encoded = iter.nextLong();
+            int x = BlockPos.unpackLongX(encoded);
+            int y = BlockPos.unpackLongY(encoded);
+            int z = BlockPos.unpackLongZ(encoded);
 
-                    it.save();
-                    for (MBlockPos p : it) {
-                        if (p.equals(posRender3) && predicate.test(p)) excludeDir |= Dir.get(side);
-                    }
-                    it.restore();
+            int excludeDir = 0;
+            for (Direction side : Direction.values()) {
+                if (renderPosSet.contains(BlockPos.asLong(x + side.getOffsetX(), y + side.getOffsetY(), z + side.getOffsetZ()))) {
+                    excludeDir |= Dir.get(side);
                 }
-
-                event.renderer.box(posRender2.getBlockPos(), sideColor, lineColor, shapeMode, excludeDir);
             }
+
+            posRender2.set(x, y, z);
+            event.renderer.box(posRender2.getBlockPos(), sideColor, lineColor, shapeMode, excludeDir);
         }
     }
 
