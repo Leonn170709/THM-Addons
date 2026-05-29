@@ -58,10 +58,19 @@ public final class PacketPlaceUtils {
     }
 
     public static boolean placeBlockPacket(BlockPos pos, FindItemResult item, boolean rotate, int rotateTicks) {
-        return placeBlockPacket(pos, item, rotate, rotateTicks, true);
+        return placeBlockPacket(pos, item, rotate, rotateTicks, true, true);
     }
 
     public static boolean placeBlockPacket(BlockPos pos, FindItemResult item, boolean rotate, int rotateTicks, boolean airPlace) {
+        return placeBlockPacket(pos, item, rotate, rotateTicks, airPlace, true);
+    }
+
+    /**
+     * @param swapBack When false, the hotbar selection is kept after placing (only swaps if the slot needs to change).
+     *                 Use false for packet-build highway placing to minimise UpdateSelectedSlot packets.
+     *                 Use true (default) for PvP modules that need the hand restored after each place.
+     */
+    public static boolean placeBlockPacket(BlockPos pos, FindItemResult item, boolean rotate, int rotateTicks, boolean airPlace, boolean swapBack) {
         if (!BlockUtils.canPlace(pos)) return false;
 
         Direction side = BlockUtils.getPlaceSide(pos);
@@ -81,8 +90,12 @@ public final class PacketPlaceUtils {
         Runnable place = () -> {
             boolean swapped = false;
             if (item.isHotbar()) {
-                InvUtils.swap(item.slot(), true);
-                swapped = true;
+                if (swapBack) {
+                    InvUtils.swap(item.slot(), true);
+                    swapped = true;
+                } else if (MinecraftClient.getInstance().player.getInventory().getSelectedSlot() != item.slot()) {
+                    InvUtils.swap(item.slot(), false);
+                }
             }
 
             MinecraftClient.getInstance().player.networkHandler.sendPacket(

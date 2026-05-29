@@ -575,7 +575,7 @@ public class HighwayBuilderTHM extends Module {
 
     private final Setting<Boolean> packetBuild = sgPaving.add(new BoolSetting.Builder()
         .name("packet-build")
-        .description("Sends forward placement packets directly for maximum throughput. Automatically enables Packet Limiter on activation. Holds position until the full current row is placed and server-confirmed.")
+        .description("Sends forward placement packets directly for maximum throughput. Automatically enables Packet Limiter on activation.")
         .defaultValue(false)
         .build()
     );
@@ -584,6 +584,14 @@ public class HighwayBuilderTHM extends Module {
         .name("air-place-mode")
         .description("Controls air placement behavior in Packet Build mode. Never: skip if no adjacent face. Smart: normal interaction when face exists, air-place packet when not. Always: always packet air place.")
         .defaultValue(AirPlaceMode.Never)
+        .visible(packetBuild::get)
+        .build()
+    );
+
+    private final Setting<Boolean> packetBuildLookahead = sgPaving.add(new BoolSetting.Builder()
+        .name("packet-build-lookahead")
+        .description("When enabled, packet build also places blocks from upcoming rows in the same tick. Disable to only place the current row.")
+        .defaultValue(true)
         .visible(packetBuild::get)
         .build()
     );
@@ -4353,15 +4361,14 @@ public class HighwayBuilderTHM extends Module {
         switch (mode) {
             case Never -> {
                 if (side == null) return false;
-                placed = PacketPlaceUtils.placeBlockPacket(pos, item, getRotateForMine(), 0, false);
+                placed = PacketPlaceUtils.placeBlockPacket(pos, item, getRotateForMine(), 0, false, false);
             }
-            case Always -> placed = PacketPlaceUtils.placeBlockPacket(pos, item, getRotateForMine(), 0, true);
+            case Always -> placed = PacketPlaceUtils.placeBlockPacket(pos, item, getRotateForMine(), 0, true, false);
             case Smart -> {
                 if (side != null) {
-                    //without airplace if a side is there
-                    placed = PacketPlaceUtils.placeBlockPacket(pos, item, getRotateForMine(), 0, false);
+                    placed = PacketPlaceUtils.placeBlockPacket(pos, item, getRotateForMine(), 0, false, false);
                 } else {
-                    placed = PacketPlaceUtils.placeBlockPacket(pos, item, getRotateForMine(), 0, true);
+                    placed = PacketPlaceUtils.placeBlockPacket(pos, item, getRotateForMine(), 0, true, false);
                 }
             }
             default -> placed = false;
@@ -7410,7 +7417,7 @@ public class HighwayBuilderTHM extends Module {
         boolean placedChangedWorld = runForwardPlaceWork(activeRow);
         if (placedChangedWorld) logForwardSchedulerStatus("place", activeRow, "place changed world", true);
         if (state != State.Forward) return;
-        if (packetBuild.get()) {
+        if (packetBuild.get() && packetBuildLookahead.get()) {
             boolean skippedActive = false;
             for (ForwardRowSchedule lookaheadRow : forwardSchedulerRuntime.rows) {
                 if (!skippedActive) { skippedActive = true; continue; }
@@ -7559,6 +7566,8 @@ public class HighwayBuilderTHM extends Module {
 
         boolean changedWorld = false;
         List<ForwardTask> snapshot = new ArrayList<>(queue.values());
+        Vec3d eyePos = mc.player.getEyePos();
+        snapshot.sort(Comparator.comparingDouble(task -> task.pos.getSquaredDistance(eyePos)));
         for (ForwardTask task : snapshot) {
             if (forwardPlaceCount >= currentPlaceActionsThisTick() || placeTimer > 0) break;
             if (!shouldKeepForwardPlaceTask(task)) {
