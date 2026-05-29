@@ -97,22 +97,6 @@ public class Speedmine extends Module {
         .defaultValue(Keybind.none())
         .build()
     );
-    private final Setting<Boolean> instantRebreakConfig = sgGeneral.add(new BoolSetting.Builder()
-        .name("instant-rebreak")
-        .description("Instantly rebreaks blocks when they reappear after being mined (AutoMine-style, fires on packet receive)")
-        .defaultValue(false)
-        .visible(() -> modeConfig.get() == SpeedmineMode.PACKET)
-        .build()
-    );
-    private final Setting<Integer> rebreakDelayConfig = sgGeneral.add(new IntSetting.Builder()
-        .name("rebreak-delay")
-        .description("Minimum delay in ms before rebreaking a block")
-        .defaultValue(50)
-        .min(0)
-        .sliderMax(500)
-        .visible(() -> modeConfig.get() == SpeedmineMode.PACKET && instantRebreakConfig.get())
-        .build()
-    );
     private final Setting<Boolean> persistentConfig = sgGeneral.add(new BoolSetting.Builder()
         .name("persistent")
         .description("Keeps packet mine exploit active even when module is disabled (prevents exploit from breaking)")
@@ -130,15 +114,6 @@ public class Speedmine extends Module {
         .description("Swaps to the best tool once the mining is complete")
         .defaultValue(Swap.SILENT)
         .visible(() -> modeConfig.get() == SpeedmineMode.PACKET)
-        .build()
-    );
-    private final Setting<Integer> swapBackTicksConfig = sgGeneral.add(new IntSetting.Builder()
-        .name("swap-back-ticks")
-        .description("Ticks before the silent/normal swap reverts to the original slot.")
-        .defaultValue(3)
-        .min(1)
-        .sliderMax(10)
-        .visible(() -> modeConfig.get() == SpeedmineMode.PACKET && swapConfig.get() != Swap.OFF)
         .build()
     );
     private final Setting<Boolean> rotateConfig = sgGeneral.add(new BoolSetting.Builder()
@@ -264,13 +239,6 @@ public class Speedmine extends Module {
         .visible(() -> modeConfig.get() == SpeedmineMode.PACKET)
         .build()
     );
-    private final Setting<SettingColor> rebreakColorConfig = sgRender.add(new ColorSetting.Builder()
-        .name("rebreak-color")
-        .description("Color for blocks queued for instant rebreak")
-        .defaultValue(new SettingColor(255, 165, 0, 100))
-        .visible(() -> modeConfig.get() == SpeedmineMode.PACKET && instantRebreakConfig.get())
-        .build()
-    );
     private final Setting<SettingColor> queueColorConfig = sgRender.add(new ColorSetting.Builder()
         .name("queue-color")
         .description("Fill color for blocks in the mining queue")
@@ -295,8 +263,6 @@ public class Speedmine extends Module {
         .build()
     );
     private final Map<MiningData, Animation> fadeList = new HashMap<>();
-    private final Map<BlockPos, Long> rebreakTracker = new HashMap<>();
-    private final Map<BlockPos, Direction> rebreakDirections = new HashMap<>();
     private final List<MiningData> blockQueue = new ArrayList<>();
     private FirstOutQueue<MiningData> miningQueue;
     private long lastBreak;
@@ -355,8 +321,6 @@ public class Speedmine extends Module {
         lastAutoMineTime = 0;
         lastAntiCrawlBlock = null;
         lastAntiCrawlTime = 0;
-        rebreakTracker.clear();
-        rebreakDirections.clear();
         blockQueue.clear();
     }
     @Override
@@ -379,8 +343,6 @@ public class Speedmine extends Module {
         lastAntiCrawlBlock = null;
         lastAntiCrawlTime = 0;
         currentTarget = null;
-        rebreakTracker.clear();
-        rebreakDirections.clear();
         blockQueue.clear();
     }
     @EventHandler
@@ -397,8 +359,6 @@ public class Speedmine extends Module {
         lastAntiCrawlBlock = null;
         lastAntiCrawlTime = 0;
         currentTarget = null;
-        rebreakTracker.clear();
-        rebreakDirections.clear();
         blockQueue.clear();
     }
     @EventHandler
@@ -443,14 +403,6 @@ public class Speedmine extends Module {
         }
         if (modeConfig.get() == SpeedmineMode.DAMAGE) {
             return;
-        }
-        // Client-side rebreak poll: fires as soon as client world has the block, without waiting for a block-update packet.
-        if (instantRebreakConfig.get() && !rebreakTracker.isEmpty()) {
-            for (BlockPos pos : new java.util.ArrayList<>(rebreakTracker.keySet())) {
-                if (!mc.world.getBlockState(pos).isAir()) {
-                    sendInstantRebreak(pos);
-                }
-            }
         }
         if (autoMine.get() && modeConfig.get() == SpeedmineMode.PACKET) {
             int maxQueueSize = doubleBreakConfig.get() ? 2 : 1;
@@ -604,57 +556,14 @@ public class Speedmine extends Module {
         }
     }
     private void handleBlockUpdatePacket(BlockUpdateS2CPacket packet) {
-        BlockPos pos = packet.getPos();
         if (!packet.getState().isAir()) {
-            if (instantRebreakConfig.get()) sendInstantRebreak(pos, packet.getState());
             return;
         }
         for (MiningData data : miningQueue) {
-            if (data.hasAttemptedBreak() && data.getPos().equals(pos)) {
+            if (data.hasAttemptedBreak() && data.getPos().equals(packet.getPos())) {
                 data.setAttemptedBreak(false);
             }
         }
-    }
-    private void sendInstantRebreak(BlockPos pos) {
-        sendInstantRebreak(pos, mc.world.getBlockState(pos));
-    }
-
-    private void sendInstantRebreak(BlockPos pos, BlockState blockState) {
-        Long lastBreakTime = rebreakTracker.get(pos);
-        if (lastBreakTime == null) return;
-        if (System.currentTimeMillis() - lastBreakTime < rebreakDelayConfig.get()) return;
-        Direction dir = rebreakDirections.getOrDefault(pos, Direction.UP);
-        if (!blockState.isAir() && swapConfig.get() != Swap.OFF) {
-            int bestSlot = getBestTool(blockState);
-            if (swapConfig.get() == Swap.SILENT) {
-                if (inventoryManager == null) inventoryManager = InventoryManager.getInstance();
-                // compare against server slot so we skip the packet when it's already correct
-                if (bestSlot != inventoryManager.getServerSlot()) {
-                    if (swappedToSlot == -1) {
-                        originalSlot = ((PlayerInventoryAccessor) mc.player.getInventory()).getSelectedSlot();
-                    }
-                    // setSlotForced bypasses the priority check in setSlot so it always goes through
-                    inventoryManager.setSlotForced(bestSlot);
-                    swappedToSlot = bestSlot;
-                }
-            } else { // NORMAL
-                int currentSlot = ((PlayerInventoryAccessor) mc.player.getInventory()).getSelectedSlot();
-                if (bestSlot != currentSlot) {
-                    if (swappedToSlot == -1) {
-                        originalSlot = currentSlot;
-                    }
-                    swapTo(bestSlot);
-                    swappedToSlot = bestSlot;
-                }
-            }
-            swapBackTicks = swapBackTicksConfig.get();
-        }
-        // START+STOP in same call — server processes both together = no server-validation wait
-        mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(
-            PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, dir));
-        mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(
-            PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, dir));
-        rebreakTracker.put(pos, System.currentTimeMillis());
     }
     @EventHandler
     public void onRenderWorld(final Render3DEvent event) {
@@ -704,19 +613,6 @@ public class Speedmine extends Module {
                 new SettingColor(boxColor), new SettingColor(lineColor), shapeMode.get(), 0);
         }
         fadeList.entrySet().removeIf(e -> e.getValue().getFactor() == 0.0);
-        if (instantRebreakConfig.get() && !rebreakTracker.isEmpty()) {
-            for (BlockPos pos : new ArrayList<>(rebreakTracker.keySet())) {
-                BlockState state = mc.world.getBlockState(pos);
-                if (state.isAir()) continue;
-                VoxelShape outlineShape = state.getOutlineShape(mc.world, pos);
-                outlineShape = outlineShape.isEmpty() ? VoxelShapes.fullCube() : outlineShape;
-                Box b = outlineShape.getBoundingBox();
-                event.renderer.box(
-                    pos.getX() + b.minX, pos.getY() + b.minY, pos.getZ() + b.minZ,
-                    pos.getX() + b.maxX, pos.getY() + b.maxY, pos.getZ() + b.maxZ,
-                    rebreakColorConfig.get(), rebreakColorConfig.get(), shapeMode.get(), 0);
-            }
-        }
         if (queueModeConfig.get() && !blockQueue.isEmpty()) {
             for (MiningData data : new ArrayList<>(blockQueue)) {
                 BlockPos pos = data.getPos();
@@ -826,16 +722,12 @@ public class Speedmine extends Module {
         if (needsSwap) {
             swapTo(bestSlot);
             swappedToSlot = bestSlot;
-            swapBackTicks = swapBackTicksConfig.get();
+            swapBackTicks = 3;
         } else if (swappedToSlot != -1) {
-            swapBackTicks = swapBackTicksConfig.get();
+            swapBackTicks = 3;
         }
         stopMiningInternal(data);
         lastBreak = System.currentTimeMillis();
-        if (instantRebreakConfig.get()) {
-            rebreakTracker.put(data.getPos(), System.currentTimeMillis());
-            rebreakDirections.put(data.getPos(), data.getDirection());
-        }
     }
     private void swapTo(int slot) {
         switch (swapConfig.get()) {
