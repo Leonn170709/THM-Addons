@@ -1113,7 +1113,7 @@ public class HighwayBuilderTHM extends Module {
     public boolean drawingBow;
     public DoubleMineBlock normalMining, packetMining;
     private final LongOpenHashSet renderPosSet = new LongOpenHashSet();
-    final RenderUtilsTHM.TimedBlockSet placeTrail = new RenderUtilsTHM.TimedBlockSet(400);
+    final LongOpenHashSet placeTrail = new LongOpenHashSet();
 
     private int debugStateLastAge = -1;
     private List<Pattern> signBreakPatterns = Collections.emptyList();
@@ -3494,7 +3494,7 @@ public class HighwayBuilderTHM extends Module {
             if (state == State.PlaceShulkerBlockade || state == State.PlaceEChestBlockade) {
                 render(event, blockPosProvider.getBlockade(false, getEffectiveBlockadeType()), mBlockPos -> canPlace(mBlockPos, false), false);
             }
-            placeTrail.render(event, renderPlaceSideColor.get(), renderPlaceLineColor.get(), renderPlaceShape.get());
+            RenderUtilsTHM.renderAndPruneBlockSet(event, placeTrail, renderPlaceSideColor.get(), renderPlaceLineColor.get(), renderPlaceShape.get());
         }
     }
 
@@ -4200,7 +4200,7 @@ public class HighwayBuilderTHM extends Module {
         placeTimer = placeDelay.get();
         count++;
 
-        if (renderPlace.get()) placeTrail.add(pos.toImmutable());
+        if (renderPlace.get()) placeTrail.add(BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ()));
 
         return true;
     }
@@ -4319,7 +4319,7 @@ public class HighwayBuilderTHM extends Module {
         placeTimer = placeDelay.get();
         count++;
 
-        if (renderPlace.get()) placeTrail.add(pos.toImmutable());
+        if (renderPlace.get()) placeTrail.add(BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ()));
 
         return true;
     }
@@ -4355,7 +4355,7 @@ public class HighwayBuilderTHM extends Module {
         if (!placed) return false;
         placeTimer = placeDelay.get();
         count++;
-        if (renderPlace.get()) placeTrail.add(pos.toImmutable());
+        if (renderPlace.get()) placeTrail.add(BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ()));
         return true;
     }
 
@@ -7949,7 +7949,7 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 if (BlockUtils.place(pos.toImmutable(), Hand.MAIN_HAND, slot, b.rotation.get().place, 100, true, true, true)) {
-                    if (b.renderPlace.get()) b.placeTrail.add(pos.toImmutable());
+                    if (b.renderPlace.get()) b.placeTrail.add(BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ()));
                     b.placeTimer = b.placeDelay.get();
                 }
             }

@@ -232,6 +232,31 @@ public class RenderUtilsTHM {
     }
 
     // =========================================================
+    // Persistent block set — renders until blocks are filled by the world
+    // =========================================================
+
+    /**
+     * Renders a set of pending block positions with face exclusion.
+     * Positions where the world already has a non-replaceable block are removed from the set —
+     * so blocks stay visible until the server confirms placement, then disappear automatically.
+     */
+    public static void renderAndPruneBlockSet(Render3DEvent event, LongOpenHashSet set,
+                                              Color sideColor, Color lineColor, ShapeMode shapeMode) {
+        if (set.isEmpty() || mc.world == null) return;
+        LongIterator iter = set.longIterator();
+        while (iter.hasNext()) {
+            long key = iter.nextLong();
+            if (!mc.world.getBlockState(new BlockPos(
+                    BlockPos.unpackLongX(key),
+                    BlockPos.unpackLongY(key),
+                    BlockPos.unpackLongZ(key))).isReplaceable()) {
+                iter.remove();
+            }
+        }
+        renderBlockSet(event, set, sideColor, lineColor, shapeMode);
+    }
+
+    // =========================================================
     // Ticking block (fade/shrink animation on a single block)
     // =========================================================
 
