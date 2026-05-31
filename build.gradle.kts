@@ -69,7 +69,9 @@ tasks {
     withType<JavaCompile> {
         options.encoding = "UTF-8"
         options.release = 21
-        options.compilerArgs.add("-Xlint:deprecation")
+        options.isFork = true
+        options.forkOptions.memoryMaximumSize = "3g"
+options.compilerArgs.add("-Xlint:deprecation")
         options.compilerArgs.add("-Xlint:unchecked")
     }
 }

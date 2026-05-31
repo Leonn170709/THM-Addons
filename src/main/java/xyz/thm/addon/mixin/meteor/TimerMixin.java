@@ -6,6 +6,7 @@ import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.world.Timer;
 import meteordevelopment.meteorclient.utils.Utils;
+import meteordevelopment.meteorclient.utils.world.TickRate;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.world.ClientChunkManager;
 import net.minecraft.util.math.ChunkPos;
@@ -29,6 +30,8 @@ public abstract class TimerMixin extends Module {
     @Shadow
     @Final
     private Setting<Double> multiplier;
+    @Unique
+    private Setting<Boolean> tpsSync;
     @Unique
     private Setting<Boolean> autoAdjust;
     @Unique
@@ -63,17 +66,24 @@ public abstract class TimerMixin extends Module {
     private double currentSpeed = 0;
     @Inject(method = "<init>", at = @At("TAIL"))
     private void onInit(CallbackInfo ci) {
+        tpsSync = sgGeneral.add(new BoolSetting.Builder()
+            .name("tps-sync")
+            .description("Sync timer multiplier to server TPS (20 TPS = 1.0, 10 TPS = 0.5, 5 TPS = 0.25).")
+            .defaultValue(false)
+            .build()
+        );
         autoAdjust = sgGeneral.add(new BoolSetting.Builder()
             .name("auto-adjust")
             .description("Automatically adjust timer speed based on chunk loading (for 2b2t).")
             .defaultValue(false)
+            .visible(() -> !tpsSync.get())
             .build()
         );
         onlyWhenTraveling = sgGeneral.add(new BoolSetting.Builder()
             .name("only-when-traveling")
             .description("Only use auto-adjust when moving faster than threshold speed. Sets timer to 1.0 when slower.")
             .defaultValue(true)
-            .visible(autoAdjust::get)
+            .visible(() -> !tpsSync.get() && autoAdjust.get())
             .build()
         );
         travelSpeedThreshold = sgGeneral.add(new DoubleSetting.Builder()
@@ -82,7 +92,7 @@ public abstract class TimerMixin extends Module {
             .defaultValue(10.0)
             .min(1.0)
             .sliderRange(1.0, 100.0)
-            .visible(() -> autoAdjust.get() && onlyWhenTraveling.get())
+            .visible(() -> !tpsSync.get() && autoAdjust.get() && onlyWhenTraveling.get())
             .build()
         );
         minSpeed = sgGeneral.add(new DoubleSetting.Builder()
@@ -91,7 +101,7 @@ public abstract class TimerMixin extends Module {
             .defaultValue(0.4)
             .min(0.1)
             .sliderRange(0.1, 1.0)
-            .visible(autoAdjust::get)
+            .visible(() -> !tpsSync.get() && autoAdjust.get())
             .build()
         );
         maxSpeed = sgGeneral.add(new DoubleSetting.Builder()
@@ -100,7 +110,7 @@ public abstract class TimerMixin extends Module {
             .defaultValue(1.0)
             .min(0.1)
             .sliderRange(0.1, 2.0)
-            .visible(autoAdjust::get)
+            .visible(() -> !tpsSync.get() && autoAdjust.get())
             .build()
         );
         checkRadius = sgGeneral.add(new IntSetting.Builder()
@@ -109,7 +119,7 @@ public abstract class TimerMixin extends Module {
             .defaultValue(3)
             .min(1)
             .sliderRange(1, 8)
-            .visible(autoAdjust::get)
+            .visible(() -> !tpsSync.get() && autoAdjust.get())
             .build()
         );
         unloadedThreshold = sgGeneral.add(new IntSetting.Builder()
@@ -118,7 +128,7 @@ public abstract class TimerMixin extends Module {
             .defaultValue(6)
             .min(1)
             .sliderRange(1, 20)
-            .visible(autoAdjust::get)
+            .visible(() -> !tpsSync.get() && autoAdjust.get())
             .build()
         );
         adjustSpeed = sgGeneral.add(new DoubleSetting.Builder()
@@ -127,7 +137,7 @@ public abstract class TimerMixin extends Module {
             .defaultValue(0.15)
             .min(0.01)
             .sliderRange(0.01, 1.0)
-            .visible(autoAdjust::get)
+            .visible(() -> !tpsSync.get() && autoAdjust.get())
             .build()
         );
         checkInterval = sgGeneral.add(new IntSetting.Builder()
@@ -136,7 +146,7 @@ public abstract class TimerMixin extends Module {
             .defaultValue(5)
             .min(1)
             .sliderRange(1, 40)
-            .visible(autoAdjust::get)
+            .visible(() -> !tpsSync.get() && autoAdjust.get())
             .build()
         );
     }
@@ -153,7 +163,13 @@ public abstract class TimerMixin extends Module {
     @Unique
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (!Utils.canUpdate() || !autoAdjust.get() || mc.player == null) return;
+        if (!Utils.canUpdate() || mc.player == null) return;
+        if (tpsSync.get()) {
+            float tps = TickRate.INSTANCE.getTickRate();
+            if (tps > 0) multiplier.set((double) Math.max(0.1f, tps / 20.0f));
+            return;
+        }
+        if (!autoAdjust.get()) return;
         if (lastPlayerPos != null) {
             net.minecraft.util.math.Vec3d currentPos = mc.player.getEntityPos();
             double distanceTraveled = currentPos.subtract(lastPlayerPos).multiply(1, 0, 1).length();

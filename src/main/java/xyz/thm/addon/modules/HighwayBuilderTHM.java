@@ -33,11 +33,10 @@ import meteordevelopment.meteorclient.utils.misc.HorizontalDirection;
 import meteordevelopment.meteorclient.utils.misc.MBlockPos;
 import meteordevelopment.meteorclient.utils.player.*;
 import meteordevelopment.meteorclient.utils.render.NametagUtils;
-import meteordevelopment.meteorclient.utils.render.RenderUtils;
+import xyz.thm.addon.utils.RenderUtilsTHM;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
-import meteordevelopment.meteorclient.utils.world.Dir;
 import meteordevelopment.meteorclient.utils.world.TickRate;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.*;
@@ -1113,8 +1112,8 @@ public class HighwayBuilderTHM extends Module {
     private final ArrayList<EndCrystalEntity> ignoreCrystals = new ArrayList<>();
     public boolean drawingBow;
     public DoubleMineBlock normalMining, packetMining;
-    private final MBlockPos posRender2 = new MBlockPos();
     private final LongOpenHashSet renderPosSet = new LongOpenHashSet();
+    final RenderUtilsTHM.TimedBlockSet placeTrail = new RenderUtilsTHM.TimedBlockSet(400);
 
     private int debugStateLastAge = -1;
     private List<Pattern> signBreakPatterns = Collections.emptyList();
@@ -3495,6 +3494,7 @@ public class HighwayBuilderTHM extends Module {
             if (state == State.PlaceShulkerBlockade || state == State.PlaceEChestBlockade) {
                 render(event, blockPosProvider.getBlockade(false, getEffectiveBlockadeType()), mBlockPos -> canPlace(mBlockPos, false), false);
             }
+            placeTrail.render(event, renderPlaceSideColor.get(), renderPlaceLineColor.get(), renderPlaceShape.get());
         }
     }
 
@@ -3509,25 +3509,7 @@ public class HighwayBuilderTHM extends Module {
             if (predicate.test(pos)) renderPosSet.add(BlockPos.asLong(pos.x, pos.y, pos.z));
         }
 
-        if (renderPosSet.isEmpty()) return;
-
-        var iter = renderPosSet.longIterator();
-        while (iter.hasNext()) {
-            long encoded = iter.nextLong();
-            int x = BlockPos.unpackLongX(encoded);
-            int y = BlockPos.unpackLongY(encoded);
-            int z = BlockPos.unpackLongZ(encoded);
-
-            int excludeDir = 0;
-            for (Direction side : Direction.values()) {
-                if (renderPosSet.contains(BlockPos.asLong(x + side.getOffsetX(), y + side.getOffsetY(), z + side.getOffsetZ()))) {
-                    excludeDir |= Dir.get(side);
-                }
-            }
-
-            posRender2.set(x, y, z);
-            event.renderer.box(posRender2.getBlockPos(), sideColor, lineColor, shapeMode, excludeDir);
-        }
+        RenderUtilsTHM.renderBlockSet(event, renderPosSet, sideColor, lineColor, shapeMode);
     }
 
     private void updateVariables() {
@@ -4218,9 +4200,7 @@ public class HighwayBuilderTHM extends Module {
         placeTimer = placeDelay.get();
         count++;
 
-        if (renderPlace.get()) {
-            RenderUtils.renderTickingBlock(pos.toImmutable(), renderPlaceSideColor.get(), renderPlaceLineColor.get(), renderPlaceShape.get(), 0, 5, true, false);
-        }
+        if (renderPlace.get()) placeTrail.add(pos.toImmutable());
 
         return true;
     }
@@ -4339,9 +4319,7 @@ public class HighwayBuilderTHM extends Module {
         placeTimer = placeDelay.get();
         count++;
 
-        if (renderPlace.get()) {
-            RenderUtils.renderTickingBlock(pos.toImmutable(), renderPlaceSideColor.get(), renderPlaceLineColor.get(), renderPlaceShape.get(), 0, 5, true, false);
-        }
+        if (renderPlace.get()) placeTrail.add(pos.toImmutable());
 
         return true;
     }
@@ -4377,9 +4355,7 @@ public class HighwayBuilderTHM extends Module {
         if (!placed) return false;
         placeTimer = placeDelay.get();
         count++;
-        if (renderPlace.get()) {
-            RenderUtils.renderTickingBlock(pos.toImmutable(), renderPlaceSideColor.get(), renderPlaceLineColor.get(), renderPlaceShape.get(), 0, 5, true, false);
-        }
+        if (renderPlace.get()) placeTrail.add(pos.toImmutable());
         return true;
     }
 
@@ -7589,7 +7565,7 @@ public class HighwayBuilderTHM extends Module {
             forwardPlaceCount++;
             revalidateForwardLatchedPlaceSlot(task);
             boolean worldChanged = !mc.world.getBlockState(task.pos).equals(stateBefore);
-            if (worldChanged) {
+            if (worldChanged || packetBuild.get()) {
                 BlockPos countedPos = task.pos.toImmutable();
                 boolean eligible = isSchedulerCountableFrontPlaceTask(task.type);
                 boolean alreadyCounted = countedPlacedForwardPositions.contains(countedPos);
@@ -7973,7 +7949,7 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 if (BlockUtils.place(pos.toImmutable(), Hand.MAIN_HAND, slot, b.rotation.get().place, 100, true, true, true)) {
-                    if (b.renderPlace.get()) RenderUtils.renderTickingBlock(pos.toImmutable(), b.renderPlaceSideColor.get(), b.renderPlaceLineColor.get(), b.renderPlaceShape.get(), 0, 5, true, false);
+                    if (b.renderPlace.get()) b.placeTrail.add(pos.toImmutable());
                     b.placeTimer = b.placeDelay.get();
                 }
             }

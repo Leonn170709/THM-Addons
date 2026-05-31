@@ -107,6 +107,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new ElytraRoute());
         Modules.get().add(new SignRender());
         Modules.get().add(new AfkLogout());
+        addOptionalModule("xyz.thm.addon.modules.SpearTargetPlus");
         addOptionalModule("xyz.thm.addon.modules.BoatNoclipPlus");
         addOptionalModule("xyz.thm.addon.modules.MCMapSender");
         Modules.get().add(new FlightBypass());
