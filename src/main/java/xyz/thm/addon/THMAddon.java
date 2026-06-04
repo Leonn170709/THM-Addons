@@ -112,6 +112,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         addOptionalModule("xyz.thm.addon.modules.MCMapSender");
         Modules.get().add(new FlightBypass());
         Modules.get().add(new KitbotFrontend());
+        addOptionalModule("xyz.thm.addon.modules.WebmapModule");
         //addOptionalModule("xyz.thm.addon.modules.ElytraUAV"); // Still WIP and may be excluded from release jars.
         if (BaritoneUtils.IS_AVAILABLE) {
             LOG.info("Baritone detected. Enabling Baritone-dependent THM modules.");
@@ -141,6 +142,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Hud.get().register(TunnelMinerHud.INFO);
         Hud.get().register(ElytraFlightHud.INFO);
         Hud.get().register(AfkLogoutHud.INFO);
+        Hud.get().register(ItemCounterHud.INFO);
 
         //Themes
         GuiThemes.add(DarkTheme.INSTANCE);
