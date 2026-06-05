@@ -1697,6 +1697,7 @@ public class HighwayBuilderTHM extends Module {
         countedPlacedForwardPositions.clear();
         clearPendingForwardBreakCredits();
         resetForwardSchedulerRuntime();
+        placeTrail.clear();
         forwardSchedulerDebugFileErrorLogged = false;
         mineActionsThisTick = 0;
         mineFractionCarry = 0.0;
@@ -3746,6 +3747,7 @@ public class HighwayBuilderTHM extends Module {
         if (previousState == State.Forward && state != State.Forward) {
             clearForwardLatchedPlaceSlot();
             clearForwardLatchedMineSlot();
+            placeTrail.clear();
         }
 
         if (state == State.Forward && restockTask.isSequenceActive()) {
@@ -7390,18 +7392,27 @@ public class HighwayBuilderTHM extends Module {
         boolean minedChangedWorld = runForwardMineWork(activeRow);
         if (minedChangedWorld) logForwardSchedulerStatus("mine", activeRow, "mine changed world", true);
         if (state != State.Forward) return;
-        boolean placedChangedWorld = runForwardPlaceWork(activeRow);
-        if (placedChangedWorld) logForwardSchedulerStatus("place", activeRow, "place changed world", true);
-        if (state != State.Forward) return;
-        if (packetBuild.get() && packetBuildLookahead.get()) {
-            boolean skippedActive = false;
-            for (ForwardRowSchedule lookaheadRow : forwardSchedulerRuntime.rows) {
-                if (!skippedActive) { skippedActive = true; continue; }
-                if (state != State.Forward) break;
-                runForwardPlaceWork(lookaheadRow);
+
+        // In paket mode, skip place work while mine tasks are pending so the UpdateSelectedSlot
+        // packet (pickaxe switch) and the mine packets are not dropped by the packet rate limiter.
+        boolean skipPlaceForPaketMine = packetBuild.get() && activeRow != null && !activeRow.mineQueue.isEmpty();
+
+        boolean placedChangedWorld = false;
+        if (!skipPlaceForPaketMine) {
+            placedChangedWorld = runForwardPlaceWork(activeRow);
+            if (placedChangedWorld) logForwardSchedulerStatus("place", activeRow, "place changed world", true);
+            if (state != State.Forward) return;
+            if (packetBuild.get() && packetBuildLookahead.get()) {
+                boolean skippedActive = false;
+                for (ForwardRowSchedule lookaheadRow : forwardSchedulerRuntime.rows) {
+                    if (!skippedActive) { skippedActive = true; continue; }
+                    if (state != State.Forward) break;
+                    runForwardPlaceWork(lookaheadRow);
+                }
             }
+            if (state != State.Forward) return;
         }
-        if (state != State.Forward) return;
+
         boolean conflictChangedWorld = runForwardConflictWork(activeRow);
         if (conflictChangedWorld) logForwardSchedulerStatus("conflict", activeRow, "conflict changed world", true);
         if (state != State.Forward) return;

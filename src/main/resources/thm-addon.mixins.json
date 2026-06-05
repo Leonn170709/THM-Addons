@@ -8,6 +8,7 @@
   "mixins": [
     "BlockedServersMixin",
     "ChatInputSuggestorMixin",
+    "SplashTextMixin",
     "HighwayBuilderBowMixin",
     "HighwayBuilderCameraMixin",
     "HighwayBuilderEntityMixin",

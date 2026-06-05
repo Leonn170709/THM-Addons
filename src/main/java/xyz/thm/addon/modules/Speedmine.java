@@ -478,6 +478,16 @@ public class Speedmine extends Module {
             }
         }
         miningQueue.removeAll(toRemove);
+        // Re-queue packet-mine blocks that timed out without breaking (queue-mode retry)
+        if (queueModeConfig.get()) {
+            for (MiningData failed : toRemove) {
+                if (!failed.getState().isAir() && !isQueuedBlock(failed.getPos()) && !isMiningBlock(failed.getPos())) {
+                    failed.resetDamage();
+                    failed.setAttemptedBreak(false);
+                    blockQueue.add(0, failed);
+                }
+            }
+        }
         MiningData miningData2 = miningQueue.getFirst();
         if (miningData2 == null) return;
         final double distance = mc.player.getEyePos().squaredDistanceTo(miningData2.getPos().toCenterPos());
@@ -491,6 +501,12 @@ public class Speedmine extends Module {
         if (miningData2.getBlockDamage() >= speedConfig.get() && miningData2.hasAttemptedBreak() && miningData2.passedAttemptedBreakTime(500)) {
             abortMining(miningData2);
             miningQueue.remove(miningData2);
+            // Re-queue for retry if in queue mode and block is still solid
+            if (queueModeConfig.get() && !miningData2.getState().isAir() && !isQueuedBlock(miningData2.getPos())) {
+                miningData2.resetDamage();
+                miningData2.setAttemptedBreak(false);
+                blockQueue.add(0, miningData2);
+            }
         }
         if (miningData2.getBlockDamage() >= speedConfig.get()) {
             if (mc.player.isUsingItem() && !multitaskConfig.get()) {
