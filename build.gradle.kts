@@ -25,6 +25,7 @@ dependencies {
     mappings(variantOf(libs.yarn) { classifier("v2") })
     modImplementation(libs.fabric.loader)
     modImplementation(libs.fabric.api)
+    //IDK why websocket is here tbh
     implementation("org.java-websocket:Java-WebSocket:1.5.4")
 
     // Meteor
@@ -38,7 +39,13 @@ tasks {
     processResources {
         val propertyMap = mapOf(
             "version" to project.version,
-            "mc_version" to libs.versions.minecraft.get()
+            "mc_version" to libs.versions.minecraft.get(),
+            "gh_hash" to (System.getenv("GITHUB_SHA") ?: run {
+                val process = ProcessBuilder("git", "rev-parse", "HEAD")
+                    .directory(rootDir)
+                    .start()
+                process.inputStream.bufferedReader().readLine()?.trim() ?: ""
+            }),
         )
 
         inputs.properties(propertyMap)
