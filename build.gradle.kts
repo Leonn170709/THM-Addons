@@ -46,6 +46,12 @@ tasks {
                     .start()
                 process.inputStream.bufferedReader().readLine()?.trim() ?: ""
             }),
+            "gh_branch" to (System.getenv("GITHUB_REF_NAME") ?: run {
+                val process = ProcessBuilder("git", "rev-parse", "--abbrev-ref", "HEAD")
+                    .directory(rootDir)
+                    .start()
+                process.inputStream.bufferedReader().readLine()?.trim() ?: ""
+            }),
         )
 
         inputs.properties(propertyMap)

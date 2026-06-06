@@ -31,7 +31,11 @@ import xyz.thm.addon.modules.*;
 import xyz.thm.addon.system.THMTab;
 import xyz.thm.addon.utils.*;
 
+import org.lwjgl.util.tinyfd.TinyFileDialogs;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Collectors;
 
 public class THMAddon extends MeteorAddon implements ClientModInitializer {
     public static final String MOD_ID = "thm-addon";
@@ -69,6 +73,51 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
     @Override
     public void onInitialize() {
         LOG.info("Initializing THM Addon");
+
+        FabricLoader loader = FabricLoader.getInstance();
+        record ModOption(String modId, String displayName) {}
+        record RequiredMod(String groupName, ModOption... options) {}
+
+        List<RequiredMod> required = List.of(
+            new RequiredMod("Baritone",
+                new ModOption("baritone-meteor", "Baritone Meteor Fork (https://meteorclient.com/) (Recommended) "),
+                new ModOption("baritone", "Baritone (https://github.com/cabaletta/baritone) (Original)")
+            )
+            // Add more RequiredMod entries here as needed
+        );
+
+        List<RequiredMod> missing = new ArrayList<>();
+        for (RequiredMod req : required) {
+            boolean anyLoaded = java.util.Arrays.stream(req.options())
+                .anyMatch(opt -> loader.isModLoaded(opt.modId()));
+            if (!anyLoaded) missing.add(req);
+        }
+
+        if (!missing.isEmpty()) {
+            StringBuilder msg = new StringBuilder("THM Addon is missing required dependencies:\n\n");
+            for (RequiredMod req : missing) {
+                if (req.options().length == 1) {
+                    msg.append("- ").append(req.options()[0].displayName()).append("\n\n");
+                } else {
+                    msg.append(req.groupName()).append(" - install one of:\n");
+                    for (ModOption opt : req.options()) {
+                        msg.append("  - ").append(opt.displayName()).append("\n");
+                    }
+                    msg.append("\n");
+                }
+            }
+            msg.append("The game will now close.");
+            String depList = missing.stream().map(RequiredMod::groupName).collect(Collectors.joining(", "));
+            LOG.error("[THM Addon] Missing dependencies: {}", depList);
+            TinyFileDialogs.tinyfd_messageBox(
+                "THM Addon - Missing Dependencies",
+                msg.toString(),
+                "ok",
+                "error",
+                true
+            );
+            System.exit(1);
+        }
 
         MOD_META = FabricLoader.getInstance().getModContainer(MOD_ID).orElseThrow().getMetadata();
         ServerStatusHandler.getInstance();
@@ -179,7 +228,13 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
 
     @Override
     public GithubRepo getRepo() {
-        return new GithubRepo("Leonn170709", "THM-Addons",  "1.21.11", null);
+        String branch = FabricLoader
+            .getInstance()
+            .getModContainer("thm-addon")
+            .get().getMetadata()
+            .getCustomValue("github:branch")
+            .getAsString();
+        return new GithubRepo("Leonn170709", "THM-Addons", branch.isEmpty() ? "master" : branch.trim(), null);
     }
 
     @Override
@@ -193,6 +248,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         LOG.info("Rejects version: {}", commit);
         return commit.isEmpty() ? null : commit.trim();
     }
+
 
     private static void addOptionalModule(String className) {
         try {

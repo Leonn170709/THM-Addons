@@ -25,6 +25,8 @@
   ],
   "custom": {
     "meteor-client:color": "0,255,255",
+    "github:sha": "${gh_hash}",
+    "github:branch": "${gh_branch}",
     "modmenu": {
       "parent": {
         "id": "meteor-client"
@@ -35,7 +37,10 @@
     "java": ">=21",
     "minecraft": "1.21.11",
     "meteor-client": "*",
-    "fabric-api": "*",
+    "fabric-api": "*"
+  },
+  "suggests": {
+    "baritone": "*",
     "baritone-meteor": "*"
   }
 }
