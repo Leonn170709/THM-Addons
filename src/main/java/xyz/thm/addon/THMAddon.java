@@ -179,7 +179,19 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
 
     @Override
     public GithubRepo getRepo() {
-        return new GithubRepo("Leonn170709", "THM-Addons");
+        return new GithubRepo("Leonn170709", "THM-Addons",  "1.21.11", null);
+    }
+
+    @Override
+    public String getCommit() {
+        String commit = FabricLoader
+            .getInstance()
+            .getModContainer("thm-addon")
+            .get().getMetadata()
+            .getCustomValue("github:sha")
+            .getAsString();
+        LOG.info("Rejects version: {}", commit);
+        return commit.isEmpty() ? null : commit.trim();
     }
 
     private static void addOptionalModule(String className) {
