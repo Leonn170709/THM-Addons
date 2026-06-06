@@ -3281,15 +3281,18 @@ public class HighwayBuilderTHM extends Module {
         if (!isExecutionAllowedOnCurrentServer(getCommittedServerState())) return;
 
         String msg = event.getMessage().getString();
+        
+        // Weird ahh fix to it never accepting
+        if (msg.contains(KITBOT_NAME + " wants to teleport to you")) {
+            ChatUtils.sendPlayerMsg("/tpy " + KITBOT_NAME);
+            kitbotUpdateOnFinishTpAccepted = true;
+            info("Accepted " + KITBOT_NAME + " teleport request.");
+        }
 
+        boolean youMayTeleport = msg.contains(KITBOT_NAME + " whispers: Bot has arrived at highway")
+            || msg.contains("you may teleport");
         if (kitbotUpdateOnFinishActive) {
-            if (msg.contains(KITBOT_NAME + " wants to teleport to you")) {
-                ChatUtils.sendPlayerMsg("/tpy " + KITBOT_NAME);
-                kitbotUpdateOnFinishTpAccepted = true;
-                info("Accepted " + KITBOT_NAME + " teleport request.");
-            }
-            if (msg.contains(KITBOT_NAME + " whispers: Bot has arrived at highway")
-                || msg.contains("you may teleport")) {
+            if (youMayTeleport) {
                 info("KitBot1 has arrived. Disconnecting.");
                 kitbotUpdateOnFinishActive = false;
                 disconnect("KitBot update complete");
@@ -3303,8 +3306,7 @@ public class HighwayBuilderTHM extends Module {
                 kitbotPeriodicUpdateTpAccepted = true;
                 info("Accepted " + KITBOT_NAME + " teleport request (periodic update).");
             }
-            if (msg.contains(KITBOT_NAME + " whispers: Bot has arrived at highway")
-                || msg.contains("you may teleport")) {
+            if (youMayTeleport) {
                 info("KitBot1 has arrived (periodic update). Continuing build.");
                 kitbotPeriodicUpdateActive = false;
             }
