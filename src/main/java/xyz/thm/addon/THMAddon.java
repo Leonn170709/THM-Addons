@@ -34,6 +34,7 @@ import xyz.thm.addon.utils.*;
 import org.lwjgl.util.tinyfd.TinyFileDialogs;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -76,28 +77,31 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
     @Override
     public void onInitialize() {
         LOG.info("Initializing THM Addon");
-
         FabricLoader loader = FabricLoader.getInstance();
-        record ModOption(String modId, String displayName) {}
-        record RequiredMod(String groupName, ModOption... options) {}
+
+        record ModOption(String modId, String displayName, String url) {}
+        record RequiredMod(String groupName, String downloadUrl, ModOption... options) {}
 
         List<RequiredMod> required = List.of(
             new RequiredMod("Baritone",
-                new ModOption("baritone-meteor", "Baritone Meteor Fork (https://meteorclient.com/) (Recommended) "),
-                new ModOption("baritone", "Baritone (https://github.com/cabaletta/baritone) (Original)")
+                "https://github.com/Leonn170709/THM-Addons/raw/refs/heads/1.21.11/docs/SuperDuperFreeFileHost/baritone-meteor-1.21.11.jar",
+                new ModOption("baritone-meteor", "Baritone Meteor Fork (Recommended)", null),
+                new ModOption("baritone", "Baritone (Original)", null)
             )
             // Add more RequiredMod entries here as needed
         );
 
         List<RequiredMod> missing = new ArrayList<>();
         for (RequiredMod req : required) {
-            boolean anyLoaded = java.util.Arrays.stream(req.options())
+            boolean anyLoaded = Arrays.stream(req.options())
                 .anyMatch(opt -> loader.isModLoaded(opt.modId()));
             if (!anyLoaded) missing.add(req);
         }
 
         if (!missing.isEmpty()) {
             StringBuilder msg = new StringBuilder("THM Addon is missing required dependencies:\n\n");
+            List<String> downloadUrls = new ArrayList<>();
+
             for (RequiredMod req : missing) {
                 if (req.options().length == 1) {
                     msg.append("- ").append(req.options()[0].displayName()).append("\n\n");
@@ -108,17 +112,48 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
                     }
                     msg.append("\n");
                 }
+
+                // Only add download URL if the group has one declared
+                if (req.downloadUrl() != null && !req.downloadUrl().isEmpty()) {
+                    downloadUrls.add(req.downloadUrl());
+                }
             }
-            msg.append("The game will now close.");
+
+            boolean hasDownload = !downloadUrls.isEmpty();
+            msg.append(hasDownload
+                ? "Click OK to open the download page, or Cancel to just close."
+                : "The game will now close.");
+
             String depList = missing.stream().map(RequiredMod::groupName).collect(Collectors.joining(", "));
             LOG.error("[THM Addon] Missing dependencies: {}", depList);
-            TinyFileDialogs.tinyfd_messageBox(
+
+            boolean openDownload = TinyFileDialogs.tinyfd_messageBox(
                 "THM Addon - Missing Dependencies",
                 msg.toString(),
-                "ok",
+                hasDownload ? "okcancel" : "ok",
                 "error",
                 true
             );
+
+            if (hasDownload && openDownload) {
+                for (String url : downloadUrls) {
+                    try {
+                        String os = System.getProperty("os.name").toLowerCase();
+                        ProcessBuilder pb;
+                        if (os.contains("win")) {
+                            pb = new ProcessBuilder("rundll32", "url.dll,FileProtocolHandler", url);
+                        } else if (os.contains("mac")) {
+                            pb = new ProcessBuilder("open", url);
+                        } else {
+                            pb = new ProcessBuilder("xdg-open", url);
+                        }
+                        pb.start();
+                    } catch (Exception e) {
+                        LOG.error("Failed to open URL: {}", url, e);
+                    }
+                }
+            }
+
             System.exit(1);
         }
 
