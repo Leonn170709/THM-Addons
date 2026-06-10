@@ -60,14 +60,17 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
     }
     @Override
     public void onInitializeClient() {
-        PayloadTypeRegistry.playC2S().register(JoinPayload.ID, JoinPayload.CODEC);
-        ClientPlayConnectionEvents.JOIN.register((listener, sender, client) -> {
-            if (!THMUtils.isNot6B6T()) {
-                sender.sendPacket(new JoinPayload());
-                LOG.info("Join payload sent.");} else {
-                LOG.info("Join payload not sent.");
-            }
-        });
+        if (!FabricLoader.getInstance().isModLoaded("anarchymod")) {
+            PayloadTypeRegistry.playC2S().register(JoinPayload.ID, JoinPayload.CODEC);
+            ClientPlayConnectionEvents.JOIN.register((listener, sender, client) -> {
+                if (!THMUtils.isNot6B6T()) {
+                    sender.sendPacket(new JoinPayload());
+                    LOG.info("Join payload sent.");
+                } else {
+                    LOG.info("Join payload not sent.");
+                }
+            });
+        }
     }
 
     @Override

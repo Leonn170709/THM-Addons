@@ -8,7 +8,9 @@
     "Leonn170709"
   ],
   "contact": {
-    "repo": "https://github.com/Leonn170709/THM-Addons"
+    "repo": "https://github.com/Leonn170709/THM-Addons",
+    "issues": "https://github.com/Leonn170709/THM-Addons/issues",
+    "discord": "https://discord.gg/thm"
   },
   "icon": "assets/icon/icon.png",
   "environment": "client",
@@ -30,17 +32,23 @@
     "modmenu": {
       "parent": {
         "id": "meteor-client"
+      },
+      "links": {
+        "modmenu.discord": "https://discord.gg/thm"
       }
+    },
+    "depends": {
+      "java": ">=21",
+      "minecraft": "1.21.11",
+      "meteor-client": "*",
+      "fabric-api": "*"
+    },
+    "suggests": {
+      "baritone": "*",
+      "baritone-meteor": "*"
+    },
+    "breaks": {
+      "anarchymod": "*"
     }
-  },
-  "depends": {
-    "java": ">=21",
-    "minecraft": "1.21.11",
-    "meteor-client": "*",
-    "fabric-api": "*"
-  },
-  "suggests": {
-    "baritone": "*",
-    "baritone-meteor": "*"
   }
 }
