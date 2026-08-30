@@ -69,6 +69,12 @@ public final class Vp8LDecoder {
         return (b[off] & 0xffL) | ((b[off + 1] & 0xffL) << 8) | ((b[off + 2] & 0xffL) << 16) | ((b[off + 3] & 0xffL) << 24);
     }
 
+    // 14 bits each lets the header claim up to 16384x16384 (~1GB for the pixel array alone) from
+    // a file a few dozen bytes long - a cosmetic cape texture never needs anywhere near that, so
+    // cap it well below what any real asset uses rather than let a crafted/corrupted file try to
+    // allocate a gigabyte-scale array (OutOfMemoryError isn't even caught by decode()'s handler).
+    private static final int MAX_DIMENSION = 2048;
+
     private static DecodedImage decodeVp8l(byte[] data, int offset, int length) {
         BitReader br = new BitReader(data, offset, length);
         if (br.readBits(8) != 0x2f) return null; // signature
@@ -78,6 +84,7 @@ public final class Vp8LDecoder {
         br.readBits(1); // alpha_is_used hint, irrelevant to decoding
         int version = br.readBits(3);
         if (version != 0) return null;
+        if (width > MAX_DIMENSION || height > MAX_DIMENSION) return null;
 
         int[] result = decodeImageStream(br, width, height, true);
         return new DecodedImage(width, height, result);

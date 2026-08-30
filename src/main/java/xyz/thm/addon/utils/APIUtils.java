@@ -31,6 +31,8 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Scanner;
 
+import static meteordevelopment.meteorclient.MeteorClient.mc;
+
 /**
  * Talks to the THM API. The base URLs are not secrets worth hiding in the class file - every
  * request (GET included) carries the player's own THM API token as {@code Authorization: Bearer},
@@ -267,7 +269,17 @@ public class APIUtils {
         }
     }
 
-    public static void postCapeSelection(String username, String cape, String token) {
+    /**
+     * Sets the cape for the currently logged-in player only - username and token are always
+     * derived from the local session, never accepted as parameters, so this can't be repurposed
+     * to change another player's cape even by a caller with a stolen token.
+     */
+    public static void postCapeSelection(String cape) {
+        if (mc.player == null) return;
+        String username = mc.player.getGameProfile().name();
+        String token = apiToken();
+        if (token.isEmpty()) return;
+
         String json = "{\"username\":\"" + username.replace("\"", "\\\"")
             + "\",\"cape\":\"" + cape.replace("\"", "\\\"")
             + "\",\"timestamp\":" + System.currentTimeMillis()

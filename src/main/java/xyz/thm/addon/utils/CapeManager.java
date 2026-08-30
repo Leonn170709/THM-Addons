@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /** Downloads THM capes listed in the API's cape index to disk and registers them as textures on demand. */
 public final class CapeManager {
@@ -58,10 +59,19 @@ public final class CapeManager {
 
     private static void downloadIfMissing(CapeEntry entry) {
         File file = capeFile(entry.id());
+        if (file == null) {
+            THMAddon.LOG.warn("Ignoring cape index entry with invalid id '{}'", entry.id());
+            return;
+        }
         if (file.exists()) return;
 
         try {
-            HttpURLConnection cn = (HttpURLConnection) new URI(entry.url()).toURL().openConnection();
+            URI uri = new URI(entry.url());
+            if (!"https".equalsIgnoreCase(uri.getScheme())) {
+                THMAddon.LOG.warn("Ignoring cape '{}' with non-https URL", entry.id());
+                return;
+            }
+            HttpURLConnection cn = (HttpURLConnection) uri.toURL().openConnection();
             cn.setRequestMethod("GET");
             cn.setConnectTimeout(10000);
             cn.setReadTimeout(10000);
@@ -99,7 +109,7 @@ public final class CapeManager {
 
     private static Identifier loadTexture(String id) {
         File file = capeFile(id);
-        if (!file.isFile()) return null;
+        if (file == null || !file.isFile()) return null;
 
         try {
             byte[] bytes = Files.readAllBytes(file.toPath());
@@ -115,7 +125,14 @@ public final class CapeManager {
         }
     }
 
+    // Same shape the backend itself enforces for cape ids (POST /cape). id ultimately comes from
+    // API responses (cape index, per-player cape map) - without this, a path-separator/traversal
+    // id could point the read (getCapeTexture) or write (downloadIfMissing) at an arbitrary file.
+    private static final Pattern SAFE_CAPE_ID = Pattern.compile("^[a-zA-Z0-9_-]{1,32}$");
+
+    /** Null if {@code id} isn't a safe filename fragment - callers must treat that as "unavailable". */
     private static File capeFile(String id) {
+        if (id == null || !SAFE_CAPE_ID.matcher(id).matches()) return null;
         return new File(new File(MeteorClient.FOLDER, "thm/capes"), id + ".webp");
     }
 }

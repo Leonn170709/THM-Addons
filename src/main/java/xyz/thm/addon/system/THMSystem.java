@@ -181,9 +181,8 @@ public class THMSystem extends System<THMSystem> {
             MinecraftClient mc = MinecraftClient.getInstance();
             if (mc == null || mc.player == null) return;
             if (!ThmMembers.isThmMember(mc.player)) return;
-            String username = mc.player.getGameProfile().name();
             if (!hasApiToken()) return;
-            APIUtils.postCapeSelection(username, id, getApiToken());
+            APIUtils.postCapeSelection(id);
         })
         .build()
     );
