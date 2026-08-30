@@ -28,20 +28,40 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Properties;
 import java.util.Scanner;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 
 public class APIUtils {
-    // Filled in at build time from secrets.properties (git-ignored) - see generateApiSecrets in
-    // build.gradle.kts, which rewrites these exact literals in place. Never commit real values.
-    private static final String MEMBER_HUD_URL = "PLACEHOLDER_MEMBER_HUD_URL";
-    private static final String HIGHWAY_URL = "PLACEHOLDER_HIGHWAY_URL";
-    private static final String STATUS_URL = "PLACEHOLDER_STATUS_URL";
-    private static final String HIGHWAY_STATUS_URL = "PLACEHOLDER_HIGHWAY_STATUS_URL";
-    private static final String CAPE_URL = "PLACEHOLDER_CAPE_URL";
-    private static final String CAPE_POST_URL = "PLACEHOLDER_CAPE_POST_URL";
-    private static final String CAPE_INDEX_URL = "PLACEHOLDER_CAPE_INDEX_URL";
+    // This source file is never touched by the build - it always reads like this, placeholders
+    // included. The real URLs are loaded at runtime from a resource bundled into the jar by
+    // processResources (thm-secrets.properties, filled from secrets.properties at build time).
+    private static final String SECRETS_RESOURCE = "/thm-secrets.properties";
+
+    private static final String MEMBER_HUD_URL;
+    private static final String HIGHWAY_URL;
+    private static final String STATUS_URL;
+    private static final String HIGHWAY_STATUS_URL;
+    private static final String CAPE_URL;
+    private static final String CAPE_POST_URL;
+    private static final String CAPE_INDEX_URL;
+
+    static {
+        Properties props = new Properties();
+        try (InputStream in = APIUtils.class.getResourceAsStream(SECRETS_RESOURCE)) {
+            if (in != null) props.load(in);
+        } catch (IOException e) {
+            THMAddon.LOG.warn("Failed to load {}: {}", SECRETS_RESOURCE, e.getMessage());
+        }
+        MEMBER_HUD_URL = props.getProperty("api.memberHud", "PLACEHOLDER_MEMBER_HUD_URL");
+        HIGHWAY_URL = props.getProperty("api.highway", "PLACEHOLDER_HIGHWAY_URL");
+        STATUS_URL = props.getProperty("api.status", "PLACEHOLDER_STATUS_URL");
+        HIGHWAY_STATUS_URL = props.getProperty("api.highwayStatus", "PLACEHOLDER_HIGHWAY_STATUS_URL");
+        CAPE_URL = props.getProperty("api.cape", "PLACEHOLDER_CAPE_URL");
+        CAPE_POST_URL = props.getProperty("api.capePost", "PLACEHOLDER_CAPE_POST_URL");
+        CAPE_INDEX_URL = props.getProperty("api.capeIndex", "PLACEHOLDER_CAPE_INDEX_URL");
+    }
 
     private APIUtils() {}
 
