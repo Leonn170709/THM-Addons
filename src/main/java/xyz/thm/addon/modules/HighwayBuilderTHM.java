@@ -25,6 +25,7 @@ import meteordevelopment.meteorclient.mixininterface.IVec3d;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.renderer.text.TextRenderer;
 import meteordevelopment.meteorclient.settings.*;
+import meteordevelopment.meteorclient.systems.friends.Friends;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.combat.AutoTotem;
@@ -1183,7 +1184,7 @@ public class HighwayBuilderTHM extends Module {
 
     public final Setting<Boolean> noSwapLoadout = sgInventory.add(new BoolSetting.Builder()
         .name("offhand-build")
-        .description("Mine with the pickaxe in your main hand, place from obsidian in your offhand. Nothing ever swaps hotbar slots, which is faster and looks far less botlike. Takes over your offhand: Meteor's AutoTotem is turned off while this is on, and a totem is swapped in for you at low health instead.")
+        .description("Mines with the pickaxe in hand and places obsidian from the offhand, taking over AutoTotem to swap in a totem there at low health or when an enemy is nearby.")
         .defaultValue(false)
         .onChanged(v -> syncNoSwapAutoTotem())
         .build()
@@ -1191,7 +1192,7 @@ public class HighwayBuilderTHM extends Module {
 
     private final Setting<Integer> noSwapTotemHealth = sgInventory.add(new IntSetting.Builder()
         .name("offhand-totem-health")
-        .description("Health (counting incoming damage you could still take) at or below which the offhand holds a totem instead of obsidian. Placing falls back to normal hotbar swapping until you are back above it.")
+        .description("Health at or below which the offhand holds a totem instead of obsidian.")
         .defaultValue(10)
         .range(0, 36)
         .sliderMax(36)
@@ -6710,7 +6711,18 @@ public class HighwayBuilderTHM extends Module {
         if (mc.player == null) return false;
         float effective = mc.player.getHealth() + mc.player.getAbsorptionAmount()
             - PlayerUtils.possibleHealthReductions(true, true);
-        return effective <= noSwapTotemHealth.get();
+        return effective <= noSwapTotemHealth.get() || enemyInRenderDistance();
+    }
+
+    private boolean enemyInRenderDistance() {
+        if (mc.world == null) return false;
+        for (PlayerEntity player : mc.world.getPlayers()) {
+            if (player == mc.player || player.isSpectator()) continue;
+            if (Friends.get().isFriend(player)) continue;
+            if (THMSystem.get().ignoreThmMembers.get() && ThmMembers.isThmMember(player)) continue;
+            return true;
+        }
+        return false;
     }
 
     private boolean isPlaceableBlockStack(ItemStack stack) {
