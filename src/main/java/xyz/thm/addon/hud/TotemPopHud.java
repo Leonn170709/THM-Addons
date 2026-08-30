@@ -34,6 +34,13 @@ public class TotemPopHud extends HudElement {
         .build()
     );
 
+    private final Setting<Boolean> showInventoryCount = sgGeneral.add(new BoolSetting.Builder()
+        .name("show-inventory-count")
+        .description("Shows totems currently in your inventory instead of totems popped.")
+        .defaultValue(false)
+        .build()
+    );
+
     public TotemPopHud() {
         super(INFO);
         calculateSize();
@@ -46,8 +53,19 @@ public class TotemPopHud extends HudElement {
     @Override
     public void render(HudRenderer renderer) {
         ItemStack stack = new ItemStack(Items.TOTEM_OF_UNDYING, 1);
-        int pops = mc.player == null ? 0 : TotemTracker.get(mc.player);
+        int count = showInventoryCount.get() ? countTotemsInInventory() : TotemTracker.get(mc.player);
 
-        renderer.post(() -> renderer.item(stack, x, y, scale.get().floatValue(), true, String.valueOf(pops)));
+        renderer.post(() -> renderer.item(stack, x, y, scale.get().floatValue(), true, String.valueOf(count)));
+    }
+
+    private int countTotemsInInventory() {
+        if (mc.player == null) return 0;
+
+        int count = 0;
+        for (ItemStack stack : mc.player.getInventory().getMainStacks()) {
+            if (stack.getItem() == Items.TOTEM_OF_UNDYING) count += stack.getCount();
+        }
+        if (mc.player.getOffHandStack().getItem() == Items.TOTEM_OF_UNDYING) count += mc.player.getOffHandStack().getCount();
+        return count;
     }
 }
