@@ -55,7 +55,6 @@ src/main/java/xyz/thm/addon/modules/MCMapSender.java
 CLAUDE.md
 src/main/java/xyz/thm/addon/modules/SpearTargetPlus.java
 src/main/java/xyz/thm/addon/modules/WebmapModule.java
-src/main/java/xyz/thm/addon/utils/APIUtils.java
 local-checkpoints.md
 rollback-post-0918-undo-log.md
 src/main/java/xyz/thm/addon/modules/HandshakeHostTest.java

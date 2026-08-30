@@ -20,13 +20,17 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /** Downloads THM capes listed in the API's cape index to disk and registers them as textures on demand. */
 public final class CapeManager {
     public record CapeEntry(String id, String url) {}
 
     private static volatile String[] availableIds = {"None"};
+    // Rendered (e.g. on the KitBot NPC via its assigned cape) but hidden from the self-cape picker.
+    private static final Set<String> HIDDEN_CAPE_IDS = Set.of("kitbot");
     private static final Map<String, Identifier> textureCache = new HashMap<>();
     private static final Identifier MISSING = Identifier.of("thm-addon", "cape/missing");
 
@@ -46,8 +50,8 @@ public final class CapeManager {
         List<String> ids = new ArrayList<>();
         ids.add("None");
         for (CapeEntry entry : entries) {
-            ids.add(entry.id());
             downloadIfMissing(entry);
+            if (!HIDDEN_CAPE_IDS.contains(entry.id().toLowerCase(Locale.ROOT))) ids.add(entry.id());
         }
         availableIds = ids.toArray(new String[0]);
     }
