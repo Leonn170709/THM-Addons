@@ -28,44 +28,20 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Properties;
 import java.util.Scanner;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 
-/**
- * Talks to the THM API. The base URLs are not secrets worth hiding in the class file - every
- * request (GET included) carries the player's own THM API token as {@code Authorization: Bearer},
- * checked server-side, so knowing a URL alone grants nothing. The URLs themselves come from
- * {@code secrets.properties} (git-ignored) at build time, copied by {@code processResources} into
- * the jar as {@code thm-secrets.properties} and read here at class-init.
- */
 public class APIUtils {
-    private static final String SECRETS_RESOURCE = "/thm-secrets.properties";
-
-    private static final String MEMBER_HUD_URL;
-    private static final String HIGHWAY_URL;
-    private static final String STATUS_URL;
-    private static final String HIGHWAY_STATUS_URL;
-    private static final String CAPE_URL;
-    private static final String CAPE_POST_URL;
-    private static final String CAPE_INDEX_URL;
-
-    static {
-        Properties props = new Properties();
-        try (InputStream in = APIUtils.class.getResourceAsStream(SECRETS_RESOURCE)) {
-            if (in != null) props.load(in);
-        } catch (IOException e) {
-            THMAddon.LOG.warn("Failed to load {}: {}", SECRETS_RESOURCE, e.getMessage());
-        }
-        MEMBER_HUD_URL = props.getProperty("api.memberHud", "https://example.com/users");
-        HIGHWAY_URL = props.getProperty("api.highway", "https://example.com/");
-        STATUS_URL = props.getProperty("api.status", "https://example.com/");
-        HIGHWAY_STATUS_URL = props.getProperty("api.highwayStatus", "https://example.com/status");
-        CAPE_URL = props.getProperty("api.cape", "https://example.com/capes");
-        CAPE_POST_URL = props.getProperty("api.capePost", "https://example.com/capes/set");
-        CAPE_INDEX_URL = props.getProperty("api.capeIndex", "https://example.com/cape/index");
-    }
+    // Filled in at build time from secrets.properties (git-ignored) - see generateApiSecrets in
+    // build.gradle.kts, which rewrites these exact literals in place. Never commit real values.
+    private static final String MEMBER_HUD_URL = "PLACEHOLDER_MEMBER_HUD_URL";
+    private static final String HIGHWAY_URL = "PLACEHOLDER_HIGHWAY_URL";
+    private static final String STATUS_URL = "PLACEHOLDER_STATUS_URL";
+    private static final String HIGHWAY_STATUS_URL = "PLACEHOLDER_HIGHWAY_STATUS_URL";
+    private static final String CAPE_URL = "PLACEHOLDER_CAPE_URL";
+    private static final String CAPE_POST_URL = "PLACEHOLDER_CAPE_POST_URL";
+    private static final String CAPE_INDEX_URL = "PLACEHOLDER_CAPE_INDEX_URL";
 
     private APIUtils() {}
 
@@ -269,11 +245,6 @@ public class APIUtils {
         }
     }
 
-    /**
-     * Sets the cape for the currently logged-in player only - username and token are always
-     * derived from the local session, never accepted as parameters, so this can't be repurposed
-     * to change another player's cape even by a caller with a stolen token.
-     */
     public static void postCapeSelection(String cape) {
         if (mc.player == null) return;
         String username = mc.player.getGameProfile().name();

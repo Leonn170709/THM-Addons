@@ -4,6 +4,8 @@
  * By using this code you agree to the license terms and to keep your repo public.
  */
 
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.fabric.loom)
 }
@@ -39,6 +41,51 @@ dependencies {
     modCompileOnly(libs.baritone)
 }
 
+// APIUtils.java is checked into git with placeholder URL literals (PLACEHOLDER_*) - this task
+// rewrites those same string literals in place with real values from secrets.properties before
+// compiling. It targets each named constant by regex (not a one-shot token), so it's safe to run
+// again after secrets.properties changes even though the placeholder text is already gone after
+// the first run. The file is git-ignored, so the real values never get committed.
+val generateApiSecrets by tasks.registering {
+    val secretsFile = file("secrets.properties")
+    val secretsExampleFile = file("secrets.properties.example")
+    // Falls back to the example (placeholder example.com URLs) so contributors without the
+    // real secrets.properties can still build - real API calls just won't resolve to anything.
+    val activeSecretsFile = if (secretsFile.exists()) secretsFile else secretsExampleFile
+    if (activeSecretsFile == secretsExampleFile) {
+        logger.lifecycle("secrets.properties not found - building with placeholder URLs from secrets.properties.example. Copy it to secrets.properties and fill in real URLs for working API calls.")
+    }
+
+    val props = Properties()
+    activeSecretsFile.bufferedReader(Charsets.UTF_8).use<java.io.Reader, Unit> { props.load(it) }
+    fun req(k: String) = props.getProperty(k) ?: error("secrets.properties missing key: $k")
+
+    val apiUtilsFile = file("src/main/java/xyz/thm/addon/utils/APIUtils.java")
+    val urlsByConstant = mapOf(
+        "MEMBER_HUD_URL" to req("api.memberHud"),
+        "HIGHWAY_URL" to req("api.highway"),
+        "STATUS_URL" to req("api.status"),
+        "HIGHWAY_STATUS_URL" to req("api.highwayStatus"),
+        "CAPE_URL" to req("api.cape"),
+        "CAPE_POST_URL" to req("api.capePost"),
+        "CAPE_INDEX_URL" to req("api.capeIndex"),
+    )
+
+    inputs.file(activeSecretsFile)
+    outputs.file(apiUtilsFile)
+    outputs.upToDateWhen { false }
+
+    doLast {
+        var content = apiUtilsFile.readText(Charsets.UTF_8)
+        for ((constant, url) in urlsByConstant) {
+            val pattern = Regex("""(private static final String $constant\s*=\s*")[^"]*(";)""")
+            if (!pattern.containsMatchIn(content)) error("APIUtils.java: could not find constant $constant to fill in")
+            content = pattern.replace(content) { m -> m.groupValues[1] + url + m.groupValues[2] }
+        }
+        apiUtilsFile.writeText(content, Charsets.UTF_8)
+    }
+}
+
 sourceSets {
     main {
         java {
@@ -53,19 +100,6 @@ sourceSets {
 
 tasks {
     processResources {
-        // Falls back to the example (placeholder example.com URLs) so contributors without the
-        // real secrets.properties can still build - real API calls just won't resolve to anything.
-        val secretsFile = file("secrets.properties")
-        val secretsExampleFile = file("secrets.properties.example")
-        val activeSecretsFile = if (secretsFile.exists()) secretsFile else secretsExampleFile
-        if (activeSecretsFile == secretsExampleFile) {
-            logger.lifecycle("secrets.properties not found - building with placeholder URLs from secrets.properties.example. Copy it to secrets.properties and fill in real URLs for working API calls.")
-        }
-        inputs.file(activeSecretsFile)
-        from(activeSecretsFile) {
-            rename { "thm-secrets.properties" }
-        }
-
         val propertyMap = mapOf(
             "version" to project.version,
             "mc_version" to libs.versions.minecraft.get(),
@@ -119,6 +153,7 @@ tasks {
     }
 
     withType<JavaCompile> {
+        dependsOn(generateApiSecrets)
         options.encoding = "UTF-8"
         options.release = 21
         options.isFork = true
