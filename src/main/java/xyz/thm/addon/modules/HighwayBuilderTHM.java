@@ -835,6 +835,28 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+    // Settings-sync convenience only - doesn't change HighwayBuilder's own mining logic anywhere.
+    private final Setting<Boolean> alwaysUseThmSpeedmine = sgDigging.add(new BoolSetting.Builder()
+        .name("always-use-thm-speedmine")
+        .description("Keeps the THM Speedmine module (PVP category) active while this runs.")
+        .defaultValue(false)
+        .onChanged(value -> {
+            if (value && Speedmine.INSTANCE != null && !Speedmine.INSTANCE.isActive()) Speedmine.INSTANCE.toggle();
+        })
+        .build()
+    );
+
+    private final Setting<Boolean> thmSpeedmineValidateBlock = sgDigging.add(new BoolSetting.Builder()
+        .name("validate-block")
+        .description("Sets THM Speedmine's own Validate Break setting.")
+        .defaultValue(false)
+        .visible(alwaysUseThmSpeedmine::get)
+        .onChanged(value -> {
+            if (Speedmine.INSTANCE != null) Speedmine.INSTANCE.validateBreak.set(value);
+        })
+        .build()
+    );
+
     private final Setting<Boolean> dontBreakTools = sgDigging.add(new BoolSetting.Builder()
         .name("dont-break-tools")
         .description("Don't break tools.")
