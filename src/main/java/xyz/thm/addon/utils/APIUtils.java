@@ -16,10 +16,6 @@ import xyz.thm.addon.system.THMSystem;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.SecureRandom;
@@ -28,40 +24,21 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Properties;
-import java.util.Scanner;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 
+/**
+ * Talks to the THM API. Endpoint URLs live encrypted in {@link GeneratedApiEndpoints} (build-time
+ * generated, git-ignored); this file stays plain and is never touched by the build. Every request
+ * goes through {@link TrustedHttp}, which rejects SSRF targets, cross-host redirects, and
+ * oversized responses. Response bodies are treated as untrusted data.
+ */
 public class APIUtils {
-    // This source file is never touched by the build - it always reads like this, placeholders
-    // included. The real URLs are loaded at runtime from a resource bundled into the jar by
-    // processResources (thm-secrets.properties, filled from secrets.properties at build time).
-    private static final String SECRETS_RESOURCE = "/thm-secrets.properties";
-
-    private static final String MEMBER_HUD_URL;
-    private static final String HIGHWAY_URL;
-    private static final String STATUS_URL;
-    private static final String HIGHWAY_STATUS_URL;
-    private static final String CAPE_URL;
-    private static final String CAPE_POST_URL;
-    private static final String CAPE_INDEX_URL;
-
-    static {
-        Properties props = new Properties();
-        try (InputStream in = APIUtils.class.getResourceAsStream(SECRETS_RESOURCE)) {
-            if (in != null) props.load(in);
-        } catch (IOException e) {
-            THMAddon.LOG.warn("Failed to load {}: {}", SECRETS_RESOURCE, e.getMessage());
-        }
-        MEMBER_HUD_URL = props.getProperty("api.memberHud", "PLACEHOLDER_MEMBER_HUD_URL");
-        HIGHWAY_URL = props.getProperty("api.highway", "PLACEHOLDER_HIGHWAY_URL");
-        STATUS_URL = props.getProperty("api.status", "PLACEHOLDER_STATUS_URL");
-        HIGHWAY_STATUS_URL = props.getProperty("api.highwayStatus", "PLACEHOLDER_HIGHWAY_STATUS_URL");
-        CAPE_URL = props.getProperty("api.cape", "PLACEHOLDER_CAPE_URL");
-        CAPE_POST_URL = props.getProperty("api.capePost", "PLACEHOLDER_CAPE_POST_URL");
-        CAPE_INDEX_URL = props.getProperty("api.capeIndex", "PLACEHOLDER_CAPE_INDEX_URL");
-    }
+    private static final Gson GSON = new Gson();
+    private static final int MAX_MEMBERS = 4_000;
+    private static final int MAX_USERNAMES_PER_MEMBER = 32;
+    private static final int MAX_CAPES = 64;
+    private static final int MAX_HIGHWAY_ROWS = 8_000;
 
     private APIUtils() {}
 
@@ -109,119 +86,108 @@ public class APIUtils {
         }
     }
 
-    private static String httpGet(String url) {
-        try {
-            HttpURLConnection cn = (HttpURLConnection) new URI(url).toURL().openConnection();
-            cn.setRequestMethod("GET");
-            cn.setConnectTimeout(5000);
-            cn.setReadTimeout(5000);
-            String token = apiToken();
-            if (!token.isEmpty()) cn.setRequestProperty("Authorization", "Bearer " + token);
-
-            if (cn.getResponseCode() != 200) {
-                cn.disconnect();
-                return null;
-            }
-            StringBuilder sb = new StringBuilder();
-            try (Scanner sc = new Scanner(cn.getInputStream())) {
-                while (sc.hasNextLine()) sb.append(sc.nextLine());
-            }
-            cn.disconnect();
-            return sb.toString();
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private static void httpPostJson(String url, String json, String token, String logLabel) {
-        new Thread(() -> {
-            HttpURLConnection cn = null;
-            try {
-                cn = (HttpURLConnection) new URI(url).toURL().openConnection();
-                cn.setRequestMethod("POST");
-                cn.setRequestProperty("Content-Type", "application/json");
-                if (token != null && !token.isEmpty()) cn.setRequestProperty("Authorization", "Bearer " + token);
-                cn.setDoOutput(true);
-                cn.setConnectTimeout(10000);
-                cn.setReadTimeout(10000);
-
-                byte[] body = json.getBytes(StandardCharsets.UTF_8);
-                try (OutputStream os = cn.getOutputStream()) {
-                    os.write(body, 0, body.length);
-                    os.flush();
-                }
-
-                int rc = cn.getResponseCode();
-                try (InputStream is = rc >= 400 ? cn.getErrorStream() : cn.getInputStream()) {
-                    if (is != null) is.readAllBytes();
-                }
-                if (rc != 204 && rc != 200) THMAddon.LOG.warn("{} response code: {}", logLabel, rc);
-            } catch (Exception e) {
-                THMAddon.LOG.warn("Failed to send {}: {}", logLabel, e.getMessage());
-            } finally {
-                if (cn != null) cn.disconnect();
-            }
-        }).start();
+    private static String jsonContent(String message) {
+        return "{\"content\": \"" + message.replace("\"", "\\\"") + "\"}";
     }
 
     public static void sendStatus(String message) {
-        httpPostJson(STATUS_URL, "{\"content\": \"" + message.replace("\"", "\\\"") + "\"}", apiToken(), "status");
+        new Thread(() ->
+            TrustedHttp.postJson(GeneratedApiEndpoints.statusUrl(), jsonContent(message), TrustedHttp.Kind.API, apiToken()),
+            "thm-status").start();
     }
 
     public static void sendStatistics(String message) {
-        httpPostJson(HIGHWAY_URL, "{\"content\": \"" + message.replace("\"", "\\\"") + "\"}", apiToken(), "statistics");
+        new Thread(() ->
+            TrustedHttp.postJson(GeneratedApiEndpoints.highwayUrl(), jsonContent(message), TrustedHttp.Kind.API, apiToken()),
+            "thm-statistics").start();
     }
 
     // Discord webhook URL, supplied by the player at runtime - never attach our API token to it.
     public static void sendToWebhook(String url, String message) {
-        httpPostJson(url, "{\"content\": \"" + message.replace("\"", "\\\"") + "\"}", null, "webhook");
+        new Thread(() ->
+            TrustedHttp.postJson(url, jsonContent(message), TrustedHttp.Kind.USER_WEBHOOK, null),
+            "thm-webhook").start();
+    }
+
+    private static String stringField(JsonObject o, String field) {
+        return o.has(field) && o.get(field).isJsonPrimitive() ? o.get(field).getAsString() : "";
     }
 
     public static List<ThmMembers.Member> fetchMembersFromApi() {
         try {
-            String response = httpGet(MEMBER_HUD_URL);
+            String response = TrustedHttp.getString(GeneratedApiEndpoints.memberHudUrl(), TrustedHttp.Kind.API, TrustedHttp.MAX_JSON_BYTES);
             if (response == null) return null;
-            THMAddon.LOG.info("Fetched Members");
 
-            Gson gson = new Gson();
-            JsonArray jsonArray = gson.fromJson(response, JsonArray.class);
+            JsonArray jsonArray = GSON.fromJson(response, JsonArray.class);
+            if (jsonArray == null) return null;
+            if (jsonArray.size() > MAX_MEMBERS) {
+                THMAddon.LOG.warn("Member list exceeded {} entries; ignoring remote payload", MAX_MEMBERS);
+                return null;
+            }
+
             List<ThmMembers.Member> members = new ArrayList<>();
             for (int i = 0; i < jsonArray.size(); i++) {
-                JsonObject jsonObject = jsonArray.get(i).getAsJsonObject();
+                JsonElement element = jsonArray.get(i);
+                if (element == null || !element.isJsonObject()) continue;
+                JsonObject jsonObject = element.getAsJsonObject();
                 JsonArray usernamesArray = jsonObject.getAsJsonArray("usernames");
-                String[] usernames = new String[usernamesArray.size()];
-                for (int j = 0; j < usernamesArray.size(); j++) usernames[j] = usernamesArray.get(j).getAsString();
+                if (usernamesArray == null) continue;
 
-                String rank = jsonObject.get("rank").getAsString();
-                String rankId = jsonObject.has("rankId") ? jsonObject.getAsJsonPrimitive("rankId").getAsString() : "";
-                String branch = jsonObject.has("branch") ? jsonObject.getAsJsonPrimitive("branch").getAsString() : "";
-                String discordName = jsonObject.has("discordname") ? jsonObject.getAsJsonPrimitive("discordname").getAsString() : "";
-                String displayName = usernames.length > 0 ? usernames[0] : "Unknown";
+                int count = Math.min(usernamesArray.size(), MAX_USERNAMES_PER_MEMBER);
+                List<String> valid = new ArrayList<>(count);
+                for (int j = 0; j < count; j++) {
+                    JsonElement nameEl = usernamesArray.get(j);
+                    if (nameEl == null || !nameEl.isJsonPrimitive()) continue;
+                    String name = nameEl.getAsString();
+                    if (isMinecraftUsername(name)) valid.add(name);
+                }
+                if (valid.isEmpty()) continue;
+
+                String rank = stringField(jsonObject, "rank");
+                String rankId = stringField(jsonObject, "rankId");
+                String branch = stringField(jsonObject, "branch");
+                String discordName = stringField(jsonObject, "discordname");
+                String displayName = valid.get(0);
                 if (discordName.isEmpty()) discordName = displayName;
 
-                members.add(new ThmMembers.Member(displayName, usernames, rank, rankId, branch, discordName));
+                members.add(new ThmMembers.Member(displayName, valid.toArray(new String[0]), rank, rankId, branch, discordName));
             }
+            THMAddon.LOG.info("Fetched Members");
             return members;
         } catch (Exception e) {
             THMAddon.LOG.warn("Error fetching members from API: {}", e.getMessage());
+            return null;
         }
-        return null;
+    }
+
+    private static boolean isMinecraftUsername(String name) {
+        if (name == null || name.isEmpty() || name.length() > 16) return false;
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            boolean ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+            if (!ok) return false;
+        }
+        return true;
     }
 
     public static Map<String, String> fetchHighwayStatusFromApi() {
         try {
-            String body = httpGet(HIGHWAY_STATUS_URL);
+            String body = TrustedHttp.getString(GeneratedApiEndpoints.highwayStatusUrl(), TrustedHttp.Kind.API, TrustedHttp.MAX_JSON_BYTES);
             if (body == null) return null;
 
-            Gson gson = new Gson();
-            JsonObject root = gson.fromJson(body, JsonObject.class);
+            JsonObject root = GSON.fromJson(body, JsonObject.class);
             Map<String, String> highwayByName = new HashMap<>();
             Map<String, Long> newestTimestampByName = new HashMap<>();
             if (root != null) {
+                if (root.size() > MAX_HIGHWAY_ROWS) {
+                    THMAddon.LOG.warn("Highway status payload exceeded {} entries; ignoring remote payload", MAX_HIGHWAY_ROWS);
+                    return highwayByName;
+                }
                 for (Map.Entry<String, JsonElement> entry : root.entrySet()) {
                     String highway = entry.getKey();
+                    if (!entry.getValue().isJsonObject()) continue;
                     JsonObject value = entry.getValue().getAsJsonObject();
-                    if (value == null || !value.has("username")) continue;
+                    if (!value.has("username")) continue;
 
                     String raw = value.get("username").getAsString().trim().toLowerCase(Locale.ROOT);
                     if (raw.isEmpty() || "unknown".equals(raw)) continue;
@@ -243,19 +209,20 @@ public class APIUtils {
 
     public static Map<String, String> fetchCapeListFromApi() {
         try {
-            String body = httpGet(CAPE_URL);
+            String body = TrustedHttp.getString(GeneratedApiEndpoints.capeListUrl(), TrustedHttp.Kind.API, TrustedHttp.MAX_JSON_BYTES);
             if (body == null) return null;
 
-            Gson gson = new Gson();
-            JsonObject root = gson.fromJson(body, JsonObject.class);
+            JsonObject root = GSON.fromJson(body, JsonObject.class);
             if (root == null || !root.has("players")) return null;
 
             JsonObject players = root.getAsJsonObject("players");
             Map<String, String> result = new HashMap<>();
             for (Map.Entry<String, JsonElement> entry : players.entrySet()) {
+                if (result.size() >= MAX_MEMBERS) break;
                 String key = entry.getKey().toLowerCase(Locale.ROOT);
+                if (!entry.getValue().isJsonObject()) continue;
                 JsonObject p = entry.getValue().getAsJsonObject();
-                if (p != null && p.has("cape")) result.put(key, p.get("cape").getAsString());
+                if (p.has("cape")) result.put(key, p.get("cape").getAsString());
             }
             THMAddon.LOG.info("Fetched Cape List");
             return result;
@@ -275,23 +242,24 @@ public class APIUtils {
             + "\",\"cape\":\"" + cape.replace("\"", "\\\"")
             + "\",\"timestamp\":" + System.currentTimeMillis()
             + ",\"token\":\"" + token.replace("\"", "\\\"") + "\"}";
-        httpPostJson(CAPE_POST_URL, json, token, "cape POST");
+        new Thread(() -> TrustedHttp.postJson(GeneratedApiEndpoints.capePostUrl(), json, TrustedHttp.Kind.API, token), "thm-cape-post").start();
     }
 
     public static List<CapeManager.CapeEntry> fetchCapeIndexFromApi() {
         try {
-            String body = httpGet(CAPE_INDEX_URL);
+            String body = TrustedHttp.getString(GeneratedApiEndpoints.capeIndexUrl(), TrustedHttp.Kind.API, TrustedHttp.MAX_JSON_BYTES);
             if (body == null) return null;
 
-            Gson gson = new Gson();
-            JsonObject root = gson.fromJson(body, JsonObject.class);
+            JsonObject root = GSON.fromJson(body, JsonObject.class);
             if (root == null || !root.has("capes")) return null;
 
             JsonArray arr = root.getAsJsonArray("capes");
             List<CapeManager.CapeEntry> result = new ArrayList<>();
-            for (int i = 0; i < arr.size(); i++) {
-                JsonObject o = arr.get(i).getAsJsonObject();
-                if (o == null || !o.has("id") || !o.has("url")) continue;
+            for (int i = 0; i < arr.size() && result.size() < MAX_CAPES; i++) {
+                JsonElement element = arr.get(i);
+                if (element == null || !element.isJsonObject()) continue;
+                JsonObject o = element.getAsJsonObject();
+                if (!o.has("id") || !o.has("url")) continue;
                 result.add(new CapeManager.CapeEntry(o.get("id").getAsString(), o.get("url").getAsString()));
             }
             return result;

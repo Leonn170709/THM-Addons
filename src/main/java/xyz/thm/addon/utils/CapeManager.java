@@ -14,8 +14,6 @@ import net.minecraft.util.Identifier;
 import xyz.thm.addon.THMAddon;
 
 import java.io.File;
-import java.net.HttpURLConnection;
-import java.net.URI;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -28,6 +26,10 @@ import java.util.regex.Pattern;
 /** Downloads THM capes listed in the API's cape index to disk and registers them as textures on demand. */
 public final class CapeManager {
     public record CapeEntry(String id, String url) {}
+
+    // Capes are full texture images, not JSON metadata - much larger cap than TrustedHttp's
+    // default JSON-response limit.
+    private static final int MAX_CAPE_BYTES = 50 * 1024 * 1024;
 
     private static volatile String[] availableIds = {"None"};
     // Rendered (e.g. on the KitBot NPC via its assigned cape) but hidden from the self-cape picker.
@@ -66,21 +68,11 @@ public final class CapeManager {
         if (file.exists()) return;
 
         try {
-            URI uri = new URI(entry.url());
-            if (!"https".equalsIgnoreCase(uri.getScheme())) {
-                THMAddon.LOG.warn("Ignoring cape '{}' with non-https URL", entry.id());
+            byte[] bytes = TrustedHttp.getBytes(entry.url(), TrustedHttp.Kind.IMAGE, MAX_CAPE_BYTES);
+            if (bytes == null) {
+                THMAddon.LOG.warn("Failed to download cape '{}'", entry.id());
                 return;
             }
-            HttpURLConnection cn = (HttpURLConnection) uri.toURL().openConnection();
-            cn.setRequestMethod("GET");
-            cn.setConnectTimeout(10000);
-            cn.setReadTimeout(10000);
-            if (cn.getResponseCode() != 200) {
-                cn.disconnect();
-                return;
-            }
-            byte[] bytes = cn.getInputStream().readAllBytes();
-            cn.disconnect();
 
             file.getParentFile().mkdirs();
             Files.write(file.toPath(), bytes);
