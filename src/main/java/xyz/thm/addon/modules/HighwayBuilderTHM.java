@@ -3299,6 +3299,12 @@ public class HighwayBuilderTHM extends Module {
             )
         );
 
+        // The wiggle itself is what moved the player; undo that unless something actually
+        // points to a genuine server-side desync.
+        if (!probe.correctionPacketObserved && !positionJumpEvidence && mc.player != null) {
+            mc.player.setPosition(probe.startX, probe.startY, probe.startZ);
+        }
+
         desyncWiggleProbe = null;
 
         if (probe.reason == DesyncWiggleReason.ForwardPacketDesync && isActive()) {
@@ -4109,6 +4115,8 @@ public class HighwayBuilderTHM extends Module {
         if (!hasCapturedReconnectBaselineLease(generation)) {
             if (reconnectBaselineLease != null && reconnectBaselineLease.generation() == generation) return false;
             if (centerSpeedOverrideActive) return false;
+            // Otherwise a mid-mining Timer boost gets captured as "normal" and never turns off after resume.
+            restoreEChestBreakSpeedIfOwned("monitor-reconnect-pause-prep");
 
             ReconnectBaselinePayload payload = captureReconnectBaselinePayload();
             if (payload == null) return false;
@@ -4357,6 +4365,11 @@ public class HighwayBuilderTHM extends Module {
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
         safetyPlacedThisTick = false;
+
+        // ponytail: self-heal against whatever race leaves this owned outside MineEnderChests, instead of chasing it.
+        if (eChestBreakSpeedSnapshotOwned && state != State.MineEnderChests) {
+            restoreEChestBreakSpeedIfOwned("safety-net-not-mining");
+        }
 
         maybeCheckpointStatsSession();
 
