@@ -8,7 +8,6 @@ package xyz.thm.addon.utils;
 
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
-import net.minecraft.block.BlockState;
 import net.minecraft.block.ScaffoldingBlock;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.decoration.ItemFrameEntity;
@@ -43,6 +42,7 @@ public class PearlPhaser {
     /** Null when built without extras. */
     public final Setting<Boolean> attack;
     public final Setting<Boolean> swing;
+    public final Setting<Boolean> antiAntiPhase;
     /** Null when built without extras. */
     public final Setting<Boolean> selfFill;
     public final Setting<Boolean> selfPlace;
@@ -100,6 +100,13 @@ public class PearlPhaser {
         swing = sgPearl.add(new BoolSetting.Builder()
             .name("swing")
             .description("Swings the hand when throwing pearls.")
+            .defaultValue(true)
+            .visible(visible::getAsBoolean)
+            .build()
+        );
+        antiAntiPhase = sgPearl.add(new BoolSetting.Builder()
+            .name("anti-anti-phase")
+            .description("Breaks scaffolding placed inside you, in the same tick as the throw.")
             .defaultValue(true)
             .visible(visible::getAsBoolean)
             .build()
@@ -180,6 +187,9 @@ public class PearlPhaser {
             throwPitch = pitch.get();
         }
 
+        if (antiAntiPhase.get()) {
+            breakScaffolding();
+        }
         if (on(attack)) {
             handlePearlAttacks(yaw);
         }
@@ -238,11 +248,16 @@ public class PearlPhaser {
                 mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
             }
         }
-        BlockState state = mc.world.getBlockState(mc.player.getBlockPos());
-        if (state.getBlock() instanceof ScaffoldingBlock) {
-            BlockPos pos = mc.player.getBlockPos();
+    }
+
+    /** Scaffolding is 0-hardness, so a START+STOP pair breaks it instantly and the pearl still leaves this tick. */
+    private void breakScaffolding() {
+        BlockPos feet = mc.player.getBlockPos();
+        for (BlockPos pos : new BlockPos[]{feet, feet.up()}) {
+            if (!(mc.world.getBlockState(pos).getBlock() instanceof ScaffoldingBlock)) continue;
             mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, Direction.UP));
             mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, Direction.UP));
+            mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
         }
     }
 

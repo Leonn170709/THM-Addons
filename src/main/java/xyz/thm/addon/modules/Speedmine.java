@@ -141,6 +141,13 @@ public class Speedmine extends Module {
         .visible(autoMine::get)
         .build());
 
+    public final Setting<Boolean> neverMineOwn = sgAuto.add(new BoolSetting.Builder()
+        .name("never-mine-own")
+        .description("Never auto-mine blocks touching you.")
+        .defaultValue(true)
+        .visible(autoMine::get)
+        .build());
+
     public final Setting<Boolean> autoDoubleMine = sgAuto.add(new BoolSetting.Builder()
         .name("auto-double-mine")
         .description("Break two auto-mine targets at once, using double-break.")
@@ -614,9 +621,16 @@ public class Speedmine extends Module {
         return new BlockPos(enemy.getBlockX(), (int) Math.round(enemy.getY()), enemy.getBlockZ());
     }
 
+    /** True if the block is inside or directly against our own hitbox — breaking it drops or exposes us. */
+    private boolean touchesSelf(BlockPos pos) {
+        return mc.player.getBoundingBox().expand(1).intersects(
+            pos.getX(), pos.getY(), pos.getZ(), pos.getX() + 1, pos.getY() + 1, pos.getZ() + 1);
+    }
+
     private boolean mineable(BlockPos pos) {
         BlockState state = mc.world.getBlockState(pos);
         if (state.isAir()) return false;
+        if (neverMineOwn.get() && touchesSelf(pos)) return false;
         // Bedrock's hardness is -1, so BlockUtils.canBreak always rejects it — it has to be checked first
         if (state.isOf(Blocks.BEDROCK)) return mineBedrock.get() && canSwing();
         return !bedrockOnly.get() && BlockUtils.canBreak(pos, state);
