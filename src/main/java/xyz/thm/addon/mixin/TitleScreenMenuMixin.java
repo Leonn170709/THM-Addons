@@ -117,7 +117,7 @@ public abstract class TitleScreenMenuMixin extends Screen {
 
     // Chrome is drawn before super.render() (which draws the buttons) so the buttons sit on
     // top of the window frame, not under it. The particle trail is handled globally by
-    // MenuParticlesMixin (every world-not-loaded screen, not just this one).
+    // ScreenMixin (every world-not-loaded screen, not just this one).
     @Inject(method = "render", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/screen/Screen;render(Lnet/minecraft/client/gui/DrawContext;IIF)V"))
     private void thm$renderWindowChrome(DrawContext context, int mouseX, int mouseY, float deltaTicks, CallbackInfo ci) {
         if (MainMenuFx.previewMode) return;

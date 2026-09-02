@@ -15,4 +15,13 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 public interface LivingEntityAccessor {
     @Accessor("limbAnimator")
     LimbAnimator thm$getLimbAnimator();
+
+    @Accessor("lastBodyYaw")
+    void thm$setLastBodyYaw(float value);
+
+    @Accessor("headYaw")
+    void thm$setHeadYaw(float value);
+
+    @Accessor("lastHeadYaw")
+    void thm$setLastHeadYaw(float value);
 }

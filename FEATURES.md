@@ -41,6 +41,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 - `auto-trap+` — Traps a target player. Adds an optional anti-cheat friendly support placement mode.
 - `surround-plus` — Surrounds feet with Obsidian using strict logic.
 - `phase` — Allows player to phase through solid blocks using ender pearls.
+- `anti-phase` — Places scaffolding inside players so their pearls land instead of phasing them.
 - `AutoConcrete` — Drops falling blocks above enemies' heads.
 - `AntiConcrete` — Places a button under yourself when enemies are nearby or dropping blocks above you.
 - `AntiConcreteDetection` — Breaks buttons and torches inside enemy hit-box.

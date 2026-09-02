@@ -132,6 +132,12 @@ public class SurroundPlus extends Module {
         .defaultValue(true)
         .build()
     );
+    private final Setting<Boolean> desyncProtection = sgPlace.add(new BoolSetting.Builder()
+        .name("desync-protection")
+        .description("Removes a client-side block when a crystal spawns inside it (desynced from server).")
+        .defaultValue(true)
+        .build()
+    );
     private final Setting<Boolean> headLevel = sgPlace.add(new BoolSetting.Builder()
         .name("head-level")
         .description("Also places surround at Y+1.")
@@ -211,6 +217,13 @@ public class SurroundPlus extends Module {
         .name("center-mode")
         .description("Method used to center the player.")
         .defaultValue(CenterMode.NCP)
+        .build()
+    );
+
+    private final Setting<Boolean> phased = sgCenter.add(new BoolSetting.Builder()
+        .name("phased")
+        .description("Skips centering while standing inside a solid client-side block.")
+        .defaultValue(false)
         .build()
     );
 
@@ -433,6 +446,7 @@ public class SurroundPlus extends Module {
 
     private void handleCentering() {
         if (centerMode.get() != CenterMode.NCP) return;
+        if (phased.get() && !mc.world.getBlockState(mc.player.getBlockPos()).isReplaceable()) return;
 
         Vec3d centerPos = Vec3d.ofBottomCenter(mc.player.getBlockPos());
         double xDiff = Math.abs(centerPos.x - mc.player.getX());
@@ -519,7 +533,6 @@ public class SurroundPlus extends Module {
     @EventHandler
     private void onPacketReceive(PacketEvent.Receive event) {
         if (mc.player == null || mc.world == null) return;
-        if (timingMode.get() != TimingMode.Sequential) return;
 
         if (event.packet instanceof BundlePacket<?> bundle) {
             for (Object sub : bundle.getPackets()) {
@@ -531,6 +544,13 @@ public class SurroundPlus extends Module {
     }
 
     private void handlePacket(Packet<?> packet) {
+        if (packet instanceof EntitySpawnS2CPacket p && desyncProtection.get() && p.getEntityType() == EntityType.END_CRYSTAL) {
+            BlockPos pos = BlockPos.ofFloored(p.getX(), p.getY(), p.getZ());
+            if (!mc.world.getBlockState(pos).isReplaceable()) mc.world.setBlockState(pos, Blocks.AIR.getDefaultState());
+        }
+
+        if (timingMode.get() != TimingMode.Sequential) return;
+
         if (packet instanceof BlockUpdateS2CPacket p) {
             BlockPos pos = p.getPos();
             if (!surroundCache.contains(pos)) return;

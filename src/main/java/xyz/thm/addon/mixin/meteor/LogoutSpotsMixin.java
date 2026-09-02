@@ -109,7 +109,7 @@ public abstract class LogoutSpotsMixin {
         entityPos.thm$setLastRenderY(y);
         entityPos.thm$setLastRenderZ(z);
 
-        LivingEntityRotationAccessor rot = (LivingEntityRotationAccessor) ghost;
+        LivingEntityAccessor rot = (LivingEntityAccessor) ghost;
         rot.thm$setHeadYaw(poseData.thm$getHeadYaw());
         rot.thm$setLastHeadYaw(poseData.thm$getHeadYaw());
         ghost.setBodyYaw(poseData.thm$getBodyYaw());
