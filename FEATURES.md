@@ -45,7 +45,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 - `AutoConcrete` — Drops falling blocks above enemies' heads.
 - `AntiConcrete` — Places a button under yourself when enemies are nearby or dropping blocks above you.
 - `AntiConcreteDetection` — Breaks buttons and torches inside enemy hit-box.
-- `AntiFeetPlace` — Interrupts enemies FeetPlace with ender-chests.
+- `AntiFeetPlace` — Interrupts enemies FeetPlace with a chosen block (ender chest by default).
 - `armor-notify` — Notifies you when your armor pieces are low.
 
 ## HUD Widgets

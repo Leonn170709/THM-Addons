@@ -20,6 +20,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
@@ -35,13 +36,17 @@ import java.util.List;
 public class AntiFeetPlace extends Module {
     public AntiFeetPlace() {
         super(THMAddon.PVP, "AntiFeetPlace",
-            "Interrupts Enemies FeetPlace with ender-chests.");
+            "Interrupts Enemies FeetPlace with a chosen block.");
     }
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgFilters = settings.createGroup("Filters");
 
     // -------------------- General Settings -------------------- //
+    private final Setting<List<Block>> blocks = sgGeneral.add(new BlockListSetting.Builder()
+        .name("blocks").defaultValue(Blocks.ENDER_CHEST)
+        .description("Blocks used to interrupt the feet place.").build());
+
     private final Setting<Double> range = sgGeneral.add(new DoubleSetting.Builder()
         .name("range").defaultValue(5.2).min(1).sliderMax(8)
         .description("Max target range.").build());
@@ -64,7 +69,7 @@ public class AntiFeetPlace extends Module {
 
     private final Setting<Boolean> disableAfterPlace = sgGeneral.add(new BoolSetting.Builder()
         .name("disable-after-place").defaultValue(false)
-        .description("If true, toggle off immediately after placing the ender chest.").build());
+        .description("If true, toggle off immediately after placing the block.").build());
 
     private final Setting<Integer> postPlacePause = sgGeneral.add(new IntSetting.Builder()
         .name("post-place-pause").defaultValue(40).min(0).sliderMax(200)
@@ -73,7 +78,7 @@ public class AntiFeetPlace extends Module {
 
     private final Setting<Boolean> waitWhileChestPresent = sgGeneral.add(new BoolSetting.Builder()
         .name("wait-while-chest-present").defaultValue(true)
-        .description("While an ender chest sits under the chosen surround, don't mine below again.").build());
+        .description("While the block sits under the chosen surround, don't mine below again.").build());
 
     private final Setting<Integer> maxWaitChestTicks = sgGeneral.add(new IntSetting.Builder()
         .name("max-wait-chest-ticks").defaultValue(0).min(0).sliderMax(2000)
@@ -82,16 +87,16 @@ public class AntiFeetPlace extends Module {
 
     private final Setting<Boolean> retargetWhileChestPresent = sgGeneral.add(new BoolSetting.Builder()
         .name("retarget-while-chest-present").defaultValue(true)
-        .description("Tap the surround periodically while the chest exists so AutoMine keeps that hole open.").build());
+        .description("Tap the surround periodically while the block exists so AutoMine keeps that hole open.").build());
 
     private final Setting<Integer> waitRetargetInterval = sgGeneral.add(new IntSetting.Builder()
         .name("wait-retarget-interval").defaultValue(3).min(1).sliderMax(20)
-        .description("How often (ticks) to tap the surround while waiting on the chest.")
+        .description("How often (ticks) to tap the surround while waiting on the block.")
         .visible(retargetWhileChestPresent::get).build());
 
     private final Setting<Boolean> placeBridge = sgGeneral.add(new BoolSetting.Builder()
         .name("place-obsidian-bridge").defaultValue(true)
-        .description("Place obsidian beside the chest (same Y) – any available side.").build());
+        .description("Place obsidian beside the block (same Y) – any available side.").build());
 
     private final Setting<Boolean> bridgeMineIfBlocking = sgGeneral.add(new BoolSetting.Builder()
         .name("bridge-mine-if-blocking").defaultValue(true)
@@ -201,7 +206,7 @@ public class AntiFeetPlace extends Module {
                 BlockState bs = mc.world.getBlockState(below);
                 boolean ok = true;
 
-                if (bs.isOf(Blocks.ENDER_CHEST) && waitWhileChestPresent.get()) { best = preferredSurround; bestDir = facingMe; bestDist = 0; }
+                if (isBlocker(bs) && waitWhileChestPresent.get()) { best = preferredSurround; bestDir = facingMe; bestDist = 0; }
                 else {
                     if (skipUnbreakableBelow.get()) {
                         float hardness = bs.getHardness(mc.world, below);
@@ -227,7 +232,7 @@ public class AntiFeetPlace extends Module {
                 BlockPos below = p.down();
                 BlockState bs = mc.world.getBlockState(below);
 
-                if (bs.isOf(Blocks.ENDER_CHEST) && waitWhileChestPresent.get()) { best = p; bestDir = dirFrom(feet, p); bestDist = 0; break; }
+                if (isBlocker(bs) && waitWhileChestPresent.get()) { best = p; bestDir = dirFrom(feet, p); bestDist = 0; break; }
 
                 if (skipUnbreakableBelow.get()) {
                     float hardness = bs.getHardness(mc.world, below);
@@ -252,7 +257,7 @@ public class AntiFeetPlace extends Module {
 
         BlockState belowState = mc.world.getBlockState(belowPos);
 
-        if (belowState.isOf(Blocks.ENDER_CHEST)) {
+        if (isBlocker(belowState)) {
             stage = waitOrYieldAfterChest();
         } else if (belowState.isOf(Blocks.BEDROCK) && allowBedrockBreak.get()) {
             if (skipBedrockBottomLayer.get() && belowPos.getY() <= mc.world.getBottomY()) { stage = Stage.SELECT; return; }
@@ -268,7 +273,7 @@ public class AntiFeetPlace extends Module {
         if (!validTarget()) { stage = Stage.SELECT; return; }
 
         BlockState bs = mc.world.getBlockState(belowPos);
-        if (bs.isOf(Blocks.ENDER_CHEST)) { stage = waitOrYieldAfterChest(); return; }
+        if (isBlocker(bs)) { stage = waitOrYieldAfterChest(); return; }
         if (bs.isAir()) { tapCounter = 0; stage = Stage.RETARGET_SURROUND_TAP; return; }
         if (bs.isOf(Blocks.BEDROCK) && allowBedrockBreak.get()) {
             if (!(skipBedrockBottomLayer.get() && belowPos.getY() <= mc.world.getBottomY())) {
@@ -288,7 +293,7 @@ public class AntiFeetPlace extends Module {
 
         BlockState bs = mc.world.getBlockState(belowPos);
         if (bs.isAir()) { ticksCounter = 0; stage = Stage.RETARGET_SURROUND_TAP; return; }
-        if (bs.isOf(Blocks.ENDER_CHEST)) { stage = waitOrYieldAfterChest(); return; }
+        if (isBlocker(bs)) { stage = waitOrYieldAfterChest(); return; }
         if (skipBedrockBottomLayer.get() && belowPos.getY() <= mc.world.getBottomY()) { stage = Stage.SELECT; return; }
 
         mineOnce(belowPos);
@@ -309,10 +314,10 @@ public class AntiFeetPlace extends Module {
 
         BlockPos placeAt = belowPos;
         BlockState bs = mc.world.getBlockState(placeAt);
-        if (bs.isOf(Blocks.ENDER_CHEST)) { stage = placeBridge.get() ? Stage.PLACE_BRIDGE : waitOrYieldAfterChest(); return; }
+        if (isBlocker(bs)) { stage = placeBridge.get() ? Stage.PLACE_BRIDGE : waitOrYieldAfterChest(); return; }
 
-        FindItemResult chest = InvUtils.findInHotbar(Items.ENDER_CHEST);
-        if (!chest.found()) chest = InvUtils.find(Items.ENDER_CHEST);
+        FindItemResult chest = InvUtils.findInHotbar(this::isBlockerItem);
+        if (!chest.found()) chest = InvUtils.find(this::isBlockerItem);
         if (!chest.found()) { stage = Stage.SELECT; return; }
 
         if (!BlockUtils.canPlace(placeAt)) {
@@ -338,7 +343,7 @@ public class AntiFeetPlace extends Module {
             stage = waitOrYieldAfterChest(); return;
         }
 
-        if (!mc.world.getBlockState(belowPos).isOf(Blocks.ENDER_CHEST)) {
+        if (!isBlocker(mc.world.getBlockState(belowPos))) {
             if (++ticksCounter < 5) return;
         }
         ticksCounter = 0;
@@ -389,7 +394,7 @@ public class AntiFeetPlace extends Module {
         if (!validTarget()) { stage = Stage.SELECT; return; }
 
         BlockState under = mc.world.getBlockState(belowPos);
-        boolean chestPresent = under.isOf(Blocks.ENDER_CHEST);
+        boolean chestPresent = isBlocker(under);
 
         if (retargetWhileChestPresent.get() && surroundPos != null) {
             if (!mc.world.getBlockState(surroundPos).isAir()
@@ -409,12 +414,20 @@ public class AntiFeetPlace extends Module {
         else if (bs.isOf(Blocks.BEDROCK) && allowBedrockBreak.get()
             && !(skipBedrockBottomLayer.get() && belowPos.getY() <= mc.world.getBottomY())) {
             stage = Stage.BREAK_BEDROCK_HOLD;
-        } else if (!bs.isAir() && !bs.isOf(Blocks.ENDER_CHEST)) {
+        } else if (!bs.isAir() && !isBlocker(bs)) {
             stage = Stage.MINE_BELOW_TAP;
         } else stage = Stage.SELECT;
     }
 
     // -------------------- Helpers -------------------- //
+    private boolean isBlocker(BlockState state) {
+        return blocks.get().contains(state.getBlock());
+    }
+
+    private boolean isBlockerItem(ItemStack stack) {
+        return blocks.get().contains(Block.getBlockFromItem(stack.getItem()));
+    }
+
     private void resetAll() {
         stage = Stage.SELECT;
         surroundPos = null;
@@ -449,7 +462,7 @@ public class AntiFeetPlace extends Module {
     private void tapBlockOnce(BlockPos pos) {
         if (tickCounter < nextMineAllowedAt) return;
         BlockState st = mc.world.getBlockState(pos);
-        if (st.isAir() || st.isOf(Blocks.ENDER_CHEST)) return;
+        if (st.isAir() || isBlocker(st)) return;
         if (rotate.get()) {
             float[] yp = lookAt(Vec3d.ofCenter(pos));
             Rotations.rotate(yp[0], yp[1], 25, () -> {});
@@ -464,7 +477,7 @@ public class AntiFeetPlace extends Module {
     private void mineOnce(BlockPos pos) {
         if (tickCounter < nextMineAllowedAt) return;
         BlockState st = mc.world.getBlockState(pos);
-        if (st.isAir() || st.isOf(Blocks.ENDER_CHEST)) return;
+        if (st.isAir() || isBlocker(st)) return;
         if (rotate.get()) {
             float[] yp = lookAt(Vec3d.ofCenter(pos));
             Rotations.rotate(yp[0], yp[1], 25, () -> {});
