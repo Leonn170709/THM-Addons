@@ -41,9 +41,28 @@ public final class CapeManager {
     }
 
     public static void initialize() {
-        Thread t = new Thread(CapeManager::refresh, "THM-CapeDownload");
+        start(false);
+    }
+
+    /** Deletes every downloaded cape and pulls them again from the index. */
+    public static void redownload() {
+        start(true);
+    }
+
+    private static void start(boolean clear) {
+        Thread t = new Thread(() -> {
+            if (clear) purge();
+            refresh();
+        }, "THM-CapeDownload");
         t.setDaemon(true);
         t.start();
+    }
+
+    private static synchronized void purge() {
+        File dir = new File(new File(MeteorClient.FOLDER, "thm"), "capes");
+        File[] files = dir.listFiles();
+        if (files != null) for (File f : files) f.delete();
+        textureCache.clear();
     }
 
     private static void refresh() {

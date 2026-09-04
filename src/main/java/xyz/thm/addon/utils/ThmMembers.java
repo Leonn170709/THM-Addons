@@ -263,6 +263,7 @@ public final class ThmMembers {
         startFetch(true);
         refreshCapeList();
         refreshHighwayStatus();
+        CapeManager.redownload();
     }
 
     public static void refreshHighwayStatus() {
