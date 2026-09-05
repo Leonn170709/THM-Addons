@@ -53,6 +53,9 @@ public final class CapeManager {
         Thread t = new Thread(() -> {
             if (clear) purge();
             refresh();
+            // Only after the files are back on disk - clearing earlier lets a render in the
+            // download window cache MISSING for a cape that then never shows up again.
+            if (clear) clearTextures();
         }, "THM-CapeDownload");
         t.setDaemon(true);
         t.start();
@@ -62,6 +65,9 @@ public final class CapeManager {
         File dir = new File(new File(MeteorClient.FOLDER, "thm"), "capes");
         File[] files = dir.listFiles();
         if (files != null) for (File f : files) f.delete();
+    }
+
+    private static synchronized void clearTextures() {
         textureCache.clear();
     }
 

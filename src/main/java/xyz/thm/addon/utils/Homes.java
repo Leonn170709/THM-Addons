@@ -13,6 +13,7 @@ import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.gui.GuiThemes;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.block.Block;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -68,7 +69,8 @@ public class Homes {
 
     /** How long after sending /homes chat lines are treated as its answer. */
     private static final long CAPTURE_MS = 3000;
-    private static final Item DEFAULT_ICON = Items.DIRT;
+    /** Derived from the home name, not rolled per call - icon() runs every frame. */
+    private static List<Item> defaultIcons;
     /** The server's answer, verbatim: {@code Your homes (18/34): stash_RED, backupstash, ...} */
     private static final Pattern HOMES_LINE = Pattern.compile("homes\\s*\\(\\d+\\s*/\\s*\\d+\\)\\s*:\\s*(.+)", Pattern.CASE_INSENSITIVE);
     private static final Pattern HOME_NAME = Pattern.compile("[A-Za-z0-9_\\-]{1,32}");
@@ -150,7 +152,14 @@ public class Homes {
     public ItemStack icon(String home) {
         String id = icons.get(home);
         Item item = id == null ? null : Registries.ITEM.get(Identifier.of(id));
-        return new ItemStack(item == null || item == Items.AIR ? DEFAULT_ICON : item);
+        return new ItemStack(item == null || item == Items.AIR ? defaultIcon(home) : item);
+    }
+
+    private static Item defaultIcon(String home) {
+        if (defaultIcons == null) {
+            defaultIcons = Registries.BLOCK.stream().map(Block::asItem).filter(i -> i != Items.AIR).toList();
+        }
+        return defaultIcons.get(Math.floorMod(home.hashCode(), defaultIcons.size()));
     }
 
     /** Null resets the home to the default icon. */
