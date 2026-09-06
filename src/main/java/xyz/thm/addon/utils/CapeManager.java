@@ -50,15 +50,13 @@ public final class CapeManager {
     }
 
     private static void start(boolean clear) {
-        Thread t = new Thread(() -> {
+        THMUtils.async("cape-download", () -> {
             if (clear) purge();
             refresh();
             // Only after the files are back on disk - clearing earlier lets a render in the
             // download window cache MISSING for a cape that then never shows up again.
             if (clear) clearTextures();
-        }, "THM-CapeDownload");
-        t.setDaemon(true);
-        t.start();
+        });
     }
 
     private static synchronized void purge() {

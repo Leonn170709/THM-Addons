@@ -63,3 +63,6 @@ src/main/java/xyz/thm/addon/mixin/ClientConnectionMixin.java
 src/main/java/xyz/thm/addon/mixin/HandshakeC2SPacketMixin.java
 src/main/java/xyz/thm/addon/mixin/MultiplayerScreenRouteButtonMixin.java
 src/main/java/xyz/thm/addon/mixin/TitleScreenFastestRouteButtonMixin.java
+
+# log4j output from ./gradlew checkSsrf
+logs/

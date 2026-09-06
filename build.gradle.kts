@@ -169,16 +169,12 @@ val generateApiEndpoints by tasks.registering {
     }
 }
 
-sourceSets {
-    main {
-        java {
-            exclude("xyz/thm/addon/modules/HandshakeHostTest.java")
-            exclude("xyz/thm/addon/mixin/ClientConnectionMixin.java")
-            exclude("xyz/thm/addon/mixin/HandshakeC2SPacketMixin.java")
-            exclude("xyz/thm/addon/mixin/MultiplayerScreenRouteButtonMixin.java")
-            exclude("xyz/thm/addon/mixin/TitleScreenFastestRouteButtonMixin.java")
-        }
-    }
+// Runs the SSRF guard self-check (TrustedHttpSelfCheck) - the only security boundary in the addon.
+val checkSsrf by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Verifies TrustedHttp's SSRF/URL guards. Needs no network."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass = "xyz.thm.addon.utils.TrustedHttpSelfCheck"
 }
 
 tasks {
@@ -211,15 +207,6 @@ tasks {
 
     jar {
         inputs.property("archivesName", project.base.archivesName.get())
-
-        exclude("xyz/thm/addon/modules/ElytraUAV.class")
-        exclude("xyz/thm/addon/modules/ElytraUAV$*.class")
-        exclude("xyz/thm/addon/modules/HandshakeHostTest.class")
-        exclude("xyz/thm/addon/modules/HandshakeHostTest$*.class")
-        exclude("xyz/thm/addon/mixin/ClientConnectionMixin.class")
-        exclude("xyz/thm/addon/mixin/HandshakeC2SPacketMixin.class")
-        exclude("xyz/thm/addon/mixin/MultiplayerScreenRouteButtonMixin.class")
-        exclude("xyz/thm/addon/mixin/TitleScreenFastestRouteButtonMixin.class")
 
         from("LICENSE") {
             rename { "${it}_${inputs.properties["archivesName"]}" }

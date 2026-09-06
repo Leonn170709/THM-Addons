@@ -15,6 +15,7 @@ import net.minecraft.client.gui.hud.MessageIndicator;
 import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.world.GameMode;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.utils.THMUtils;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -160,7 +161,6 @@ public final class ServerStatusHandler {
     private final AtomicBoolean sampleQueued = new AtomicBoolean(false);
     private volatile long sampleQueuedAtMs;
     private volatile boolean workerRunning;
-    private Thread worker;
 
     private static void debugInfo(String message, Object... args) {
         if (DEBUG_LOGS) THMAddon.LOG.info(message, args);
@@ -307,7 +307,7 @@ public final class ServerStatusHandler {
     private void startWorker() {
         if (workerRunning) return;
         workerRunning = true;
-        worker = new Thread(() -> {
+        THMUtils.async("server-status", () -> {
             while (workerRunning) {
                 requestSample();
                 try {
@@ -315,9 +315,7 @@ public final class ServerStatusHandler {
                 } catch (InterruptedException ignored) {
                 }
             }
-        }, "THM-ServerStatusHandler");
-        worker.setDaemon(true);
-        worker.start();
+        });
     }
 
     private void requestSample() {

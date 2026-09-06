@@ -20,6 +20,8 @@ import net.minecraft.network.packet.s2c.play.SubtitleS2CPacket;
 import net.minecraft.text.Text;
 import net.minecraft.text.TextColor;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.utils.THMUtils;
+import xyz.thm.addon.utils.TrustedHttp;
 
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
@@ -275,37 +277,22 @@ public class DiscordNotifs extends Module
 
         final String finalMessage = message;
 
-        // use threads so the game doesnt lag when sending a ton of webhooks
-        new Thread(() -> {
-            try {
-                @SuppressWarnings("deprecation") java.net.URL url = new java.net.URL(webhookURL.get());
-                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
-                conn.setRequestMethod("POST");
-                conn.setRequestProperty("Content-Type", "application/json");
-                conn.setDoOutput(true);
+        // off-thread so a slow webhook can never stall the game
+        THMUtils.async("discord-notifs", () -> {
+            // embeds, not content, so the message can't ping anyone
+            String escapedMessage = finalMessage
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r");
+            String json = "{\"embeds\": [{\"description\": \"" + escapedMessage + "\"}]}";
 
-                // Create JSON payload for Discord webhook using embeds to prevent mentions
-                String escapedMessage = finalMessage.replace("\"", "\\\"").replace("\\", "\\\\");
-                String json = "{\"embeds\": [{\"description\": \"" + escapedMessage + "\"}]}";
-
-                try (java.io.OutputStream os = conn.getOutputStream()) {
-                    byte[] input = json.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-                    os.write(input, 0, input.length);
-                }
-
-                int responseCode = conn.getResponseCode();
-                if (responseCode == 204 || responseCode == 200) {
-                    THMAddon.LOG.info("Successfully sent message to webhook!");
-                } else {
-                    THMAddon.LOG.warn("Webhook response code: " + responseCode);
-                    THMAddon.LOG.warn("Failed to send to Webhook");
-                }
-
-                conn.disconnect();
-            } catch (Exception e) {
-                THMAddon.LOG.warn("Failed to send to webhook: " + e.getMessage());
+            if (TrustedHttp.postJson(webhookURL.get(), json, TrustedHttp.Kind.USER_WEBHOOK, null)) {
+                THMAddon.LOG.info("Successfully sent message to webhook!");
+            } else {
+                THMAddon.LOG.warn("Failed to send to Webhook");
             }
-        }).start();
+        });
     }
 
     public enum MessageType

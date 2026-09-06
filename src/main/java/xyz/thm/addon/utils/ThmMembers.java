@@ -69,7 +69,6 @@ public final class ThmMembers {
     private static List<Member> cachedMembers = null;
     private static Map<String, Member> cachedByMcName = null;
     private static boolean fetchInProgress = false;
-    private static Thread fetchThread = null;
     private static boolean startupFetchStarted = false;
 
     private static final long HIGHWAY_STATUS_REFRESH_MS = 10 * 60 * 1000; // 10 minutes
@@ -109,9 +108,7 @@ public final class ThmMembers {
 
             fetchInProgress = true;
             startupFetchStarted = true;
-            fetchThread = new Thread(() -> runFetchLoop(force), "THM-MemberFetch");
-            fetchThread.setDaemon(true);
-            fetchThread.start();
+            THMUtils.async("member-fetch", () -> runFetchLoop(force));
         }
     }
 
@@ -267,7 +264,7 @@ public final class ThmMembers {
     }
 
     public static void refreshHighwayStatus() {
-        Thread t = new Thread(() -> {
+        THMUtils.async("highway-status-fetch", () -> {
             Map<String, String> fetched = APIUtils.fetchHighwayStatusFromApi();
             if (fetched != null) {
                 synchronized (ThmMembers.class) {
@@ -275,9 +272,7 @@ public final class ThmMembers {
                     lastHighwayStatusFetchTime = System.currentTimeMillis();
                 }
             }
-        }, "THM-HighwayStatusFetch");
-        t.setDaemon(true);
-        t.start();
+        });
     }
 
     public static synchronized void initialize() {
@@ -291,16 +286,14 @@ public final class ThmMembers {
     }
 
     public static void refreshCapeList() {
-        Thread t = new Thread(() -> {
+        THMUtils.async("cape-fetch", () -> {
             Map<String, String> fetched = APIUtils.fetchCapeListFromApi();
             if (fetched != null) {
                 synchronized (ThmMembers.class) {
                     cachedCapeByMcName = fetched;
                 }
             }
-        }, "THM-CapeFetch");
-        t.setDaemon(true);
-        t.start();
+        });
     }
 
     public static synchronized String getCapeByMcName(String mcName) {
@@ -315,7 +308,7 @@ public final class ThmMembers {
             highwayStatusPollingStarted = true;
         }
 
-        Thread thread = new Thread(() -> {
+        THMUtils.async("highway-status-poll", () -> {
             while (!Thread.currentThread().isInterrupted()) {
                 Map<String, String> fetched = APIUtils.fetchHighwayStatusFromApi();
                 if (fetched != null) {
@@ -331,9 +324,7 @@ public final class ThmMembers {
                     Thread.currentThread().interrupt();
                 }
             }
-        }, "THM-HighwayStatusFetch");
-        thread.setDaemon(true);
-        thread.start();
+        });
     }
 
     public static synchronized String getHighwayStatusByMcName(String mcName) {

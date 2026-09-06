@@ -13,7 +13,6 @@ import meteordevelopment.meteorclient.addons.MeteorAddon;
 import meteordevelopment.meteorclient.commands.Commands;
 import meteordevelopment.meteorclient.gui.GuiThemes;
 import meteordevelopment.meteorclient.gui.tabs.Tabs;
-import meteordevelopment.meteorclient.pathing.BaritoneUtils;
 import meteordevelopment.meteorclient.systems.hud.Hud;
 import meteordevelopment.meteorclient.systems.hud.HudGroup;
 import meteordevelopment.meteorclient.systems.modules.Category;
@@ -222,15 +221,9 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new THMStashMover());
         Modules.get().add(new Loadouts());
         Homes.initialize();
-        if (BaritoneUtils.IS_AVAILABLE) {
-            LOG.info("Baritone detected. Enabling Baritone-dependent THM modules.");
-            Modules.get().add(new THMHwyMonitor());
-            //Modules.get().add(new ObsidianFarmerTHM()); //Not enabled in production
-            Modules.get().add(new HighwayTools());
-        } else {
-            LOG.warn("Baritone not detected. Skipping Baritone-dependent modules (THM Highway Monitor, Highway Tools).");
-        }
-
+        // Baritone is a hard requirement (checked above), so these need no availability guard.
+        Modules.get().add(new THMHwyMonitor());
+        Modules.get().add(new HighwayTools());
 
         //Commands
         Commands.add(new Center());

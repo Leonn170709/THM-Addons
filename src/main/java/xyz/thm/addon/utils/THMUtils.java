@@ -38,11 +38,9 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.InputStream;
-import java.net.URI;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.net.URL;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -396,16 +394,33 @@ public class THMUtils {
     );
     private static final AtomicBoolean anarchyModDomainsRefreshStarted = new AtomicBoolean(false);
 
+    private static final ExecutorService ASYNC = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "thm-async");
+        t.setDaemon(true);
+        return t;
+    });
+
+    /** Shared daemon pool for every background job in the addon — never blocks the game thread. */
+    public static void async(String name, Runnable task) {
+        ASYNC.execute(() -> {
+            Thread.currentThread().setName("thm-" + name);
+            try {
+                task.run();
+            } catch (Throwable t) {
+                THMAddon.LOG.warn("[THM] async task '{}' failed", name, t);
+            }
+        });
+    }
+
     private static void refreshAnarchyModDomainsAsync() {
         if (!anarchyModDomainsRefreshStarted.compareAndSet(false, true)) return;
 
-        Thread thread = new Thread(() -> {
+        async("anarchy-domains", () -> {
             try {
-                HttpRequest request = HttpRequest.newBuilder(URI.create("https://www.6b6t.org/api/anarchy-mod.json"))
-                    .GET()
-                    .build();
-                HttpResponse<String> response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
-                JsonObject root = new Gson().fromJson(response.body(), JsonObject.class);
+                // IMAGE, not API: third-party endpoint, so HTTPS-only and never our bearer token.
+                String responseBody = TrustedHttp.getString("https://www.6b6t.org/api/anarchy-mod.json",
+                    TrustedHttp.Kind.IMAGE, TrustedHttp.MAX_JSON_BYTES);
+                JsonObject root = new Gson().fromJson(responseBody, JsonObject.class);
                 JsonArray domainsJson = root == null ? null : root.getAsJsonArray("domains");
                 if (domainsJson == null) return;
 
@@ -419,9 +434,7 @@ public class THMUtils {
             } catch (Exception e) {
                 THMAddon.LOG.warn("[THM] Failed to refresh 6b6t anarchy-mod domain list, keeping cached list", e);
             }
-        }, "thm-anarchy-mod-domains");
-        thread.setDaemon(true);
-        thread.start();
+        });
     }
 
     public static boolean isNot6B6T() {
@@ -450,7 +463,7 @@ public class THMUtils {
         savedZ = (int) mc.player.getZ()-1;
 
         baritone.getCommandManager().execute("pickup minecraft:obsidian");
-        new Thread(() -> {
+        async("baritone-pickup", () -> {
             try {
                 THMAddon.LOG.info("Waiting 10 seconds for baritone to pick up");
                 Thread.sleep(10000);
@@ -465,7 +478,7 @@ public class THMUtils {
                     baritone.getPathingBehavior().cancelEverything();
                 }
             }
-        }).start();
+        });
 
     }
     //Unused
@@ -621,7 +634,7 @@ public class THMUtils {
      * Fires on a daemon thread, same as APIUtils' own webhook sends.
      */
     public static void sendToWebhookWithFile(String url, String message, Path file) {
-        Thread thread = new Thread(() -> {
+        async("webhook-attachment", () -> {
             try {
                 String boundary = "thm" + System.nanoTime();
                 byte[] sep = ("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8);
@@ -642,17 +655,13 @@ public class THMUtils {
                 }
                 body.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
 
-                HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                    .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                    .POST(HttpRequest.BodyPublishers.ofByteArray(body.toByteArray()))
-                    .build();
-                HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.discarding());
+                TrustedHttp.postBytes(url, body.toByteArray(),
+                    "multipart/form-data; boundary=" + boundary,
+                    TrustedHttp.Kind.USER_WEBHOOK, TrustedHttp.MAX_UPLOAD_BYTES);
             } catch (Exception e) {
                 THMAddon.LOG.warn("[THM] Failed to send webhook with attachment", e);
             }
-        }, "thm-webhook-attachment");
-        thread.setDaemon(true);
-        thread.start();
+        });
     }
 
     public static void sendClientMsg(String msg, Style style) {

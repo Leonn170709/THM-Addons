@@ -16,6 +16,8 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 - `scaffold-THM` — Scaffolds blocks under you.
 - `auto-portal` — For the Base Hunter who has places to be.
 - `Fly-Bypass` — Fly using packets.
+- `highway-traveler` — Travels along anarchy highways with smart BFS obstacle avoidance.
+- `elytra-route` — Flies to a target bearing, restocks from inventory shulkers, and manages periodic home saves.
 
 ## Mining and Building
 - `tunnel-miner` — Mines a tunnel block-by-block to target XZ coordinates at the same Y.
@@ -23,6 +25,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 - `BlockCounter` — Counts the selected blocks.
 - `Better-echest-farmer` — Better echest farmer that uses instant rebreak exploit.
 - `sign-render` — Renders sign text through walls with advanced clustering.
+- `nuker` — Nuker with many additions.
 
 ## Inventory and Utility
 - `offhand-manager` — Automatically manages your offhand (optimized for highway work).
@@ -30,6 +33,9 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 - `chest-tracker` — Track items in containers.
 - `paket-limiter` — Limits outgoing packets per tick with a bypass list.
 - `AntiDrop` — Stops you from dropping certain items.
+- `THM Stash mover` — Keeps named kit-pair deposit storage topped off with full shulker kits.
+- `friends-sync` — Runs commands when friends or THM members join. `%player%` is replaced with their name.
+- `packet-logger-thm` — Logs selected packets to replay-grade JSONL files.
 - `auto-ignore` — Auto-ignores Spambots and fake KitBots.
 - `Kitbot-frontend` — Send kitbot commands (`$update`, `$goto`, `$kit`).
 - `discord-notifs` — Sends notifications to a Discord webhook.
@@ -47,6 +53,10 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 - `AntiConcreteDetection` — Breaks buttons and torches inside enemy hit-box.
 - `AntiFeetPlace` — Interrupts enemies FeetPlace with a chosen block (ender chest by default).
 - `armor-notify` — Notifies you when your armor pieces are low.
+- `crystal-aura-thm` — Custom crystal PvP automation with friend-safety, force-pop and id-predict logic.
+- `anti-mine` — Phases or clips when your surround gets mined out.
+- `hole-jitter` — Random sub-block clips to break enemy crystal aura prediction.
+- `Loadouts` — Save and load inventory configurations.
 
 ## HUD Widgets
 - `online-friends` — Displays online friends from your friend list.

@@ -6,7 +6,8 @@
 
 package xyz.thm.addon.utils;
 
-import xyz.thm.addon.THMAddon;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import xyz.thm.addon.system.THMSystem;
 
 import java.io.ByteArrayOutputStream;
@@ -25,7 +26,12 @@ import java.util.Locale;
  * host, or write an unbounded payload to memory.
  */
 public final class TrustedHttp {
+    // Own logger, not THMAddon.LOG: that class static-inits against a live FabricLoader, which
+    // would make this class unloadable outside the game (see TrustedHttpSelfCheck).
+    private static final Logger LOG = LoggerFactory.getLogger(TrustedHttp.class);
     public static final int MAX_JSON_BYTES = 1_048_576;
+    /** Screenshot attachments are far bigger than any JSON body. */
+    public static final int MAX_UPLOAD_BYTES = 8_388_608;
     public static final int CONNECT_TIMEOUT_MS = 8_000;
     public static final int READ_TIMEOUT_MS = 10_000;
     private static final int MAX_REDIRECTS = 3;
@@ -49,7 +55,7 @@ public final class TrustedHttp {
             if (uri == null) return null;
             return exchange("GET", uri, kind, null, null, maxBytes, false, null);
         } catch (Exception e) {
-            THMAddon.LOG.warn("Trusted HTTP GET failed: {}", e.getMessage());
+            LOG.warn("Trusted HTTP GET failed: {}", e.getMessage());
             return null;
         }
     }
@@ -59,7 +65,7 @@ public final class TrustedHttp {
             byte[] body = json.getBytes(StandardCharsets.UTF_8);
             if (!allowOutboundPost(kind, body)) return false;
             if (body.length > MAX_JSON_BYTES) {
-                THMAddon.LOG.warn("Refusing oversized JSON POST ({} bytes)", body.length);
+                LOG.warn("Refusing oversized JSON POST ({} bytes)", body.length);
                 return false;
             }
             URI uri = parseAllowedUri(url, kind);
@@ -67,7 +73,25 @@ public final class TrustedHttp {
             exchange("POST", uri, kind, "application/json", body, MAX_JSON_BYTES, true, bearerToken);
             return true;
         } catch (Exception e) {
-            THMAddon.LOG.warn("Trusted HTTP POST failed: {}", e.getMessage());
+            LOG.warn("Trusted HTTP POST failed: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /** Same guarantees as {@link #postJson}, for a body that isn't JSON (multipart uploads). */
+    public static boolean postBytes(String url, byte[] body, String contentType, Kind kind, int maxBytes) {
+        try {
+            if (!allowOutboundPost(kind, body)) return false;
+            if (body.length > maxBytes) {
+                LOG.warn("Refusing oversized POST ({} bytes)", body.length);
+                return false;
+            }
+            URI uri = parseAllowedUri(url, kind);
+            if (uri == null) return false;
+            exchange("POST", uri, kind, contentType, body, MAX_JSON_BYTES, true, null);
+            return true;
+        } catch (Exception e) {
+            LOG.warn("Trusted HTTP POST failed: {}", e.getMessage());
             return false;
         }
     }
@@ -76,19 +100,21 @@ public final class TrustedHttp {
     // player-chosen destination - refuse to let it exfiltrate the API token or cracked-account password.
     private static boolean allowOutboundPost(Kind kind, byte[] body) {
         if (body.length == 0) return true;
-        String text = new String(body, StandardCharsets.UTF_8);
+        // Scan the head only: a JSON body always fits, and in a multipart upload every text part
+        // precedes the binary attachment - decoding a whole 8 MB PNG here would cost 16 MB of chars.
+        String text = new String(body, 0, Math.min(body.length, MAX_JSON_BYTES), StandardCharsets.UTF_8);
         try {
             THMSystem system = THMSystem.get();
             if (system == null) return true;
             String password = system.getCrackedPassword();
             if (password != null && password.length() >= 3 && text.contains(password)) {
-                THMAddon.LOG.warn("Refusing HTTP body that contains the cracked login password");
+                LOG.warn("Refusing HTTP body that contains the cracked login password");
                 return false;
             }
             if (kind == Kind.USER_WEBHOOK) {
                 String token = system.getApiToken();
                 if (token != null && token.length() >= 8 && text.contains(token)) {
-                    THMAddon.LOG.warn("Refusing webhook body that contains the API token");
+                    LOG.warn("Refusing webhook body that contains the API token");
                     return false;
                 }
             }
@@ -98,7 +124,7 @@ public final class TrustedHttp {
         return true;
     }
 
-    private static URI parseAllowedUri(String raw, Kind kind) {
+    static URI parseAllowedUri(String raw, Kind kind) {
         if (raw == null) return null;
         String trimmed = raw.trim();
         if (trimmed.isEmpty() || trimmed.length() > 2048) return null;
@@ -113,24 +139,24 @@ public final class TrustedHttp {
         String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
         if (kind == Kind.API || kind == Kind.IMAGE) {
             if (!"https".equals(scheme)) {
-                THMAddon.LOG.warn("Rejected non-HTTPS {} URL", kind);
+                LOG.warn("Rejected non-HTTPS {} URL", kind);
                 return null;
             }
         } else if (!"https".equals(scheme) && !"http".equals(scheme)) {
-            THMAddon.LOG.warn("Rejected non-HTTP(S) webhook URL");
+            LOG.warn("Rejected non-HTTP(S) webhook URL");
             return null;
         }
 
         if (uri.getHost() == null || uri.getHost().isBlank()) return null;
         if (uri.getUserInfo() != null) return null;
         if (!isPublicHostname(uri.getHost())) {
-            THMAddon.LOG.warn("Rejected URL host that resolves to a private or local address");
+            LOG.warn("Rejected URL host that resolves to a private or local address");
             return null;
         }
         return uri.normalize();
     }
 
-    private static boolean isPublicHostname(String host) {
+    static boolean isPublicHostname(String host) {
         String h = host.toLowerCase(Locale.ROOT);
         if (h.endsWith(".")) h = h.substring(0, h.length() - 1);
         if (h.isEmpty() || h.equals("localhost") || h.endsWith(".localhost")) return false;
@@ -149,7 +175,7 @@ public final class TrustedHttp {
         return true;
     }
 
-    private static boolean isPublicAddress(InetAddress addr) {
+    static boolean isPublicAddress(InetAddress addr) {
         if (addr.isAnyLocalAddress() || addr.isLoopbackAddress() || addr.isLinkLocalAddress()
             || addr.isSiteLocalAddress() || addr.isMulticastAddress()) {
             return false;
@@ -192,7 +218,7 @@ public final class TrustedHttp {
         URI current = start;
         for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
             if (current.getHost() == null || !isPublicHostname(current.getHost())) {
-                THMAddon.LOG.warn("Rejected URL host that resolves to a private or local address");
+                LOG.warn("Rejected URL host that resolves to a private or local address");
                 return null;
             }
 
@@ -223,13 +249,13 @@ public final class TrustedHttp {
                     || code == HttpURLConnection.HTTP_SEE_OTHER || code == 307 || code == 308) {
                     String location = cn.getHeaderField("Location");
                     if (location == null || location.isBlank()) {
-                        THMAddon.LOG.warn("HTTP redirect without Location from {}", current.getHost());
+                        LOG.warn("HTTP redirect without Location from {}", current.getHost());
                         return null;
                     }
                     URI allowed = parseAllowedUri(current.resolve(location).toString(), kind);
                     if (allowed == null) return null;
                     if (!current.getHost().equalsIgnoreCase(allowed.getHost())) {
-                        THMAddon.LOG.warn("Rejected cross-host HTTP redirect from {} to {}", current.getHost(), allowed.getHost());
+                        LOG.warn("Rejected cross-host HTTP redirect from {} to {}", current.getHost(), allowed.getHost());
                         return null;
                     }
                     current = allowed;
@@ -250,7 +276,7 @@ public final class TrustedHttp {
                     return body;
                 }
                 if (code != 200) {
-                    THMAddon.LOG.warn("HTTP GET {} returned {}", current.getHost(), code);
+                    LOG.warn("HTTP GET {} returned {}", current.getHost(), code);
                     return null;
                 }
                 return body;
@@ -258,7 +284,7 @@ public final class TrustedHttp {
                 cn.disconnect();
             }
         }
-        THMAddon.LOG.warn("Too many HTTP redirects");
+        LOG.warn("Too many HTTP redirects");
         return null;
     }
 

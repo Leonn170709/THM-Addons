@@ -9564,7 +9564,7 @@ public class HighwayBuilderTHM extends Module {
     private void scheduleStatsScreenshot(String sessionId, String reason, StatsScreenshotSurface surface, long captureToken) {
         long sequence = statsScreenshotSequence.incrementAndGet();
         try {
-            Thread thread = new Thread(() -> {
+            THMUtils.async("stats-screenshot-" + surface.fileNamePart + "-" + sequence, () -> {
                 try {
                     Thread.sleep(STATS_SCREENSHOT_DELAY_MS);
                 } catch (InterruptedException e) {
@@ -9607,9 +9607,7 @@ public class HighwayBuilderTHM extends Module {
                         e.getClass().getSimpleName()
                     );
                 }
-            }, "thm-highwaybuilder-" + surface.fileNamePart + "-stats-screenshot-" + sequence);
-            thread.setDaemon(true);
-            thread.start();
+            });
         } catch (RuntimeException | Error e) {
             finishStatsScreenshotCapture(captureToken);
             flushPendingWebhookStats(null);

@@ -91,22 +91,19 @@ public class APIUtils {
     }
 
     public static void sendStatus(String message) {
-        new Thread(() ->
-            TrustedHttp.postJson(GeneratedApiEndpoints.statusUrl(), jsonContent(message), TrustedHttp.Kind.API, apiToken()),
-            "thm-status").start();
+        THMUtils.async("status", () ->
+            TrustedHttp.postJson(GeneratedApiEndpoints.statusUrl(), jsonContent(message), TrustedHttp.Kind.API, apiToken()));
     }
 
     public static void sendStatistics(String message) {
-        new Thread(() ->
-            TrustedHttp.postJson(GeneratedApiEndpoints.highwayUrl(), jsonContent(message), TrustedHttp.Kind.API, apiToken()),
-            "thm-statistics").start();
+        THMUtils.async("statistics", () ->
+            TrustedHttp.postJson(GeneratedApiEndpoints.highwayUrl(), jsonContent(message), TrustedHttp.Kind.API, apiToken()));
     }
 
     // Discord webhook URL, supplied by the player at runtime - never attach our API token to it.
     public static void sendToWebhook(String url, String message) {
-        new Thread(() ->
-            TrustedHttp.postJson(url, jsonContent(message), TrustedHttp.Kind.USER_WEBHOOK, null),
-            "thm-webhook").start();
+        THMUtils.async("webhook", () ->
+            TrustedHttp.postJson(url, jsonContent(message), TrustedHttp.Kind.USER_WEBHOOK, null));
     }
 
     private static String stringField(JsonObject o, String field) {
@@ -242,7 +239,7 @@ public class APIUtils {
             + "\",\"cape\":\"" + cape.replace("\"", "\\\"")
             + "\",\"timestamp\":" + System.currentTimeMillis()
             + ",\"token\":\"" + token.replace("\"", "\\\"") + "\"}";
-        new Thread(() -> TrustedHttp.postJson(GeneratedApiEndpoints.capePostUrl(), json, TrustedHttp.Kind.API, token), "thm-cape-post").start();
+        THMUtils.async("cape-post", () -> TrustedHttp.postJson(GeneratedApiEndpoints.capePostUrl(), json, TrustedHttp.Kind.API, token));
     }
 
     public static List<CapeManager.CapeEntry> fetchCapeIndexFromApi() {

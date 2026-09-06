@@ -49,6 +49,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import xyz.thm.addon.utils.THMUtils;
 import static xyz.thm.addon.utils.THMUtils.getSaveName;
 
 public class THMHwyMonitor extends Module {
@@ -273,7 +274,6 @@ public class THMHwyMonitor extends Module {
     private long delayedMainServerResumeAtMs;
     private String delayedMainServerResumeContext = "";
     private boolean restartRecoveryActive;
-    private ObsidianFarmerTHM recoveryFarmer;
     private THMStashMover recoveryStashMover;
     private boolean postRejoinDirectionGateActive;
     private int postRejoinDirectionRetryCount;
@@ -380,7 +380,6 @@ public class THMHwyMonitor extends Module {
     private enum ReconnectOwner {
         None,
         HighwayBuilder,
-        ObsidianFarmer,
         StashMover
     }
 
@@ -685,19 +684,6 @@ public class THMHwyMonitor extends Module {
             return;
         }
 
-        if (reconnectOwner == ReconnectOwner.ObsidianFarmer) {
-            delayedMainServerResumePending = true;
-            delayedMainServerResumeCycleId = cycleId;
-            delayedMainServerResumeAtMs = System.currentTimeMillis() + MAIN_SERVER_RESUME_DELAY_MS;
-            delayedMainServerResumeContext = contextTag == null ? "obsidian-farmer" : contextTag;
-            info(
-                "Reconnect service reached MAIN_SERVER (%s). Waiting 6.0s before ObsidianFarmerTHM resume (cycle %d).",
-                delayedMainServerResumeContext,
-                cycleId
-            );
-            return;
-        }
-
         if (reconnectOwner == ReconnectOwner.StashMover) {
             delayedMainServerResumePending = true;
             delayedMainServerResumeCycleId = cycleId;
@@ -742,16 +728,6 @@ public class THMHwyMonitor extends Module {
         }
         if (!isActive()) return;
         if (cycleId != activeReconnectCycleId) {
-            return;
-        }
-
-        if (reconnectOwner == ReconnectOwner.ObsidianFarmer) {
-            ObsidianFarmerTHM farmer = recoveryFarmer;
-            clearRestartAutomationState("obsidian-farmer-failure:" + reason.name(), true, true);
-            reconnectOwner = ReconnectOwner.None;
-            recoveryFarmer = null;
-            if (farmer != null) farmer.onMonitorReconnectFailure(cycleId, reason.name(), detail);
-            warning("Reconnect failed (%s): %s", reason.name(), detail == null ? "" : detail);
             return;
         }
 
@@ -929,10 +905,6 @@ public class THMHwyMonitor extends Module {
 
         HighwayBuilderTHM builderBeforeDisconnect = Modules.get().get(HighwayBuilderTHM.class);
         boolean builderWasActiveAtDisconnect = builderBeforeDisconnect != null && builderBeforeDisconnect.isActive();
-        ObsidianFarmerTHM farmerBeforeDisconnect = Modules.get().get(ObsidianFarmerTHM.class);
-        boolean farmerWasActiveAtDisconnect = farmerBeforeDisconnect != null
-            && farmerBeforeDisconnect.isActive()
-            && farmerBeforeDisconnect.isManagingThmHwyMonitor();
         THMStashMover stashMoverBeforeDisconnect = Modules.get().get(THMStashMover.class);
         boolean stashMoverWasActiveAtDisconnect = stashMoverBeforeDisconnect != null
             && stashMoverBeforeDisconnect.isActive()
@@ -978,16 +950,6 @@ public class THMHwyMonitor extends Module {
         }
 
         String restartEvidence = consumeRestartDisconnectEvidence();
-
-        if (!builderWasActiveAtDisconnect && farmerWasActiveAtDisconnect) {
-            unresolvedMainServerDisconnectCandidate = false;
-            recoveryFarmer = farmerBeforeDisconnect;
-            reconnectOwner = ReconnectOwner.ObsidianFarmer;
-            restartRecoveryActive = true;
-            long cycleId = armReconnectCycle("obsidian-farmer-disconnect", false);
-            info("Detected disconnect while ObsidianFarmerTHM was active. Armed reconnect cycle %d.", cycleId);
-            return;
-        }
 
         if (builderWasActiveAtDisconnect && reconnectAutomationEnabled()) {
             if (!prepareFreshHighwayBuilderReconnect(builderBeforeDisconnect, "game-left")) return;
@@ -1114,7 +1076,7 @@ public class THMHwyMonitor extends Module {
         if (effectiveDelayMs <= 0) info("Restart detection screen found. Taking screenshot now.");
         else info("Restart detection screen found. Taking screenshot in %.1fs.", effectiveDelayMs / 1000.0);
 
-        Thread thread = new Thread(() -> {
+        THMUtils.async("restart-screenshot", () -> {
             try {
                 if (effectiveDelayMs > 0) Thread.sleep(effectiveDelayMs);
             } catch (InterruptedException ignored) {
@@ -1130,9 +1092,7 @@ public class THMHwyMonitor extends Module {
                 takeRestartScreenshot();
                 restartScreenshotScheduled = false;
             });
-        }, "thm-restart-screenshot");
-        thread.setDaemon(true);
-        thread.start();
+        });
     }
 
     private boolean prepareFreshHighwayBuilderReconnect(HighwayBuilderTHM builder, String source) {
@@ -1333,7 +1293,6 @@ public class THMHwyMonitor extends Module {
         clearNonRestartHardFailSignal();
         clearRestartHardFailSignal();
         reconnectOwner = ReconnectOwner.None;
-        recoveryFarmer = null;
         recoveryStashMover = null;
         rearmNormalReconnectAfterForwardReconnectResume = false;
         clearRestartRecoveryState("reset-automation", false, clearCycleBinding);
@@ -2556,17 +2515,6 @@ public class THMHwyMonitor extends Module {
         long cycleId = delayedMainServerResumeCycleId;
         String contextTag = delayedMainServerResumeContext;
         clearDelayedMainServerResumeState();
-
-        if (reconnectOwner == ReconnectOwner.ObsidianFarmer) {
-            ObsidianFarmerTHM farmer = recoveryFarmer;
-            clearRestartAutomationState("obsidian-farmer-main-server-ready", true, true);
-            reconnectOwner = ReconnectOwner.None;
-            recoveryFarmer = null;
-            if (farmer != null && farmer.isActive()) {
-                farmer.onMonitorReconnectMainServerReady(cycleId, contextTag);
-            }
-            return;
-        }
 
         if (reconnectOwner == ReconnectOwner.StashMover) {
             THMStashMover stashMover = recoveryStashMover;

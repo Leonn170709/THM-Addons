@@ -37,10 +37,9 @@ import net.minecraft.world.World;
 import net.minecraft.world.chunk.WorldChunk;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.THMUtils;
+import xyz.thm.addon.utils.TrustedHttp;
 
 import java.io.IOException;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -1247,23 +1246,11 @@ public class HighwayTools extends Module {
         if (url.isEmpty()) return;
         String payload = "{\"content\":\"" + escapeJson(message) + "\"}";
 
-        new Thread(() -> {
-            try {
-                @SuppressWarnings("deprecation")
-                HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
-                connection.setRequestMethod("POST");
-                connection.setRequestProperty("Content-Type", "application/json");
-                connection.setDoOutput(true);
-                byte[] data = payload.getBytes(StandardCharsets.UTF_8);
-                connection.setFixedLengthStreamingMode(data.length);
-                connection.getOutputStream().write(data);
-                connection.getOutputStream().flush();
-                connection.getOutputStream().close();
-                connection.getInputStream().close();
-            } catch (Exception e) {
-                debug("webhook", "send-failed kind=%s msg=%s", kind, e.getMessage());
+        THMUtils.async("highway-checker-webhook", () -> {
+            if (!TrustedHttp.postJson(url, payload, TrustedHttp.Kind.USER_WEBHOOK, null)) {
+                debug("webhook", "send-failed kind=%s", kind);
             }
-        }, "HighwayCheckerWebhook").start();
+        });
     }
 
     private static String escapeJson(String input) {

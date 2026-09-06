@@ -15,6 +15,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.utils.THMUtils;
 import xyz.thm.addon.system.THMSystem;
 
 import javax.imageio.ImageIO;
@@ -49,7 +50,7 @@ public class ScreenshotClipboardMixin {
     private static void onSaveScreenshotFile(NativeImage image, File file, Consumer<Text> messageReceiver, CallbackInfo ci) {
         if (!THMSystem.get().screenshotToClipboard.get()) return;
 
-        new Thread(() -> {
+        THMUtils.async("screenshot-clipboard", () -> {
             try {
                 if (IS_MAC) {
                     copyToClipboardMac(file);
@@ -64,7 +65,7 @@ public class ScreenshotClipboardMixin {
             } catch (Exception e) {
                 THMAddon.LOG.warn("[THM] Failed to copy screenshot to clipboard", e);
             }
-        }).start();
+        });
     }
 
     // macOS: use osascript to write PNG bytes directly into NSPasteboard.
