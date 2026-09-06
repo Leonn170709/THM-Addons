@@ -121,8 +121,14 @@ public final class Vp8LDecoder {
         java.util.List<Transform> transforms = new java.util.ArrayList<>();
 
         if (allowRecursion) {
+            // The spec allows each transform at most once (so at most 4). Without this the loop is
+            // driven purely by attacker bits, and every PREDICTOR/COLOR round allocates a sub-image
+            // - a crafted file loops until OutOfMemoryError, which decode() deliberately doesn't catch.
+            int seenTransforms = 0;
             while (br.readBits(1) == 1) {
                 int type = br.readBits(2);
+                if ((seenTransforms & (1 << type)) != 0) throw new IllegalStateException("repeated transform");
+                seenTransforms |= 1 << type;
                 switch (type) {
                     case 0 -> transforms.add(readBlockTransform(br, TransformKind.PREDICTOR, workWidth, height));
                     case 1 -> transforms.add(readBlockTransform(br, TransformKind.COLOR, workWidth, height));
