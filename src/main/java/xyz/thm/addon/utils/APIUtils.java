@@ -87,7 +87,9 @@ public class APIUtils {
     }
 
     private static String jsonContent(String message) {
-        return "{\"content\": \"" + message.replace("\"", "\\\"") + "\"}";
+        JsonObject payload = new JsonObject();
+        payload.addProperty("content", message);
+        return payload.toString();
     }
 
     public static void sendStatus(String message) {
@@ -235,10 +237,12 @@ public class APIUtils {
         String token = apiToken();
         if (token.isEmpty()) return;
 
-        String json = "{\"username\":\"" + username.replace("\"", "\\\"")
-            + "\",\"cape\":\"" + cape.replace("\"", "\\\"")
-            + "\",\"timestamp\":" + System.currentTimeMillis()
-            + ",\"token\":\"" + token.replace("\"", "\\\"") + "\"}";
+        JsonObject payload = new JsonObject();
+        payload.addProperty("username", username);
+        payload.addProperty("cape", cape);
+        payload.addProperty("timestamp", System.currentTimeMillis());
+        payload.addProperty("token", token);
+        String json = payload.toString();
         THMUtils.async("cape-post", () -> TrustedHttp.postJson(GeneratedApiEndpoints.capePostUrl(), json, TrustedHttp.Kind.API, token));
     }
 

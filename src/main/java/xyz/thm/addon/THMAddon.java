@@ -220,6 +220,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new KitbotFrontend());
         Modules.get().add(new THMStashMover());
         Modules.get().add(new Loadouts());
+        Modules.get().add(new ModuleManager());
         Homes.initialize();
         // Baritone is a hard requirement (checked above), so these need no availability guard.
         Modules.get().add(new THMHwyMonitor());

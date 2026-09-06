@@ -30,6 +30,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 ## Inventory and Utility
 - `offhand-manager` — Automatically manages your offhand (optimized for highway work).
 - `hotbar-manager` — Automatically move items to your hotbar.
+- `module-manager` — Tracks module toggle ownership and restores managed modules after reconnect.
 - `chest-tracker` — Track items in containers.
 - `paket-limiter` — Limits outgoing packets per tick with a bypass list.
 - `AntiDrop` — Stops you from dropping certain items.
@@ -67,6 +68,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 - `THM Member Hud` — Shows all online THM members and ranks.
 - `KOS Hud` — Shows all online Kill-on-Sight (KOS) players.
 - `tunnel-miner-hud` — Displays Tunnel Miner stats.
+- `elytra-flight-hud` — Displays Elytra Route flight stats.
 - `afk-logout-hud` — Displays AFK Logout remaining time.
 - `totem-pop-hud` — Shows how many totems of undying you've popped, like an item count.
 - `player-list-hud` — Lists players in render distance, with configurable ping/distance/hp/armor/totem columns.

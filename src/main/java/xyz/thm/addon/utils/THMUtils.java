@@ -641,7 +641,9 @@ public class THMUtils {
                 ByteArrayOutputStream body = new ByteArrayOutputStream();
 
                 String content = message == null ? "" : message;
-                String payload = "{\"content\":\"" + content.replace("\\", "\\\\").replace("\"", "\\\"") + "\"}";
+                JsonObject payloadJson = new JsonObject();
+                payloadJson.addProperty("content", content);
+                String payload = payloadJson.toString();
                 body.write(sep);
                 body.write(("Content-Disposition: form-data; name=\"payload_json\"\r\nContent-Type: application/json\r\n\r\n"
                     + payload + "\r\n").getBytes(StandardCharsets.UTF_8));

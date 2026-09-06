@@ -33,6 +33,7 @@ import net.minecraft.util.Formatting;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.*;
+import com.google.gson.JsonObject;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.WorldChunk;
 import xyz.thm.addon.THMAddon;
@@ -1244,21 +1245,15 @@ public class HighwayTools extends Module {
         if (!webhookEnabled.get()) return;
         String url = webhookUrl.get().trim();
         if (url.isEmpty()) return;
-        String payload = "{\"content\":\"" + escapeJson(message) + "\"}";
+        JsonObject payloadJson = new JsonObject();
+        payloadJson.addProperty("content", message);
+        String payload = payloadJson.toString();
 
         THMUtils.async("highway-checker-webhook", () -> {
             if (!TrustedHttp.postJson(url, payload, TrustedHttp.Kind.USER_WEBHOOK, null)) {
                 debug("webhook", "send-failed kind=%s", kind);
             }
         });
-    }
-
-    private static String escapeJson(String input) {
-        return input
-            .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r");
     }
 
     private void fail(String format, Object... args) {

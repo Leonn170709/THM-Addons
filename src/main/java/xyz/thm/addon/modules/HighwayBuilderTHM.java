@@ -176,8 +176,8 @@ public class HighwayBuilderTHM extends Module {
     private static final String THM_SPEED_SNAPSHOT_FILE_NAME = "highwaybuilder-speed-snapshot";
     private static final String THM_SPEED_SNAPSHOT_MAGIC = "HB_THM_SPEED_SNAPSHOT_V1";
     private static final int THM_SPEED_SNAPSHOT_VERSION = 1;
-    private static boolean MANAGED_SPEEDMINE_SETTING_ENABLED = false;
-    private static boolean MODULE_MANAGER_INTEGRATION_ENABLED = false;
+    private static final boolean MANAGED_SPEEDMINE_SETTING_ENABLED = true;
+    private static final boolean MODULE_MANAGER_INTEGRATION_ENABLED = true;
     private static final long THM_DEBUG_LOG_ROTATE_BYTES = 100L * 1024L * 1024L;
     private static final Object THM_DEBUG_LOG_LOCK = new Object();
     private static final String STATS_CANONICAL_FILE_NAME = "highwaybuildersettings";

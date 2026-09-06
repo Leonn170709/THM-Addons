@@ -19,6 +19,8 @@ import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.network.packet.s2c.play.SubtitleS2CPacket;
 import net.minecraft.text.Text;
 import net.minecraft.text.TextColor;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.THMUtils;
 import xyz.thm.addon.utils.TrustedHttp;
@@ -280,12 +282,13 @@ public class DiscordNotifs extends Module
         // off-thread so a slow webhook can never stall the game
         THMUtils.async("discord-notifs", () -> {
             // embeds, not content, so the message can't ping anyone
-            String escapedMessage = finalMessage
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r");
-            String json = "{\"embeds\": [{\"description\": \"" + escapedMessage + "\"}]}";
+            JsonObject embed = new JsonObject();
+            embed.addProperty("description", finalMessage);
+            JsonArray embeds = new JsonArray();
+            embeds.add(embed);
+            JsonObject payload = new JsonObject();
+            payload.add("embeds", embeds);
+            String json = payload.toString();
 
             if (TrustedHttp.postJson(webhookURL.get(), json, TrustedHttp.Kind.USER_WEBHOOK, null)) {
                 THMAddon.LOG.info("Successfully sent message to webhook!");
