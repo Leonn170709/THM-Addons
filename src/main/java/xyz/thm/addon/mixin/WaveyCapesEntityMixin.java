@@ -25,6 +25,7 @@ public abstract class WaveyCapesEntityMixin extends Entity implements CapeHolder
 
     @Unique private BasicSimulation thm$simulation;
     @Unique private boolean thm$dirty;
+    @Unique private boolean thm$canUpdateGravityVector;
 
     public WaveyCapesEntityMixin(EntityType<?> type, World world) {
         super(type, world);
@@ -33,6 +34,8 @@ public abstract class WaveyCapesEntityMixin extends Entity implements CapeHolder
     @Override public BasicSimulation getSimulation() { return thm$simulation; }
     @Override public void setSimulation(BasicSimulation sim) { thm$simulation = sim; }
     @Override public void setDirty() { thm$dirty = true; }
+    @Override public void setGravityVectorRequest(boolean canUpdate) { thm$canUpdateGravityVector = canUpdate; }
+    @Override public boolean canUpdateGravityVector() { return thm$canUpdateGravityVector; }
 
     @Inject(method = "tick", at = @At("TAIL"))
     private void thm$wavyCapesTick(CallbackInfo ci) {
@@ -42,6 +45,7 @@ public abstract class WaveyCapesEntityMixin extends Entity implements CapeHolder
         if (player.getSkin().cape() == null) return;
 
         updateSimulation(16);
+        setGravityVectorRequest(true);
         if (thm$dirty) {
             thm$dirty = false;
             getSimulation().applyMovement(new xyz.thm.addon.waveycapes.util.Vector3(1f, 1f, 0));

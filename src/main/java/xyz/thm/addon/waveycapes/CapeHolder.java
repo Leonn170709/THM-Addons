@@ -18,6 +18,10 @@ public interface CapeHolder {
     void setSimulation(BasicSimulation sim);
     void setDirty();
 
+    /** The render layer may only refresh the gravity vector once per tick, not once per render pass. */
+    void setGravityVectorRequest(boolean canUpdate);
+    boolean canUpdateGravityVector();
+
     default void updateSimulation(int partCount) {
         BasicSimulation simulation = getSimulation();
         if (simulation == null || simulation.getClass() != StickSimulation3d.class) {
@@ -70,13 +74,16 @@ public interface CapeHolder {
         simulation.setSneaking(entity.isSneaking());
         Vector3 change = new Vector3((float) changeX, (float) changeY, (float) changeZ);
 
-        if (entity.isInSwimmingPose()) {
-            float rotation = entity.getPitch() + 90;
-            gravity.rotateDegrees(rotation);
-            change.rotateDegrees(rotation);
+        // With computeGravityVector on, the render layer sets the direction from the model's real
+        // down vector, so the swim-pose approximation would only fight it.
+        if (!WaveyCapesConfig.computeGravityVector) {
+            if (entity.isInSwimmingPose()) {
+                float rotation = entity.getPitch() + 90;
+                gravity.rotateDegrees(rotation);
+                change.rotateDegrees(rotation);
+            }
+            simulation.setGravityDirection(gravity);
         }
-
-        simulation.setGravityDirection(gravity);
         simulation.applyMovement(change);
         simulation.simulate();
     }

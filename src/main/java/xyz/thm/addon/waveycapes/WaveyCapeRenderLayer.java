@@ -26,6 +26,7 @@ import org.joml.Vector4f;
 
 import xyz.thm.addon.waveycapes.sim.BasicSimulation;
 import xyz.thm.addon.waveycapes.util.CapePoint;
+import xyz.thm.addon.waveycapes.util.Mth;
 import xyz.thm.addon.waveycapes.util.Vector3;
 import xyz.thm.addon.waveycapes.util.Vector4;
 
@@ -77,8 +78,14 @@ public class WaveyCapeRenderLayer extends FeatureRenderer<PlayerEntityRenderStat
         net.minecraft.client.network.AbstractClientPlayerEntity player = findPlayerForState(state);
         if (player == null) return;
 
-        BasicSimulation simulation = ((CapeHolder) player).getSimulation();
+        CapeHolder holder = (CapeHolder) player;
+        BasicSimulation simulation = holder.getSimulation();
         if (simulation == null || simulation.empty()) return;
+
+        if (WaveyCapesConfig.computeGravityVector && holder.canUpdateGravityVector()) {
+            simulation.setGravityDirection(modelDownDirection(matrices, state.bodyYaw));
+            holder.setGravityVectorRequest(false);
+        }
 
         RenderLayer layer = RenderLayers.entityTranslucent(capeId);
         if (WaveyCapesConfig.capeStyle == CapeStyle.SMOOTH) {
@@ -100,6 +107,22 @@ public class WaveyCapeRenderLayer extends FeatureRenderer<PlayerEntityRenderStat
                 emitBlockyVertices(consumer, pm, light);
             });
         }
+    }
+
+    /**
+     * The model's real "up" in body space: where the cape hangs from vs. one block above it, with the
+     * body yaw taken back out. Beats the swim-pose approximation for any pose that tilts the model.
+     */
+    private Vector3 modelDownDirection(MatrixStack matrices, float bodyYaw) {
+        Matrix4f pose = matrices.peek().getPositionMatrix();
+        org.joml.Vector3f body = pose.transformPosition(new org.joml.Vector3f());
+        org.joml.Vector3f up = pose.transformPosition(new org.joml.Vector3f(0, 1, 0)).sub(body).normalize();
+
+        float rot = -(bodyYaw - 90) * ((float) Math.PI / 180f);
+        return new Vector3(
+            up.x * Mth.cos(rot) - up.z * Mth.sin(rot),
+            up.y,
+            up.x * Mth.sin(rot) + up.z * Mth.cos(rot));
     }
 
     private net.minecraft.client.network.AbstractClientPlayerEntity findPlayerForState(PlayerEntityRenderState state) {

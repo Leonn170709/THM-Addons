@@ -309,6 +309,15 @@ public class THMSystem extends System<THMSystem> {
         .build()
     );
 
+    public final Setting<Boolean> wavyComputeGravityVector = sgWavyCapes.add(new BoolSetting.Builder()
+        .name("compute-gravity-vector")
+        .description("Hangs the cape along the model's real down direction instead of the swim-pose hack.")
+        .defaultValue(false)
+        .visible(wavyCapes::get)
+        .onChanged(v -> WaveyCapesConfig.syncFromSystem())
+        .build()
+    );
+
     public final Setting<Double> wavyMaxBend = sgWavyCapes.add(new DoubleSetting.Builder()
         .name("max-bend")
         .description("Maximum bend angle between cape segments (degrees).")

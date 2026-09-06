@@ -2145,7 +2145,8 @@ public class HighwayBuilderTHM extends Module {
             case HighwayBuilding -> {
                 width.set(5);
                 height.set(3);
-                blocksToPlace.set(List.of(Blocks.OBSIDIAN));
+                // Mutable: Meteor's block-list GUI adds straight into the setting's live list.
+                blocksToPlace.set(new ArrayList<>(List.of(Blocks.OBSIDIAN)));
                 mineAboveRailings.set(true);
                 railings.set(true);
                 floor.set(Floor.Replace);
@@ -2157,7 +2158,7 @@ public class HighwayBuilderTHM extends Module {
             case HighwayDigging -> {
                 width.set(5);
                 height.set(4);
-                blocksToPlace.set(List.of(Blocks.NETHERRACK, Blocks.BASALT, Blocks.BLACKSTONE, Blocks.SOUL_SOIL));
+                blocksToPlace.set(new ArrayList<>(List.of(Blocks.NETHERRACK, Blocks.BASALT, Blocks.BLACKSTONE, Blocks.SOUL_SOIL)));
                 mineAboveRailings.set(true);
                 railings.set(true);
                 floor.set(Floor.Replace);
