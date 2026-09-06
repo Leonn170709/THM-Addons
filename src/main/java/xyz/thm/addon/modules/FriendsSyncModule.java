@@ -41,7 +41,7 @@ public class FriendsSyncModule extends Module {
     private final Setting<SyncMode> syncMode = sgGeneral.add(new EnumSetting.Builder<SyncMode>()
         .name("sync-mode")
         .description("Command: run chat commands when a tracked player joins. File: write straight into the installed clients' friend lists — no waiting for anyone to join.")
-        .defaultValue(SyncMode.Command)
+        .defaultValue(SyncMode.File)
         .build()
     );
 
