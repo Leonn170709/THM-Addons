@@ -22,7 +22,12 @@ import net.minecraft.client.texture.NativeImage;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.resource.Resource;
 import net.minecraft.util.Identifier;
+import meteordevelopment.meteorclient.settings.BoolSetting;
+import meteordevelopment.meteorclient.settings.Setting;
+import meteordevelopment.meteorclient.settings.SettingGroup;
+import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -49,7 +54,15 @@ public abstract class NametagsMixin extends Module {
     @Unique private static final Identifier THM_ICON_TRANSPARENT_WHITE = Identifier.of("icon", "whitetransparent.webp");
     @Unique private static final Identifier THM_ICON_TRANSPARENT_BLACK = Identifier.of("icon", "blacktransparent.webp");
 
-    @Unique private static final Color THM_TOTEM_COLOR = new Color(255, 205, 60);
+    @Unique private static final Color THM_TOTEM_COLOR = new Color(255, 60, 60);
+    @Unique private static final Identifier THM_TOTEM_TEXTURE = Identifier.of("minecraft", "textures/item/totem_of_undying.png");
+
+    @Shadow @Final private SettingGroup sgPlayers;
+    @Unique private Setting<Boolean> thm$totemPops;
+    @Unique private Setting<Boolean> thm$totemPopsIcon;
+
+    @Unique private double thm$rowY;
+    @Unique private double thm$rowEndX;
 
     @Unique private static final int THM_ICON_PAD = 2;
     @Unique private static int thm$iconWidth = 64;
@@ -59,10 +72,29 @@ public abstract class NametagsMixin extends Module {
     @Unique private DrawContext thm$drawContext;
     @Unique private PlayerEntity thm$player;
 
+    @Inject(method = "<init>", at = @At("TAIL"))
+    private void thmAddon$addSettings(CallbackInfo ci) {
+        thm$totemPops = sgPlayers.add(new BoolSetting.Builder()
+            .name("totem-pops")
+            .description("Shows totem pops at the end of the nametag.")
+            .defaultValue(false)
+            .build()
+        );
+        thm$totemPopsIcon = sgPlayers.add(new BoolSetting.Builder()
+            .name("totem-pops-icon")
+            .description("Draws a totem icon in front of the count.")
+            .defaultValue(true)
+            .visible(() -> thm$totemPops.get())
+            .build()
+        );
+    }
+
     @Inject(method = "renderNametagPlayer", at = @At("HEAD"))
     private void thmAddon$captureContext(Render2DEvent event, PlayerEntity player, boolean shadow, CallbackInfo ci) {
         thm$drawContext = event.drawContext;
         thm$player = player;
+        thm$rowY = Double.NaN;
+        thm$rowEndX = 0;
     }
 
     @Inject(method = "renderNametagPlayer", at = @At("RETURN"))
@@ -91,6 +123,8 @@ public abstract class NametagsMixin extends Module {
     private double thmAddon$iconWidth(TextRenderer text, String string, boolean shadow) {
         double width = text.getWidth(string, shadow);
 
+        if (thm$isNameString(string)) width += thm$getTotemWidth(text, shadow);
+
         if (!thm$shouldRenderIcon(string)) return width;
 
         double iconHeight = text.getHeight(shadow);
@@ -101,7 +135,7 @@ public abstract class NametagsMixin extends Module {
     @Redirect(method = "renderNametagPlayer", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/renderer/text/TextRenderer;render(Ljava/lang/String;DDLmeteordevelopment/meteorclient/utils/render/color/Color;Z)D"))
     private double thmAddon$renderNameWithIcon(TextRenderer text, String string, double x, double y, Color color, boolean shadow) {
         if (!thm$shouldRenderIcon(string)) {
-            return text.render(string, x, y, color, shadow);
+            return thm$renderNameAndTotem(text, string, x, y, color, shadow);
         }
 
         double iconHeight = text.getHeight(shadow);
@@ -129,28 +163,74 @@ public abstract class NametagsMixin extends Module {
             );
         }
 
-        return text.render(string, x + iconWidth + THM_ICON_PAD, y, color, shadow);
+        return thm$renderNameAndTotem(text, string, x + iconWidth + THM_ICON_PAD, y, color, shadow);
+    }
+
+    @Unique
+    private double thm$renderNameAndTotem(TextRenderer text, String string, double x, double y, Color color, boolean shadow) {
+        double endX = text.render(string, x, y, color, shadow);
+
+        // Only the nametag line itself, not the item/enchant texts below it.
+        if (Double.isNaN(thm$rowY)) thm$rowY = y;
+        if (y == thm$rowY) thm$rowEndX = Math.max(thm$rowEndX, endX);
+
+        return endX;
     }
 
     @Inject(method = "renderNametagPlayer", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/utils/render/NametagUtils;end(Lnet/minecraft/client/gui/DrawContext;)V"))
-    private void thmAddon$renderTotemCounter(Render2DEvent event, PlayerEntity player, boolean shadow, CallbackInfo ci) {
-        THMSystem system = THMSystem.get();
-        if (system == null || !system.showTotemCounter.get()) return;
-
-        int pops = TotemTracker.get(player);
-        if (pops <= 0) return;
+    private void thmAddon$renderTotemPops(Render2DEvent event, PlayerEntity player, boolean shadow, CallbackInfo ci) {
+        String totem = thm$getTotemText();
+        if (totem == null || Double.isNaN(thm$rowY)) return;
 
         TextRenderer text = TextRenderer.get();
-        String totemText = "Totem x" + pops;
+        double x = thm$rowEndX + THM_ICON_PAD;
+        double size = text.getHeight(shadow);
 
-        double width = text.getWidth(totemText, shadow);
-        double heightDown = text.getHeight(shadow);
-        double drawX = -width / 2;
-        double drawY = heightDown + 2;
+        if (thm$totemPopsIcon.get() && thm$drawContext != null) {
+            thm$drawContext.drawTexture(
+                RenderPipelines.GUI_TEXTURED,
+                THM_TOTEM_TEXTURE,
+                (int) Math.round(x),
+                (int) Math.round(thm$rowY),
+                0f,
+                0f,
+                (int) Math.round(size),
+                (int) Math.round(size),
+                16,
+                16,
+                16,
+                16
+            );
+            x += size + THM_ICON_PAD;
+        }
 
         text.beginBig();
-        text.render(totemText, drawX, drawY, THM_TOTEM_COLOR, shadow);
+        text.render(totem, x, thm$rowY, THM_TOTEM_COLOR, shadow);
         text.end();
+    }
+
+    @Unique
+    private double thm$getTotemWidth(TextRenderer text, boolean shadow) {
+        String totem = thm$getTotemText();
+        if (totem == null) return 0;
+
+        double width = THM_ICON_PAD + text.getWidth(totem, shadow);
+        if (thm$totemPopsIcon.get()) width += text.getHeight(shadow) + THM_ICON_PAD;
+        return width;
+    }
+
+    @Unique
+    private String thm$getTotemText() {
+        if (thm$totemPops == null || !thm$totemPops.get() || thm$player == null) return null;
+
+        int pops = TotemTracker.get(thm$player);
+        return pops <= 0 ? null : "-" + pops;
+    }
+
+    @Unique
+    private boolean thm$isNameString(String string) {
+        if (thm$player == null) return false;
+        return string.equals(thm$getDisplayName(thm$player)) || string.equals(thm$player.getDisplayName().getString());
     }
 
     @Unique
@@ -158,7 +238,7 @@ public abstract class NametagsMixin extends Module {
         THMSystem system = THMSystem.get();
         if (system == null || !system.highlightNametags.get() || !system.showNametagIcon.get()) return false;
         if (thm$player == null || thm$getEligibleMember(thm$player, system) == null) return false;
-        return string.equals(thm$getDisplayName(thm$player));
+        return thm$isNameString(string);
     }
 
     @Unique

@@ -42,8 +42,8 @@ import net.minecraft.world.GameMode;
 import net.minecraft.world.RaycastContext;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.interfaces.LogoutSpotsPoseData;
-import xyz.thm.addon.mixin.accessor.LogoutSpotsAccessor;
-import xyz.thm.addon.mixin.accessor.LogoutSpotsEntryAccessor;
+import xyz.thm.addon.interfaces.LogoutSpotsPlayers;
+import xyz.thm.addon.interfaces.LogoutSpotsPoseData;
 import xyz.thm.addon.utils.PlacementUtils;
 
 import java.util.*;
@@ -464,10 +464,10 @@ public class AutoTrapPlus extends Module {
             if (!Module.class.isAssignableFrom(clazz)) return;
 
             Module module = Modules.get().get((Class<? extends Module>) clazz);
-            if (!(module instanceof LogoutSpotsAccessor accessor) || !module.isActive()) return;
+            if (!(module instanceof LogoutSpotsPlayers accessor) || !module.isActive()) return;
 
             for (Object entryObj : accessor.thm$getPlayers()) {
-                if (!(entryObj instanceof LogoutSpotsEntryAccessor entry)) continue;
+                if (!(entryObj instanceof LogoutSpotsPoseData entry)) continue;
 
                 String name = entryObj instanceof LogoutSpotsPoseData poseData
                     ? poseData.thm$getName()

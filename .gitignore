@@ -66,3 +66,4 @@ src/main/java/xyz/thm/addon/mixin/TitleScreenFastestRouteButtonMixin.java
 
 # log4j output from ./gradlew checkSsrf
 logs/
+src/main/java/xyz/thm/addon/modules/BlockTeleport.java

@@ -7,10 +7,14 @@
 package xyz.thm.addon.mixin.meteor;
 
 import meteordevelopment.meteorclient.systems.modules.render.LogoutSpots;
+import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.entity.EntityPose;
+import net.minecraft.entity.player.SkinTextures;
 import net.minecraft.entity.LimbAnimator;
 import net.minecraft.entity.player.PlayerEntity;
+import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -18,9 +22,18 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import xyz.thm.addon.interfaces.LogoutSpotsPoseData;
 import xyz.thm.addon.mixin.accessor.LivingEntityAccessor;
 
+import java.util.UUID;
+import xyz.thm.addon.mixin.accessor.PlayerModelPartsAccessor;
+
 @Mixin(targets = "meteordevelopment.meteorclient.systems.modules.render.LogoutSpots$Entry", remap = false)
-public class LogoutSpotsEntryPoseMixin implements LogoutSpotsPoseData {
+public abstract class LogoutSpotsEntryPoseMixin implements LogoutSpotsPoseData {
+    @Shadow @Final public double x, y, z;
+    @Shadow @Final public double xWidth, zWidth, height;
+    @Shadow @Final public UUID uuid;
+
     @Unique private String thm$name;
+    @Unique private SkinTextures thm$skin;
+    @Unique private byte thm$modelParts;
     @Unique private float thm$bodyYaw;
     @Unique private float thm$yaw;
     @Unique private float thm$pitch;
@@ -36,6 +49,8 @@ public class LogoutSpotsEntryPoseMixin implements LogoutSpotsPoseData {
         LimbAnimator limbAnimator = ((LivingEntityAccessor) entity).thm$getLimbAnimator();
 
         thm$name = entity.getName().getString();
+        thm$skin = entity instanceof AbstractClientPlayerEntity clientPlayer ? clientPlayer.getSkin() : null;
+        thm$modelParts = entity.getDataTracker().get(PlayerModelPartsAccessor.thm$getModelParts());
         thm$bodyYaw = entity.getBodyYaw();
         thm$yaw = entity.getYaw();
         thm$pitch = entity.getPitch();
@@ -48,6 +63,41 @@ public class LogoutSpotsEntryPoseMixin implements LogoutSpotsPoseData {
     }
 
     @Override
+    public double thm$getX() {
+        return x;
+    }
+
+    @Override
+    public double thm$getY() {
+        return y;
+    }
+
+    @Override
+    public double thm$getZ() {
+        return z;
+    }
+
+    @Override
+    public double thm$getXWidth() {
+        return xWidth;
+    }
+
+    @Override
+    public double thm$getZWidth() {
+        return zWidth;
+    }
+
+    @Override
+    public double thm$getHeight() {
+        return height;
+    }
+
+    @Override
+    public UUID thm$getUuid() {
+        return uuid;
+    }
+
+    @Override
     public float thm$getBodyYaw() {
         return thm$bodyYaw;
     }
@@ -55,6 +105,16 @@ public class LogoutSpotsEntryPoseMixin implements LogoutSpotsPoseData {
     @Override
     public String thm$getName() {
         return thm$name;
+    }
+
+    @Override
+    public SkinTextures thm$getSkin() {
+        return thm$skin;
+    }
+
+    @Override
+    public byte thm$getModelParts() {
+        return thm$modelParts;
     }
 
     @Override

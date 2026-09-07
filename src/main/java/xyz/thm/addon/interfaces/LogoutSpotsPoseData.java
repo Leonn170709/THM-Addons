@@ -6,8 +6,22 @@
 
 package xyz.thm.addon.interfaces;
 
+import net.minecraft.entity.player.SkinTextures;
+
+import java.util.UUID;
+
 public interface LogoutSpotsPoseData {
+    double thm$getX();
+    double thm$getY();
+    double thm$getZ();
+    double thm$getXWidth();
+    double thm$getZWidth();
+    double thm$getHeight();
+    UUID thm$getUuid();
+
     String thm$getName();
+    SkinTextures thm$getSkin();
+    byte thm$getModelParts();
     float thm$getBodyYaw();
     float thm$getYaw();
     float thm$getPitch();

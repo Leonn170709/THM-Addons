@@ -141,13 +141,6 @@ public class THMSystem extends System<THMSystem> {
         .build()
     );
 
-    public final Setting<Boolean> showTotemCounter = sgRender.add(new BoolSetting.Builder()
-        .name("show-totem-counter")
-        .description("Shows each player's totem of undying pop count in their nametag.")
-        .defaultValue(false)
-        .build()
-    );
-
     public final Setting<Boolean> highlightInTab = sgRender.add(new BoolSetting.Builder()
         .name("highlight-in-tab")
         .description("Highlights THM members in the player tab list.")

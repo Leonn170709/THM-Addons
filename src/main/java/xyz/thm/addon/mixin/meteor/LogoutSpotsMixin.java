@@ -16,7 +16,6 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.render.LogoutSpots;
 import meteordevelopment.meteorclient.utils.render.WireframeEntityRenderer;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
-import net.minecraft.client.network.OtherClientPlayerEntity;
 import net.minecraft.entity.EntityPose;
 import net.minecraft.entity.LimbAnimator;
 import org.spongepowered.asm.mixin.Mixin;
@@ -25,15 +24,18 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import xyz.thm.addon.interfaces.LogoutSpotsPlayers;
 import xyz.thm.addon.interfaces.LogoutSpotsPoseData;
 import xyz.thm.addon.mixin.accessor.*;
+import xyz.thm.addon.utils.render.GhostRenderer;
+import xyz.thm.addon.utils.render.SkinGhostPlayer;
 
 import java.util.*;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 
 @Mixin(value = LogoutSpots.class, remap = false)
-public abstract class LogoutSpotsMixin {
+public abstract class LogoutSpotsMixin implements LogoutSpotsPlayers {
     @Shadow private List<?> players;
     @Shadow private Setting<ShapeMode> shapeMode;
     @Shadow private Setting<SettingColor> sideColor;
@@ -41,7 +43,9 @@ public abstract class LogoutSpotsMixin {
 
     @Unique private Setting<Boolean> thm$improvedLogoutShape;
     @Unique private Setting<Boolean> thm$captureLimbAnimation;
-    @Unique private final Map<UUID, OtherClientPlayerEntity> thm$ghosts = new HashMap<>();
+    @Unique private Setting<Boolean> thm$renderSkin;
+    @Unique private Setting<Boolean> thm$skinThroughWalls;
+    @Unique private final Map<UUID, SkinGhostPlayer> thm$ghosts = new HashMap<>();
 
     @Inject(method = "<init>", at = @At("TAIL"))
     private void thm$init(CallbackInfo ci) {
@@ -59,6 +63,25 @@ public abstract class LogoutSpotsMixin {
             .visible(thm$improvedLogoutShape::get)
             .build()
         );
+        thm$renderSkin = sgThm.add(new BoolSetting.Builder()
+            .name("render-skin")
+            .description("Render the logged out player's skin instead of the wireframe.")
+            .defaultValue(true)
+            .visible(thm$improvedLogoutShape::get)
+            .build()
+        );
+        thm$skinThroughWalls = sgThm.add(new BoolSetting.Builder()
+            .name("skin-through-walls")
+            .description("Show the skin through solid blocks.")
+            .defaultValue(false)
+            .visible(() -> thm$improvedLogoutShape.get() && thm$renderSkin.get())
+            .build()
+        );
+    }
+
+    @Override
+    public List<?> thm$getPlayers() {
+        return players;
     }
 
     @Inject(method = "onDeactivate", at = @At("TAIL"))
@@ -76,17 +99,18 @@ public abstract class LogoutSpotsMixin {
         Set<UUID> seen = new HashSet<>();
 
         for (Object player : players) {
-            if (!(player instanceof LogoutSpotsEntryAccessor entry)) continue;
             if (!(player instanceof LogoutSpotsPoseData poseData)) continue;
 
-            UUID uuid = entry.thm$getUuid();
+            UUID uuid = poseData.thm$getUuid();
             seen.add(uuid);
-            OtherClientPlayerEntity ghost = thm$ghosts.computeIfAbsent(uuid, ignored ->
-                new OtherClientPlayerEntity(mc.world, new GameProfile(uuid, poseData.thm$getName()))
+            SkinGhostPlayer ghost = thm$ghosts.computeIfAbsent(uuid, ignored ->
+                new SkinGhostPlayer(mc.world, new GameProfile(uuid, poseData.thm$getName()), poseData.thm$getSkin())
             );
 
-            thm$applySnapshot(ghost, entry, poseData);
-            WireframeEntityRenderer.render(event, ghost, 1, sideColor.get(), lineColor.get(), shapeMode.get());
+            thm$applySnapshot(ghost, poseData);
+            if (!thm$renderSkin.get()) WireframeEntityRenderer.render(event, ghost, 1, sideColor.get(), lineColor.get(), shapeMode.get());
+            else if (thm$skinThroughWalls.get()) GhostRenderer.renderThroughWalls(event, ghost, 1);
+            else GhostRenderer.submit(ghost, 1);
             renderedAny = true;
         }
 
@@ -95,11 +119,13 @@ public abstract class LogoutSpotsMixin {
     }
 
     @Unique
-    private void thm$applySnapshot(OtherClientPlayerEntity ghost, LogoutSpotsEntryAccessor entry, LogoutSpotsPoseData poseData) {
-        double x = entry.thm$getX() + entry.thm$getXWidth() / 2.0;
-        double y = entry.thm$getY();
-        double z = entry.thm$getZ() + entry.thm$getZWidth() / 2.0;
+    private void thm$applySnapshot(SkinGhostPlayer ghost, LogoutSpotsPoseData poseData) {
+        double x = poseData.thm$getX() + poseData.thm$getXWidth() / 2.0;
+        double y = poseData.thm$getY();
+        double z = poseData.thm$getZ() + poseData.thm$getZWidth() / 2.0;
 
+        // The wireframe would trace the outer skin layer too, so only the skin render gets it.
+        ghost.setModelParts(thm$renderSkin.get() ? poseData.thm$getModelParts() : 0);
         ghost.refreshPositionAndAngles(x, y, z, poseData.thm$getYaw(), poseData.thm$getPitch());
         EntityPositionAccessor entityPos = (EntityPositionAccessor) ghost;
         entityPos.thm$setLastX(x);

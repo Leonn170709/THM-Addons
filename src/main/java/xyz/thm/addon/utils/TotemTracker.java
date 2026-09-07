@@ -9,6 +9,7 @@ package xyz.thm.addon.utils;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
+import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.Entity;
@@ -20,7 +21,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-/** Session-scoped totem-of-undying pop counter, keyed by player UUID. Resets on disconnect. */
+/** Session-scoped totem-of-undying pop counter, keyed by player UUID. Resets on death and disconnect. */
 public final class TotemTracker {
     private static final Map<UUID, Integer> pops = new HashMap<>();
     private static boolean subscribed = false;
@@ -41,6 +42,17 @@ public final class TotemTracker {
             if (!(entity instanceof PlayerEntity player)) return;
 
             pops.merge(player.getUuid(), 1, Integer::sum);
+        }
+
+        // Death only shows up as 0 health client-side; a player dying out of render distance keeps their count.
+        @EventHandler
+        private void onTick(TickEvent.Post event) {
+            MinecraftClient mc = MinecraftClient.getInstance();
+            if (mc.world == null || pops.isEmpty()) return;
+
+            for (PlayerEntity player : mc.world.getPlayers()) {
+                if (player.deathTime > 0 || player.getHealth() <= 0) pops.remove(player.getUuid());
+            }
         }
 
         @EventHandler
