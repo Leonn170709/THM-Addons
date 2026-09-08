@@ -25,7 +25,7 @@ import static org.lwjgl.opengl.GL11.*;
 
 /** Renders an entity with its real model and skin, like Meteor's WireframeEntityRenderer but textured. */
 public final class GhostRenderer {
-    private record Ghost(Entity entity, double scale, float alpha) {}
+    private record Ghost(Entity entity, double scale, float alpha, boolean cape) {}
 
     private static final List<Ghost> QUEUED = new ArrayList<>();
     private static final OrderedRenderCommandQueueImpl QUEUE = new OrderedRenderCommandQueueImpl();
@@ -47,10 +47,10 @@ public final class GhostRenderer {
     }
 
     /** Draws with the world's own entities, so blocks hide it but glass and portals don't. */
-    public static void submit(Entity entity, double scale, float alpha) {
+    public static void submit(Entity entity, double scale, float alpha, boolean cape) {
         // Drained every world render; a full list means nothing is draining it.
         if (QUEUED.size() > 256) QUEUED.clear();
-        QUEUED.add(new Ghost(entity, scale, alpha));
+        QUEUED.add(new Ghost(entity, scale, alpha, cape));
     }
 
     /** Called from the vanilla entity pass; ghosts submitted during a frame show up in the next one. */
@@ -59,12 +59,12 @@ public final class GhostRenderer {
 
         Vec3d cam = mc.gameRenderer.getCamera().getCameraPos();
         float tickDelta = mc.getRenderTickCounter().getTickProgress(false);
-        for (Ghost ghost : QUEUED) draw(ghost.entity, ghost.scale, ghost.alpha, cam.x, cam.y, cam.z, matrices, queue, tickDelta);
+        for (Ghost ghost : QUEUED) draw(ghost.entity, ghost.scale, ghost.alpha, ghost.cape, cam.x, cam.y, cam.z, matrices, queue, tickDelta);
         QUEUED.clear();
     }
 
     /** Draws after the world with a depth offset, so solid blocks don't hide it either. */
-    public static void renderThroughWalls(Render3DEvent event, Entity entity, double scale, float alpha) {
+    public static void renderThroughWalls(Render3DEvent event, Entity entity, double scale, float alpha, boolean cape) {
         if (mc.world == null) return;
 
         VertexConsumerProvider.Immediate immediate = mc.getBufferBuilders().getEntityVertexConsumers();
@@ -80,7 +80,7 @@ public final class GhostRenderer {
             );
         }
 
-        draw(entity, scale, alpha, event.offsetX, event.offsetY, event.offsetZ, event.matrices, QUEUE, event.tickDelta);
+        draw(entity, scale, alpha, cape, event.offsetX, event.offsetY, event.offsetZ, event.matrices, QUEUE, event.tickDelta);
 
         // Same trick Meteor's chams uses: pull the depth towards the camera instead of turning depth testing off.
         glEnable(GL_POLYGON_OFFSET_FILL);
@@ -92,15 +92,15 @@ public final class GhostRenderer {
         glDisable(GL_POLYGON_OFFSET_FILL);
     }
 
-    private static void draw(Entity entity, double scale, float ghostAlpha, double camX, double camY, double camZ, MatrixStack matrices, OrderedRenderCommandQueue queue, float tickDelta) {
+    private static void draw(Entity entity, double scale, float ghostAlpha, boolean cape, double camX, double camY, double camZ, MatrixStack matrices, OrderedRenderCommandQueue queue, float tickDelta) {
         alpha = Math.clamp(ghostAlpha, 0f, 1f);
 
         try {
             // The dispatcher, not the renderer, is what tags the state with its entity - Meteor's Chams needs that tag.
             EntityRenderState state = mc.getEntityRenderDispatcher().getAndUpdateRenderState(entity, tickDelta);
 
-            // Armor/cape feature layers are opaque, so a see-through ghost has to drop them.
-            if (isFading() && state instanceof PlayerEntityRenderState player) player.spectator = true;
+            // The cape renders on its own opaque layer, so it does not fade with the rest.
+            if (!cape && state instanceof PlayerEntityRenderState player) player.capeVisible = false;
 
             matrices.push();
             matrices.translate(entity.getX() - camX, entity.getY() - camY, entity.getZ() - camZ);

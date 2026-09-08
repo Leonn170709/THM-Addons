@@ -7,6 +7,8 @@
 package xyz.thm.addon.mixin.meteor;
 
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
+import meteordevelopment.meteorclient.mixininterface.IVec3d;
+import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.mixin.AbstractClientPlayerEntityAccessor;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.Setting;
@@ -40,8 +42,11 @@ public abstract class PopChamsGhostMixin implements GhostPose {
     @Unique private static Setting<Boolean> thm$renderSkin;
     @Unique private static Setting<Boolean> thm$throughWalls;
     @Unique private static Setting<Double> thm$transparency;
+    @Unique private static Setting<Boolean> thm$showCape;
     @Unique private static Setting<Boolean> thm$fadeOut;
     @Unique private static Setting<Double> thm$renderTime;
+    @Unique private static Setting<Double> thm$riseSpeed;
+    @Unique private static Setting<Double> thm$riseHeight;
 
     @Unique
     private static boolean thm$settings() {
@@ -50,15 +55,20 @@ public abstract class PopChamsGhostMixin implements GhostPose {
             thm$captureLimbs = settings.get("capture-limb-animation", Boolean.class);
             thm$throughWalls = settings.get("skin-through-walls", Boolean.class);
             thm$transparency = settings.get("transparency", Double.class);
+            thm$showCape = settings.get("show-cape", Boolean.class);
             thm$fadeOut = settings.get("fade-out", Boolean.class);
             thm$renderTime = settings.get("render-time", Double.class);
             thm$renderSkin = settings.get("render-skin", Boolean.class);
+            thm$riseSpeed = settings.get("rise-speed", Double.class);
+            thm$riseHeight = settings.get("rise-height", Double.class);
         }
 
         return thm$renderSkin != null && thm$captureLimbs != null && thm$throughWalls != null
-            && thm$transparency != null && thm$fadeOut != null && thm$renderTime != null;
+            && thm$transparency != null && thm$showCape != null && thm$fadeOut != null && thm$renderTime != null
+            && thm$riseSpeed != null && thm$riseHeight != null;
     }
 
+    @Unique private double thm$risen;
     @Unique private float thm$limbPos;
     @Unique private float thm$limbAmplitude;
 
@@ -94,6 +104,18 @@ public abstract class PopChamsGhostMixin implements GhostPose {
         }
     }
 
+    @Redirect(method = "render", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/mixininterface/IVec3d;meteor$setY"))
+    private void thm$rise(IVec3d pos, double y) {
+        if (!thm$settings()) {
+            pos.meteor$setY(y);
+            return;
+        }
+
+        double next = Math.min(thm$risen + thm$riseSpeed.get() * Utils.frameTime, thm$riseHeight.get());
+        pos.meteor$setY(((Entity) (Object) this).getY() + (next - thm$risen));
+        thm$risen = next;
+    }
+
     @Redirect(method = "render", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/utils/render/WireframeEntityRenderer;render"))
     private void thm$renderGhost(Render3DEvent event, Entity entity, double scale, Color sideColor, Color lineColor, ShapeMode shapeMode) {
         if (!thm$settings() || !thm$renderSkin.get()) {
@@ -104,7 +126,8 @@ public abstract class PopChamsGhostMixin implements GhostPose {
         float alpha = (float) (1 - thm$transparency.get());
         if (thm$fadeOut.get()) alpha *= (float) Math.max(0, 1 - timer / thm$renderTime.get());
 
-        if (thm$throughWalls.get()) GhostRenderer.renderThroughWalls(event, entity, scale, alpha);
-        else GhostRenderer.submit(entity, scale, alpha);
+        boolean cape = thm$showCape.get();
+        if (thm$throughWalls.get()) GhostRenderer.renderThroughWalls(event, entity, scale, alpha, cape);
+        else GhostRenderer.submit(entity, scale, alpha, cape);
     }
 }

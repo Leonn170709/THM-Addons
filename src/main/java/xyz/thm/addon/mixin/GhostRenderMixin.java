@@ -37,9 +37,10 @@ public abstract class GhostRenderMixin<T extends LivingEntity, S extends LivingE
     @Inject(method = "getRenderLayer", at = @At("RETURN"), cancellable = true)
     private void thm$ghostTranslucent(S state, boolean showBody, boolean translucent, boolean showOutline, CallbackInfoReturnable<RenderLayer> cir) {
         RenderLayer layer = cir.getReturnValue();
-        // Cutout layers ignore vertex alpha, so a fading ghost needs a translucent one.
+        // Cutout layers ignore vertex alpha; entityTranslucent is the no-cull counterpart, and the model's
+        // mirrored left limbs lose their faces on a culling layer.
         if (!GhostRenderer.isFading() || layer == null || layer.isTranslucent()) return;
 
-        cir.setReturnValue(RenderLayers.itemEntityTranslucentCull(getTexture(state)));
+        cir.setReturnValue(RenderLayers.entityTranslucent(getTexture(state)));
     }
 }

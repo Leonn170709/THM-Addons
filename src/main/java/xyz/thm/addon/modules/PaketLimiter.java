@@ -60,6 +60,7 @@ public class PaketLimiter extends Module {
     public final Setting<Set<Class<? extends Packet<?>>>> alwaysBlock = sgGeneral.add(new PacketListSetting.Builder()
         .name("always-block")
         .description("C2S packets that are always cancelled, even if in bypass.")
+        .defaultValue(java.util.Set.<Class<? extends Packet<?>>>of(net.minecraft.network.packet.c2s.play.HandSwingC2SPacket.class))
         .filter(aClass -> PacketUtils.getC2SPackets().contains(aClass))
         .build()
     );
@@ -74,9 +75,7 @@ public class PaketLimiter extends Module {
 
     @Override
     public void onActivate() {
-        if (bypass.get().isEmpty() && alwaysBlock.get().isEmpty()) {
-            applyPresets();
-        }
+        if (bypass.get().isEmpty()) applyPresets();
     }
 
     public void applyPresets() {
@@ -90,8 +89,6 @@ public class PaketLimiter extends Module {
         bypass.get().add(net.minecraft.network.packet.c2s.common.KeepAliveC2SPacket.class);
         bypass.get().add(net.minecraft.network.packet.c2s.common.CommonPongC2SPacket.class);
         bypass.get().add(net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket.class);
-        alwaysBlock.get().clear();
-        alwaysBlock.get().add(net.minecraft.network.packet.c2s.play.HandSwingC2SPacket.class);
         if (!isActive()) toggle();
     }
 

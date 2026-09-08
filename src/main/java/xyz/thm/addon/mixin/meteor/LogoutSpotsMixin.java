@@ -46,6 +46,7 @@ public abstract class LogoutSpotsMixin implements LogoutSpotsPlayers {
     @Unique private Setting<Boolean> thm$renderSkin;
     @Unique private Setting<Boolean> thm$skinThroughWalls;
     @Unique private Setting<Double> thm$transparency;
+    @Unique private Setting<Boolean> thm$showCape;
     @Unique private final Map<UUID, SkinGhostPlayer> thm$ghosts = new HashMap<>();
 
     @Inject(method = "<init>", at = @At("TAIL"))
@@ -74,6 +75,13 @@ public abstract class LogoutSpotsMixin implements LogoutSpotsPlayers {
         thm$skinThroughWalls = sgThm.add(new BoolSetting.Builder()
             .name("skin-through-walls")
             .description("Show the skin through solid blocks.")
+            .defaultValue(false)
+            .visible(() -> thm$improvedLogoutShape.get() && thm$renderSkin.get())
+            .build()
+        );
+        thm$showCape = sgThm.add(new BoolSetting.Builder()
+            .name("show-cape")
+            .description("Render the ghost's cape.")
             .defaultValue(false)
             .visible(() -> thm$improvedLogoutShape.get() && thm$renderSkin.get())
             .build()
@@ -121,8 +129,8 @@ public abstract class LogoutSpotsMixin implements LogoutSpotsPlayers {
             thm$applySnapshot(ghost, poseData);
             float alpha = (float) (1 - thm$transparency.get());
             if (!thm$renderSkin.get()) WireframeEntityRenderer.render(event, ghost, 1, sideColor.get(), lineColor.get(), shapeMode.get());
-            else if (thm$skinThroughWalls.get()) GhostRenderer.renderThroughWalls(event, ghost, 1, alpha);
-            else GhostRenderer.submit(ghost, 1, alpha);
+            else if (thm$skinThroughWalls.get()) GhostRenderer.renderThroughWalls(event, ghost, 1, alpha, thm$showCape.get());
+            else GhostRenderer.submit(ghost, 1, alpha, thm$showCape.get());
             renderedAny = true;
         }
 

@@ -44,6 +44,28 @@ public abstract class PopChamsMixin {
             .visible(thm$renderSkin::get)
             .build()
         );
+        sgThm.add(new BoolSetting.Builder()
+            .name("show-cape")
+            .description("Render the ghost's cape.")
+            .defaultValue(false)
+            .visible(thm$renderSkin::get)
+            .build()
+        );
+        sgThm.add(new DoubleSetting.Builder()
+            .name("rise-speed")
+            .description("Blocks per second the ghost floats up. Replaces y-modifier.")
+            .defaultValue(0.75)
+            .sliderRange(0, 5)
+            .build()
+        );
+        sgThm.add(new DoubleSetting.Builder()
+            .name("rise-height")
+            .description("Blocks the ghost stops rising at.")
+            .defaultValue(3)
+            .min(0)
+            .sliderRange(0, 10)
+            .build()
+        );
         sgThm.add(new DoubleSetting.Builder()
             .name("transparency")
             .description("How see-through the skin is.")
