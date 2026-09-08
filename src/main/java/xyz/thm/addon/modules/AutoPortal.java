@@ -21,6 +21,7 @@ import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
 
 import java.util.ArrayList;
@@ -198,9 +199,7 @@ public class AutoPortal extends Module {
     @EventHandler
     private void onRender(Render3DEvent event) {
         if (!render.get()) return;
-        for (int i = index; i < portalBlocks.size(); i++) {
-            BlockPos pos = portalBlocks.get(i);
-            event.renderer.box(pos, sideColor.get(), lineColor.get(), shapeMode.get(), 0);
-        }
+        RenderUtilsTHM.renderBlocks(event, portalBlocks.subList(index, portalBlocks.size()),
+            sideColor.get(), lineColor.get(), shapeMode.get());
     }
 }

@@ -30,6 +30,8 @@ public final class GhostRenderer {
 
     /** Draws with the world's own entities, so blocks hide it but glass and portals don't. */
     public static void submit(Entity entity, double scale) {
+        // Drained every world render; a full list means nothing is draining it.
+        if (QUEUED.size() > 256) QUEUED.clear();
         QUEUED.add(new Ghost(entity, scale));
     }
 
@@ -38,7 +40,8 @@ public final class GhostRenderer {
         if (QUEUED.isEmpty()) return;
 
         Vec3d cam = mc.gameRenderer.getCamera().getCameraPos();
-        for (Ghost ghost : QUEUED) draw(ghost.entity, ghost.scale, cam.x, cam.y, cam.z, matrices, queue, 0);
+        float tickDelta = mc.getRenderTickCounter().getTickProgress(false);
+        for (Ghost ghost : QUEUED) draw(ghost.entity, ghost.scale, cam.x, cam.y, cam.z, matrices, queue, tickDelta);
         QUEUED.clear();
     }
 

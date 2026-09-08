@@ -18,6 +18,7 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.Dimension;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.util.math.Vec3d;
+import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
 
 public class AxisViewer extends Module {
@@ -336,7 +337,7 @@ public class AxisViewer extends Module {
     }
 
     private void drawLine(Render3DEvent event, Vec3d start, Vec3d end, Color color) {
-        event.renderer.line(start.getX(), start.getY(), start.getZ(),
+        RenderUtilsTHM.renderLine(event, start.getX(), start.getY(), start.getZ(),
             end.getX(), end.getY(), end.getZ(), color);
     }
 

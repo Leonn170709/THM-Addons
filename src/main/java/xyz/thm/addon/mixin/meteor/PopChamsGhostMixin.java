@@ -3,6 +3,7 @@ package xyz.thm.addon.mixin.meteor;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.Setting;
+import meteordevelopment.meteorclient.settings.Settings;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.render.PopChams;
 import meteordevelopment.meteorclient.utils.render.WireframeEntityRenderer;
@@ -21,12 +22,17 @@ public class PopChamsGhostMixin {
 
     @Redirect(method = "render", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/utils/render/WireframeEntityRenderer;render"))
     private void thm$renderGhost(Render3DEvent event, Entity entity, double scale, Color sideColor, Color lineColor, ShapeMode shapeMode) {
-        if (thm$renderSkin == null) {
-            thm$renderSkin = Modules.get().get(PopChams.class).settings.get("render-skin", Boolean.class);
-            thm$throughWalls = Modules.get().get(PopChams.class).settings.get("skin-through-walls", Boolean.class);
+        if (thm$renderSkin == null || thm$throughWalls == null) {
+            Settings settings = Modules.get().get(PopChams.class).settings;
+            thm$renderSkin = settings.get("render-skin", Boolean.class);
+            thm$throughWalls = settings.get("skin-through-walls", Boolean.class);
+            if (thm$renderSkin == null || thm$throughWalls == null) {
+                WireframeEntityRenderer.render(event, entity, scale, sideColor, lineColor, shapeMode);
+                return;
+            }
         }
 
-        if (thm$renderSkin == null || !thm$renderSkin.get()) WireframeEntityRenderer.render(event, entity, scale, sideColor, lineColor, shapeMode);
+        if (!thm$renderSkin.get()) WireframeEntityRenderer.render(event, entity, scale, sideColor, lineColor, shapeMode);
         else if (thm$throughWalls.get()) GhostRenderer.renderThroughWalls(event, entity, scale);
         else GhostRenderer.submit(entity, scale);
     }

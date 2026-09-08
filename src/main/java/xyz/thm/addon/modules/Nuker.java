@@ -49,6 +49,7 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 import org.joml.Vector3d;
+import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
 import xyz.thm.addon.utils.InventoryManager;
 import xyz.thm.addon.utils.RangeUtils;
@@ -188,7 +189,7 @@ public class Nuker extends Module {
             int maxX = Math.max(pos1.getX(), pos2.getX());
             int maxY = Math.max(pos1.getY(), pos2.getY());
             int maxZ = Math.max(pos1.getZ(), pos2.getZ());
-            event.renderer.box(minX, minY, minZ, maxX, maxY, maxZ, sideColorBox.get(), lineColorBox.get(), shapeModeBox.get(), 0);
+            RenderUtilsTHM.renderBox(event, minX, minY, minZ, maxX, maxY, maxZ, sideColorBox.get(), lineColorBox.get(), shapeModeBox.get());
         }
 
         if (doubleMine.get()) {

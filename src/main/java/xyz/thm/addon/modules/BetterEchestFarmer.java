@@ -33,6 +33,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.shape.VoxelShape;
+import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
 
 public class BetterEchestFarmer extends Module {
@@ -319,8 +320,8 @@ public class BetterEchestFarmer extends Module {
     private void onRender(Render3DEvent event) {
         if (target == null || !render.get()) return;
         Box box = SHAPE.getBoundingBoxes().get(0);
-        event.renderer.box(target.getX() + box.minX, target.getY() + box.minY, target.getZ() + box.minZ,
+        RenderUtilsTHM.renderBox(event, target.getX() + box.minX, target.getY() + box.minY, target.getZ() + box.minZ,
             target.getX() + box.maxX, target.getY() + box.maxY, target.getZ() + box.maxZ,
-            sideColor.get(), lineColor.get(), ShapeMode.Both, 0);
+            sideColor.get(), lineColor.get(), ShapeMode.Both);
     }
 }

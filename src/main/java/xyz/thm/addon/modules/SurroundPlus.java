@@ -39,6 +39,7 @@ import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.*;
+import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.mixin.accessor.ExplosionS2CPacketAccessor;
 import xyz.thm.addon.utils.PlacementUtils;
@@ -623,13 +624,7 @@ public class SurroundPlus extends Module {
                 progress = 1.0 - MathHelper.clamp((double) alive / (fadeTime.get() * 1000), 0.0, 1.0);
             }
 
-            SettingColor sColor = new SettingColor(sideColor.get());
-            SettingColor lColor = new SettingColor(lineColor.get());
-
-            sColor.a = (int) (sColor.a * progress);
-            lColor.a = (int) (lColor.a * progress);
-
-            event.renderer.box(pos, sColor, lColor, shapeMode.get(), 0);
+            RenderUtilsTHM.renderBlockFaded(event, pos, sideColor.get(), lineColor.get(), shapeMode.get(), progress);
         });
     }
 

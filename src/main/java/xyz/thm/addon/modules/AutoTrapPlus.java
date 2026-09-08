@@ -40,8 +40,8 @@ import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 import net.minecraft.world.RaycastContext;
+import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
-import xyz.thm.addon.interfaces.LogoutSpotsPoseData;
 import xyz.thm.addon.interfaces.LogoutSpotsPlayers;
 import xyz.thm.addon.interfaces.LogoutSpotsPoseData;
 import xyz.thm.addon.utils.PlacementUtils;
@@ -799,9 +799,7 @@ public class AutoTrapPlus extends Module {
     private void onRender(Render3DEvent event) {
         if (!render.get()) return;
 
-        for (BlockPos pos : placePositions) {
-            event.renderer.box(pos, sideColor.get(), lineColor.get(), shapeMode.get(), 0);
-        }
+        RenderUtilsTHM.renderBlocks(event, placePositions, sideColor.get(), lineColor.get(), shapeMode.get());
 
         if (renderMap.isEmpty()) return;
 
@@ -813,12 +811,7 @@ public class AutoTrapPlus extends Module {
                 progress = 1.0 - MathHelper.clamp((double) alive / (fadeTime.get() * 1000), 0.0, 1.0);
             }
 
-            SettingColor sColor = new SettingColor(sideColor.get());
-            SettingColor lColor = new SettingColor(lineColor.get());
-            sColor.a = (int) (sColor.a * progress);
-            lColor.a = (int) (lColor.a * progress);
-
-            event.renderer.box(pos, sColor, lColor, shapeMode.get(), 0);
+            RenderUtilsTHM.renderBlockFaded(event, pos, sideColor.get(), lineColor.get(), shapeMode.get(), progress);
         });
     }
 

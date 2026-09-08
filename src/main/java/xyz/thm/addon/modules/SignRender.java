@@ -7,7 +7,6 @@
 package xyz.thm.addon.modules;
 
 import meteordevelopment.meteorclient.events.render.Render2DEvent;
-import meteordevelopment.meteorclient.renderer.Renderer2D;
 import meteordevelopment.meteorclient.renderer.text.TextRenderer;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -24,6 +23,7 @@ import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import org.joml.Vector3d;
+import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
 
 import java.util.*;
@@ -557,15 +557,7 @@ public class SignRender extends Module {
         double bgTop = centerY - bgHeight / 2;
         textRenderer.end();
         if (showBackground.get()) {
-            Color bgColor = new Color(
-                backgroundColor.get().r,
-                backgroundColor.get().g,
-                backgroundColor.get().b,
-                (int)(backgroundColor.get().a * (sign.color.a / 255.0))
-            );
-            Renderer2D.COLOR.begin();
-            Renderer2D.COLOR.quad(bgLeft, bgTop, bgWidth, bgHeight, bgColor);
-            Renderer2D.COLOR.render();
+            RenderUtilsTHM.renderBackground2D(bgLeft, bgTop, bgWidth, bgHeight, backgroundColor.get(), sign.color.a / 255.0);
         }
         textRenderer.begin(sign.scale, false, true);
         for (int i = 0; i < sign.lines.size(); i++) {
@@ -593,15 +585,7 @@ public class SignRender extends Module {
         double elementTop = screenY - elementHeight / 2;
         textRenderer.end();
         if (showBackground.get()) {
-            Color bgColor = new Color(
-                backgroundColor.get().r,
-                backgroundColor.get().g,
-                backgroundColor.get().b,
-                (int)(backgroundColor.get().a * (color.a / 255.0))
-            );
-            Renderer2D.COLOR.begin();
-            Renderer2D.COLOR.quad(elementLeft, elementTop, elementWidth, elementHeight, bgColor);
-            Renderer2D.COLOR.render();
+            RenderUtilsTHM.renderBackground2D(elementLeft, elementTop, elementWidth, elementHeight, backgroundColor.get(), color.a / 255.0);
         }
         textRenderer.begin(scale, false, true);
         textRenderer.render(text, elementLeft + bgPadding, elementTop + bgPadding, color);

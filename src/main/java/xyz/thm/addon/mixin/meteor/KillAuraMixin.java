@@ -50,6 +50,7 @@ import xyz.thm.addon.modules.ModuleManager;
 import xyz.thm.addon.system.THMSystem;
 import xyz.thm.addon.utils.InventoryManager;
 import xyz.thm.addon.utils.InventoryManager.SwapMode;
+import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.utils.RenderUtilsTHM.RenderMode;
 import xyz.thm.addon.utils.RotationUtils;
 import xyz.thm.addon.utils.ThmMembers;
@@ -489,61 +490,8 @@ public abstract class KillAuraMixin extends Module {
         Entity target = targets.get(0);
         if (target == null || !target.isAlive()) return;
         if (!(thm$isHoldingWeapon() || thm$swapMode.get() == SwapMode.Silent)) return;
-        double x = MathHelper.lerp(event.tickDelta, target.lastX, target.getX());
-        double y = MathHelper.lerp(event.tickDelta, target.lastY, target.getY());
-        double z = MathHelper.lerp(event.tickDelta, target.lastZ, target.getZ());
-        Box box = target.getBoundingBox().offset(-target.getX(), -target.getY(), -target.getZ()).offset(x, y, z);
-        Color sideColor;
-        Color lineColor;
-        switch (thm$renderMode.get()) {
-            case Fade -> {
-                long timeSinceAttack = System.currentTimeMillis() - thm$lastAttackTime;
-                float fade = 1.0f - MathHelper.clamp(timeSinceAttack / 1000.0f, 0.0f, 1.0f);
-                int sideAlpha = (int) (thm$sideColor.get().a * fade);
-                int lineAlpha = (int) (thm$lineColor.get().a * fade);
-                sideColor = new Color(
-                    thm$sideColor.get().r,
-                    thm$sideColor.get().g,
-                    thm$sideColor.get().b,
-                    Math.max(sideAlpha, 0)
-                );
-                lineColor = new Color(
-                    thm$lineColor.get().r,
-                    thm$lineColor.get().g,
-                    thm$lineColor.get().b,
-                    Math.max(lineAlpha, 0)
-                );
-            }
-            case Pulse -> {
-                double pulse = Math.sin(System.currentTimeMillis() / 200.0) * 0.5 + 0.5;
-                int sideAlpha = (int) (thm$sideColor.get().a * pulse);
-                int lineAlpha = (int) (thm$lineColor.get().a * pulse);
-                sideColor = new Color(
-                    thm$sideColor.get().r,
-                    thm$sideColor.get().g,
-                    thm$sideColor.get().b,
-                    Math.max(sideAlpha, 10)
-                );
-                lineColor = new Color(
-                    thm$lineColor.get().r,
-                    thm$lineColor.get().g,
-                    thm$lineColor.get().b,
-                    Math.max(lineAlpha, 10)
-                );
-            }
-            case Shrink -> {
-                long timeSinceAttack = System.currentTimeMillis() - thm$lastAttackTime;
-                float shrink = MathHelper.clamp(timeSinceAttack / 500.0f, 0.0f, 1.0f);
-                double expansion = 0.1 * (1.0 - shrink);
-                box = box.expand(expansion);
-                sideColor = thm$sideColor.get();
-                lineColor = thm$lineColor.get();
-            }
-            default -> {
-                sideColor = thm$sideColor.get();
-                lineColor = thm$lineColor.get();
-            }
-        }
-        event.renderer.box(box, sideColor, lineColor, thm$shapeMode.get(), 0);
+        RenderMode mode = thm$renderMode.get();
+        RenderUtilsTHM.renderEntity(event, target, thm$sideColor.get(), thm$lineColor.get(), thm$shapeMode.get(),
+            mode, thm$lastAttackTime, mode == RenderMode.Shrink ? 500 : 1000);
     }
 }

@@ -22,6 +22,7 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Items;
 import net.minecraft.util.math.BlockPos;
+import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
 
 public class AntiPhase extends Module {
@@ -142,6 +143,6 @@ public class AntiPhase extends Module {
     private void onRender(Render3DEvent event) {
         if (!render.get() || !rendering) return;
 
-        event.renderer.box(renderPos, sideColor.get(), lineColor.get(), shapeMode.get(), 0);
+        RenderUtilsTHM.renderBlock(event, renderPos, sideColor.get(), lineColor.get(), shapeMode.get());
     }
 }

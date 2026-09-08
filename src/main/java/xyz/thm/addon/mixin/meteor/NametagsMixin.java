@@ -61,6 +61,8 @@ public abstract class NametagsMixin extends Module {
     @Unique private Setting<Boolean> thm$totemPops;
     @Unique private Setting<Boolean> thm$totemPopsIcon;
 
+    @Unique private String thm$name;
+    @Unique private String thm$prefixedName;
     @Unique private double thm$rowY;
     @Unique private double thm$rowEndX;
 
@@ -93,6 +95,8 @@ public abstract class NametagsMixin extends Module {
     private void thmAddon$captureContext(Render2DEvent event, PlayerEntity player, boolean shadow, CallbackInfo ci) {
         thm$drawContext = event.drawContext;
         thm$player = player;
+        thm$name = thm$getDisplayName(player);
+        thm$prefixedName = player.getDisplayName() == null ? null : player.getDisplayName().getString();
         thm$rowY = Double.NaN;
         thm$rowEndX = 0;
     }
@@ -229,8 +233,7 @@ public abstract class NametagsMixin extends Module {
 
     @Unique
     private boolean thm$isNameString(String string) {
-        if (thm$player == null) return false;
-        return string.equals(thm$getDisplayName(thm$player)) || string.equals(thm$player.getDisplayName().getString());
+        return string.equals(thm$name) || string.equals(thm$prefixedName);
     }
 
     @Unique

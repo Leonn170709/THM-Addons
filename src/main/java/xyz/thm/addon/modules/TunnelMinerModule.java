@@ -44,6 +44,7 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.*;
+import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.RangeUtils;
 
@@ -1999,9 +2000,7 @@ public class TunnelMinerModule extends Module {
     private void onRender(Render3DEvent event) {
         // Render blocks to break
         if (optRenderMining()) {
-            for (BlockPos pos : renderBreakPositions) {
-                event.renderer.box(pos, optBreakSideColor(), optBreakLineColor(), optShapeMode(), 0);
-            }
+            RenderUtilsTHM.renderBlocks(event, renderBreakPositions, optBreakSideColor(), optBreakLineColor(), optShapeMode());
         }
 
         // Render blocks to place
@@ -2009,13 +2008,9 @@ public class TunnelMinerModule extends Module {
             int px = MathHelper.floor(mc.player.getX());
             int pz = MathHelper.floor(mc.player.getZ());
 
-            for (BlockPos pos : renderPlacePositions) {
-                // Only render if it's a valid placement target (not in player's current column)
-                if (pos.getX() == px && pos.getZ() == pz) {
-                    continue;
-                }
-                event.renderer.box(pos, optPlaceSideColor(), optPlaceLineColor(), optShapeMode(), 0);
-            }
+            // Skips the player's own column, which is never a placement target.
+            RenderUtilsTHM.renderBlocks(event, renderPlacePositions, pos -> pos.getX() != px || pos.getZ() != pz,
+                optPlaceSideColor(), optPlaceLineColor(), optShapeMode());
         }
 
         // Render planned path
@@ -2027,7 +2022,7 @@ public class TunnelMinerModule extends Module {
                 double z1 = step.fromZ() + 0.5;
                 double x2 = step.toX() + 0.5;
                 double z2 = step.toZ() + 0.5;
-                event.renderer.line(x1, y, z1, x2, y, z2, optPathLineColor());
+                RenderUtilsTHM.renderLine(event, x1, y, z1, x2, y, z2, optPathLineColor());
             }
         }
     }
