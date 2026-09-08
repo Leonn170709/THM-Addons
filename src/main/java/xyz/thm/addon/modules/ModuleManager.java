@@ -295,11 +295,6 @@ public class ModuleManager extends Module {
         if (manager != null) manager.logModuleMethodInvocation(module, action);
     }
 
-    public static void traceKillAuraMixinEvent(String event, String detail) {
-        ModuleManager manager = getActiveInstance();
-        if (manager != null) manager.logKillAuraMixinEvent(event, detail);
-    }
-
     private static ModuleManager getActiveInstance() {
         try {
             ModuleManager manager = Modules.get().get(ModuleManager.class);
@@ -364,18 +359,6 @@ public class ModuleManager extends Module {
             module,
             context.leaseLabels(),
             stack
-        ));
-    }
-
-    private void logKillAuraMixinEvent(String event, String detail) {
-        Module killAura = Modules.get().get(KillAura.class);
-        ModuleContext context = buildContext(killAura);
-        writeDebugLine(formatEventLine(
-            "killaura-mixin",
-            String.format(Locale.ROOT, "event=%s detail=%s", safeValue(event), safeValue(detail)),
-            killAura,
-            context.leaseLabels(),
-            null
         ));
     }
 

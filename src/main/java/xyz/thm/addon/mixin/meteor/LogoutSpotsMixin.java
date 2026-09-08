@@ -10,6 +10,7 @@ import com.mojang.authlib.GameProfile;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.BoolSetting;
+import meteordevelopment.meteorclient.settings.DoubleSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -17,7 +18,6 @@ import meteordevelopment.meteorclient.systems.modules.render.LogoutSpots;
 import meteordevelopment.meteorclient.utils.render.WireframeEntityRenderer;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import net.minecraft.entity.EntityPose;
-import net.minecraft.entity.LimbAnimator;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -45,6 +45,7 @@ public abstract class LogoutSpotsMixin implements LogoutSpotsPlayers {
     @Unique private Setting<Boolean> thm$captureLimbAnimation;
     @Unique private Setting<Boolean> thm$renderSkin;
     @Unique private Setting<Boolean> thm$skinThroughWalls;
+    @Unique private Setting<Double> thm$transparency;
     @Unique private final Map<UUID, SkinGhostPlayer> thm$ghosts = new HashMap<>();
 
     @Inject(method = "<init>", at = @At("TAIL"))
@@ -74,6 +75,16 @@ public abstract class LogoutSpotsMixin implements LogoutSpotsPlayers {
             .name("skin-through-walls")
             .description("Show the skin through solid blocks.")
             .defaultValue(false)
+            .visible(() -> thm$improvedLogoutShape.get() && thm$renderSkin.get())
+            .build()
+        );
+        thm$transparency = sgThm.add(new DoubleSetting.Builder()
+            .name("transparency")
+            .description("How see-through the skin is.")
+            .defaultValue(0)
+            .sliderRange(0, 1)
+            .min(0)
+            .max(1)
             .visible(() -> thm$improvedLogoutShape.get() && thm$renderSkin.get())
             .build()
         );
@@ -108,9 +119,10 @@ public abstract class LogoutSpotsMixin implements LogoutSpotsPlayers {
             );
 
             thm$applySnapshot(ghost, poseData);
+            float alpha = (float) (1 - thm$transparency.get());
             if (!thm$renderSkin.get()) WireframeEntityRenderer.render(event, ghost, 1, sideColor.get(), lineColor.get(), shapeMode.get());
-            else if (thm$skinThroughWalls.get()) GhostRenderer.renderThroughWalls(event, ghost, 1);
-            else GhostRenderer.submit(ghost, 1);
+            else if (thm$skinThroughWalls.get()) GhostRenderer.renderThroughWalls(event, ghost, 1, alpha);
+            else GhostRenderer.submit(ghost, 1, alpha);
             renderedAny = true;
         }
 
@@ -150,19 +162,7 @@ public abstract class LogoutSpotsMixin implements LogoutSpotsPlayers {
             ghost.setSwimming(false);
         }
 
-        LimbAnimator limbAnimator = ((LivingEntityAccessor) ghost).thm$getLimbAnimator();
-        ((LimbAnimatorAccessor) limbAnimator).thm$setAnimationProgress(poseData.thm$getLimbPos());
-        if (thm$captureLimbAnimation != null && thm$captureLimbAnimation.get()) {
-            // Freeze at captured swing phase/amount so the pose is preserved but does not keep animating.
-            ((LimbAnimatorAccessor) limbAnimator).thm$setLastSpeed(poseData.thm$getLimbAmplitude());
-            ((LimbAnimatorAccessor) limbAnimator).thm$setSpeedInternal(poseData.thm$getLimbAmplitude());
-            ((LimbAnimatorAccessor) limbAnimator).thm$setTimeScale(0);
-        } else {
-            ((LimbAnimatorAccessor) limbAnimator).thm$setLastSpeed(0);
-            ((LimbAnimatorAccessor) limbAnimator).thm$setSpeedInternal(0);
-            ((LimbAnimatorAccessor) limbAnimator).thm$setAnimationProgress(0);
-            ((LimbAnimatorAccessor) limbAnimator).thm$setTimeScale(0);
-        }
-
+        boolean capture = thm$captureLimbAnimation != null && thm$captureLimbAnimation.get();
+        ghost.setLimbs(capture ? poseData.thm$getLimbPos() : 0, capture ? poseData.thm$getLimbAmplitude() : 0);
     }
 }

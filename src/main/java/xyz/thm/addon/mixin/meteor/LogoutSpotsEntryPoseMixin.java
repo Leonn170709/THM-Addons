@@ -39,7 +39,6 @@ public abstract class LogoutSpotsEntryPoseMixin implements LogoutSpotsPoseData {
     @Unique private float thm$pitch;
     @Unique private float thm$headYaw;
     @Unique private float thm$limbPos;
-    @Unique private float thm$limbSpeed;
     @Unique private float thm$limbAmplitude;
     @Unique private boolean thm$sneaking;
     @Unique private boolean thm$lowPose;
@@ -56,7 +55,6 @@ public abstract class LogoutSpotsEntryPoseMixin implements LogoutSpotsPoseData {
         thm$pitch = entity.getPitch();
         thm$headYaw = entity.headYaw;
         thm$limbPos = limbAnimator.getAnimationProgress();
-        thm$limbSpeed = limbAnimator.getSpeed();
         thm$limbAmplitude = limbAnimator.getAmplitude(1);
         thm$sneaking = entity.isSneaking();
         thm$lowPose = entity.isCrawling() || entity.isSwimming() || entity.getPose() == EntityPose.SWIMMING;
@@ -135,11 +133,6 @@ public abstract class LogoutSpotsEntryPoseMixin implements LogoutSpotsPoseData {
     @Override
     public float thm$getLimbPos() {
         return thm$limbPos;
-    }
-
-    @Override
-    public float thm$getLimbSpeed() {
-        return thm$limbSpeed;
     }
 
     @Override
