@@ -8,7 +8,6 @@ package xyz.thm.addon.utils;
 
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
-import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.player.PlayerEntity;
@@ -76,19 +75,18 @@ public final class ThmMembers {
     private static Map<String, String> cachedCapeByMcName = new HashMap<>();
     private static boolean eventSubscribed = false;
 
-    private static volatile boolean joinedOnce = false;
+    private static final long JOIN_REFRESH_COOLDOWN_MS = 10 * 60 * 1000;
+    private static final int MAX_FETCH_ATTEMPTS = 4;
+    private static volatile long lastJoinRefresh = 0;
 
     private static final Object SERVER_JOIN_LISTENER = new Object() {
+        // Meteor fires this on every proxy server switch too (6b6t lobby/queue/main), not just real joins.
         @EventHandler
         private void onGameJoined(GameJoinedEvent event) {
-            if (joinedOnce) return; // dimension change, not server join
-            joinedOnce = true;
+            long now = System.currentTimeMillis();
+            if (now - lastJoinRefresh < JOIN_REFRESH_COOLDOWN_MS || !APIUtils.canRequest()) return;
+            lastJoinRefresh = now;
             refreshNow();
-        }
-
-        @EventHandler
-        private void onGameLeft(GameLeftEvent event) {
-            joinedOnce = false;
         }
     };
     private static long lastHighwayStatusFetchTime = 0;
@@ -108,41 +106,31 @@ public final class ThmMembers {
 
             fetchInProgress = true;
             startupFetchStarted = true;
-            THMUtils.async("member-fetch", () -> runFetchLoop(force));
+            THMUtils.async("member-fetch", ThmMembers::runFetchLoop);
         }
     }
 
-    private static void runFetchLoop(boolean force) {
+    // Gives up after a few tries - the next server join or the refresh button starts it again.
+    private static void runFetchLoop() {
         long delayMs = 2000;
-        while (true) {
-            // Joining 6b6t / the refresh button restarts this via refreshNow().
-            if (!APIUtils.canRequest()) {
-                synchronized (ThmMembers.class) {
-                    fetchInProgress = false;
+        try {
+            for (int attempt = 1; attempt <= MAX_FETCH_ATTEMPTS && APIUtils.canRequest(); attempt++) {
+                List<Member> members = APIUtils.fetchMembersFromApi();
+                if (members != null) {
+                    synchronized (ThmMembers.class) {
+                        updateCache(members);
+                    }
+                    return;
                 }
-                return;
+                if (attempt < MAX_FETCH_ATTEMPTS) Thread.sleep(delayMs);
+                delayMs *= 2;
             }
-            List<Member> members = APIUtils.fetchMembersFromApi();
-            if (members != null) {
-                synchronized (ThmMembers.class) {
-                    updateCache(members);
-                    fetchInProgress = false;
-                }
-                return;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            synchronized (ThmMembers.class) {
+                fetchInProgress = false;
             }
-
-            try {
-                Thread.sleep(delayMs);
-            } catch (InterruptedException e) {
-                synchronized (ThmMembers.class) {
-                    fetchInProgress = false;
-                }
-                Thread.currentThread().interrupt();
-                return;
-            }
-
-            delayMs = Math.min(delayMs * 2, 30000);
-            if (!force && startupFetchStarted && cachedMembers != null) return;
         }
     }
 
