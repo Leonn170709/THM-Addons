@@ -115,6 +115,13 @@ public final class ThmMembers {
     private static void runFetchLoop(boolean force) {
         long delayMs = 2000;
         while (true) {
+            // Joining 6b6t / the refresh button restarts this via refreshNow().
+            if (!APIUtils.canRequest()) {
+                synchronized (ThmMembers.class) {
+                    fetchInProgress = false;
+                }
+                return;
+            }
             List<Member> members = APIUtils.fetchMembersFromApi();
             if (members != null) {
                 synchronized (ThmMembers.class) {

@@ -61,6 +61,12 @@ public final class TrustedHttpSelfCheck {
         uriAccepted("https://1.1.1.1/hook", TrustedHttp.Kind.USER_WEBHOOK);
         uriAccepted("https://1.1.1.1/v1/x", TrustedHttp.Kind.API);
 
+        String logged = TrustedHttp.describe(new java.io.IOException("wrap",
+            new java.net.UnknownHostException("API.Secret.example")), "https://api.secret.example/v1/x");
+        expect(!logged.toLowerCase(java.util.Locale.ROOT).contains("secret"), "log line must not reveal the host: " + logged);
+        logged = TrustedHttp.describe(new java.io.IOException("bad https://api.secret.example/v1/x"), "https://api.secret.example/v1/x");
+        expect(!logged.contains("secret") && !logged.contains("/v1/x"), "log line must not reveal the url: " + logged);
+
         if (failures > 0) {
             System.err.println(failures + " SSRF guard check(s) FAILED");
             System.exit(1);

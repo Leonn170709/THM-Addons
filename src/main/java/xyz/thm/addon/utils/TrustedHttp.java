@@ -18,6 +18,7 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /**
  * Outbound HTTP that cannot be turned into a backdoor by a compromised API host or a
@@ -55,7 +56,7 @@ public final class TrustedHttp {
             if (uri == null) return null;
             return exchange("GET", uri, kind, null, null, maxBytes, false, null);
         } catch (Exception e) {
-            LOG.warn("Trusted HTTP GET failed: {}", e.getMessage());
+            LOG.warn("{} GET failed: {}", kind, describe(e, url));
             return null;
         }
     }
@@ -73,7 +74,7 @@ public final class TrustedHttp {
             exchange("POST", uri, kind, "application/json", body, MAX_JSON_BYTES, true, bearerToken);
             return true;
         } catch (Exception e) {
-            LOG.warn("Trusted HTTP POST failed: {}", e.getMessage());
+            LOG.warn("{} POST failed: {}", kind, describe(e, url));
             return false;
         }
     }
@@ -91,7 +92,7 @@ public final class TrustedHttp {
             exchange("POST", uri, kind, contentType, body, MAX_JSON_BYTES, true, null);
             return true;
         } catch (Exception e) {
-            LOG.warn("Trusted HTTP POST failed: {}", e.getMessage());
+            LOG.warn("{} POST failed: {}", kind, describe(e, url));
             return false;
         }
     }
@@ -125,14 +126,17 @@ public final class TrustedHttp {
     }
 
     static URI parseAllowedUri(String raw, Kind kind) {
-        if (raw == null) return null;
-        String trimmed = raw.trim();
-        if (trimmed.isEmpty() || trimmed.length() > 2048) return null;
+        String trimmed = raw == null ? "" : raw.trim();
+        if (trimmed.isEmpty() || trimmed.length() > 2048) {
+            LOG.warn("Rejected {} URL: missing or too long", kind);
+            return null;
+        }
 
         URI uri;
         try {
             uri = URI.create(trimmed);
         } catch (IllegalArgumentException e) {
+            LOG.warn("Rejected {} URL: malformed", kind);
             return null;
         }
 
@@ -147,10 +151,12 @@ public final class TrustedHttp {
             return null;
         }
 
-        if (uri.getHost() == null || uri.getHost().isBlank()) return null;
-        if (uri.getUserInfo() != null) return null;
+        if (uri.getHost() == null || uri.getHost().isBlank() || uri.getUserInfo() != null) {
+            LOG.warn("Rejected {} URL: no host or has credentials", kind);
+            return null;
+        }
         if (!isPublicHostname(uri.getHost())) {
-            LOG.warn("Rejected URL host that resolves to a private or local address");
+            LOG.warn("Rejected {} URL: host unresolvable (DNS) or private/local", kind);
             return null;
         }
         return uri.normalize();
@@ -218,7 +224,7 @@ public final class TrustedHttp {
         URI current = start;
         for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
             if (current.getHost() == null || !isPublicHostname(current.getHost())) {
-                LOG.warn("Rejected URL host that resolves to a private or local address");
+                LOG.warn("Rejected {} URL: host unresolvable (DNS) or private/local", kind);
                 return null;
             }
 
@@ -249,13 +255,13 @@ public final class TrustedHttp {
                     || code == HttpURLConnection.HTTP_SEE_OTHER || code == 307 || code == 308) {
                     String location = cn.getHeaderField("Location");
                     if (location == null || location.isBlank()) {
-                        LOG.warn("HTTP redirect without Location from {}", current.getHost());
+                        LOG.warn("{} HTTP {} redirect without Location", kind, code);
                         return null;
                     }
                     URI allowed = parseAllowedUri(current.resolve(location).toString(), kind);
                     if (allowed == null) return null;
                     if (!current.getHost().equalsIgnoreCase(allowed.getHost())) {
-                        LOG.warn("Rejected cross-host HTTP redirect from {} to {}", current.getHost(), allowed.getHost());
+                        LOG.warn("Rejected cross-host {} redirect", kind);
                         return null;
                     }
                     current = allowed;
@@ -270,13 +276,13 @@ public final class TrustedHttp {
                     }
                 }
                 if (discardBody) {
-                    if (code != 200 && code != 204) {
-                        throw new java.io.IOException("HTTP " + method + " " + current.getHost() + " returned " + code);
+                    if (code < 200 || code >= 300) {
+                        throw new java.io.IOException("HTTP " + code);
                     }
                     return body;
                 }
                 if (code != 200) {
-                    LOG.warn("HTTP GET {} returned {}", current.getHost(), code);
+                    LOG.warn("{} GET returned HTTP {}", kind, code);
                     return null;
                 }
                 return body;
@@ -286,6 +292,22 @@ public final class TrustedHttp {
         }
         LOG.warn("Too many HTTP redirects");
         return null;
+    }
+
+    // Exception type + message (TLS alerts, timeouts) with the URL and host redacted - the API host must never hit the log.
+    static String describe(Throwable e, String url) {
+        Throwable root = e;
+        while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+        String msg = e.getClass().getSimpleName() + ": " + e.getMessage();
+        if (root != e) msg += " (cause " + root.getClass().getSimpleName() + ": " + root.getMessage() + ")";
+        if (url == null || url.isBlank()) return msg;
+        msg = msg.replace(url.trim(), "<url>");
+        try {
+            String host = URI.create(url.trim()).getHost();
+            if (host != null && !host.isEmpty()) msg = msg.replaceAll("(?i)" + Pattern.quote(host), "<host>");
+        } catch (IllegalArgumentException ignored) {
+        }
+        return msg;
     }
 
     private static byte[] readLimited(InputStream in, int maxBytes) throws Exception {

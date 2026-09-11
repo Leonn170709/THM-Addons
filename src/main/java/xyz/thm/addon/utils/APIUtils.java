@@ -86,6 +86,43 @@ public class APIUtils {
         }
     }
 
+    private static volatile String lastSkipReason;
+
+    /** API traffic only goes out on 6b6t with a valid token. Logs the reason once each time it changes. */
+    public static boolean canRequest() {
+        String reason = skipReason();
+        if (reason == null) {
+            lastSkipReason = null;
+            return true;
+        }
+        if (!reason.equals(lastSkipReason)) {
+            lastSkipReason = reason;
+            THMAddon.LOG.warn("API request skipped: {}", reason);
+        }
+        return false;
+    }
+
+    private static String skipReason() {
+        try {
+            THMSystem system = THMSystem.get();
+            if (system == null) return "settings not loaded";
+            if (!system.hasApiToken()) return "no valid API token set (must be a UUID)";
+            if (mc.world == null) return "not in a world";
+            if (THMUtils.isNot6B6T()) return "not on 6b6t";
+            return null;
+        } catch (Throwable t) {
+            return "check failed: " + t.getClass().getSimpleName();
+        }
+    }
+
+    private static String apiGet(String url) {
+        return canRequest() ? TrustedHttp.getString(url, TrustedHttp.Kind.API, TrustedHttp.MAX_JSON_BYTES) : null;
+    }
+
+    private static void apiPost(String name, String url, String json) {
+        if (canRequest()) THMUtils.async(name, () -> TrustedHttp.postJson(url, json, TrustedHttp.Kind.API, apiToken()));
+    }
+
     private static String jsonContent(String message) {
         JsonObject payload = new JsonObject();
         payload.addProperty("content", message);
@@ -93,13 +130,11 @@ public class APIUtils {
     }
 
     public static void sendStatus(String message) {
-        THMUtils.async("status", () ->
-            TrustedHttp.postJson(GeneratedApiEndpoints.statusUrl(), jsonContent(message), TrustedHttp.Kind.API, apiToken()));
+        apiPost("status", GeneratedApiEndpoints.statusUrl(), jsonContent(message));
     }
 
     public static void sendStatistics(String message) {
-        THMUtils.async("statistics", () ->
-            TrustedHttp.postJson(GeneratedApiEndpoints.highwayUrl(), jsonContent(message), TrustedHttp.Kind.API, apiToken()));
+        apiPost("statistics", GeneratedApiEndpoints.highwayUrl(), jsonContent(message));
     }
 
     // Discord webhook URL, supplied by the player at runtime - never attach our API token to it.
@@ -114,11 +149,14 @@ public class APIUtils {
 
     public static List<ThmMembers.Member> fetchMembersFromApi() {
         try {
-            String response = TrustedHttp.getString(GeneratedApiEndpoints.memberHudUrl(), TrustedHttp.Kind.API, TrustedHttp.MAX_JSON_BYTES);
+            String response = apiGet(GeneratedApiEndpoints.memberHudUrl());
             if (response == null) return null;
 
             JsonArray jsonArray = GSON.fromJson(response, JsonArray.class);
-            if (jsonArray == null) return null;
+            if (jsonArray == null) {
+                THMAddon.LOG.warn("Member list response was empty");
+                return null;
+            }
             if (jsonArray.size() > MAX_MEMBERS) {
                 THMAddon.LOG.warn("Member list exceeded {} entries; ignoring remote payload", MAX_MEMBERS);
                 return null;
@@ -171,7 +209,7 @@ public class APIUtils {
 
     public static Map<String, String> fetchHighwayStatusFromApi() {
         try {
-            String body = TrustedHttp.getString(GeneratedApiEndpoints.highwayStatusUrl(), TrustedHttp.Kind.API, TrustedHttp.MAX_JSON_BYTES);
+            String body = apiGet(GeneratedApiEndpoints.highwayStatusUrl());
             if (body == null) return null;
 
             JsonObject root = GSON.fromJson(body, JsonObject.class);
@@ -208,11 +246,14 @@ public class APIUtils {
 
     public static Map<String, String> fetchCapeListFromApi() {
         try {
-            String body = TrustedHttp.getString(GeneratedApiEndpoints.capeListUrl(), TrustedHttp.Kind.API, TrustedHttp.MAX_JSON_BYTES);
+            String body = apiGet(GeneratedApiEndpoints.capeListUrl());
             if (body == null) return null;
 
             JsonObject root = GSON.fromJson(body, JsonObject.class);
-            if (root == null || !root.has("players")) return null;
+            if (root == null || !root.has("players")) {
+                THMAddon.LOG.warn("Cape list response missing 'players'");
+                return null;
+            }
 
             JsonObject players = root.getAsJsonObject("players");
             Map<String, String> result = new HashMap<>();
@@ -242,17 +283,19 @@ public class APIUtils {
         payload.addProperty("cape", cape);
         payload.addProperty("timestamp", System.currentTimeMillis());
         payload.addProperty("token", token);
-        String json = payload.toString();
-        THMUtils.async("cape-post", () -> TrustedHttp.postJson(GeneratedApiEndpoints.capePostUrl(), json, TrustedHttp.Kind.API, token));
+        apiPost("cape-post", GeneratedApiEndpoints.capePostUrl(), payload.toString());
     }
 
     public static List<CapeManager.CapeEntry> fetchCapeIndexFromApi() {
         try {
-            String body = TrustedHttp.getString(GeneratedApiEndpoints.capeIndexUrl(), TrustedHttp.Kind.API, TrustedHttp.MAX_JSON_BYTES);
+            String body = apiGet(GeneratedApiEndpoints.capeIndexUrl());
             if (body == null) return null;
 
             JsonObject root = GSON.fromJson(body, JsonObject.class);
-            if (root == null || !root.has("capes")) return null;
+            if (root == null || !root.has("capes")) {
+                THMAddon.LOG.warn("Cape index response missing 'capes'");
+                return null;
+            }
 
             JsonArray arr = root.getAsJsonArray("capes");
             List<CapeManager.CapeEntry> result = new ArrayList<>();
