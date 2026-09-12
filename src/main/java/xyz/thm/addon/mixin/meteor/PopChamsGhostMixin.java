@@ -20,6 +20,7 @@ import meteordevelopment.meteorclient.utils.render.color.Color;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LimbAnimator;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.util.math.Vec3d;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -105,15 +106,13 @@ public abstract class PopChamsGhostMixin implements GhostPose {
     }
 
     @Redirect(method = "render", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/mixininterface/IVec3d;meteor$setY"))
-    private void thm$rise(IVec3d pos, double y) {
-        if (!thm$settings()) {
-            pos.meteor$setY(y);
-            return;
-        }
+    private Vec3d thm$rise(IVec3d pos, double y) {
+        if (!thm$settings()) return pos.meteor$setY(y);
 
         double next = Math.min(thm$risen + thm$riseSpeed.get() * Utils.frameTime, thm$riseHeight.get());
-        pos.meteor$setY(((Entity) (Object) this).getY() + (next - thm$risen));
+        Vec3d result = pos.meteor$setY(((Entity) (Object) this).getY() + (next - thm$risen));
         thm$risen = next;
+        return result;
     }
 
     @Redirect(method = "render", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/utils/render/WireframeEntityRenderer;render"))

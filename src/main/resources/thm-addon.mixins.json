@@ -58,6 +58,7 @@
     "meteor.ModulesScreenMixin",
     "meteor.NametagsMixin",
     "meteor.NoSlowMixin",
+    "meteor.NotebotMixin",
     "meteor.NotifierMixin",
     "meteor.OffhandMixin",
     "meteor.PopChamsGhostMixin",

@@ -18,6 +18,7 @@ import meteordevelopment.meteorclient.systems.hud.HudGroup;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.Utils;
+import meteordevelopment.meteorclient.utils.notebot.decoder.SongDecoders;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
@@ -221,6 +222,9 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new THMStashMover());
         Modules.get().add(new Loadouts());
         Modules.get().add(new ModuleManager());
+        Modules.get().add(new NotebotStealer());
+        SongDecoders.registerDecoder("notebot", new FutureSongDecoder());
+        FutureSongDecoder.importFutureSongs();
         Homes.initialize();
         // Baritone is a hard requirement (checked above), so these need no availability guard.
         Modules.get().add(new THMHwyMonitor());

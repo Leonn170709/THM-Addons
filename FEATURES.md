@@ -34,6 +34,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 - `chest-tracker` — Track items in containers.
 - `paket-limiter` — Limits outgoing packets per tick with a bypass list.
 - `AntiDrop` — Stops you from dropping certain items.
+- `NotebotStealer` — Records nearby noteblock songs as `.nbs` for Notebot, one file per song (skips tuning, splits on 3s of silence). Notebot also plays Future `.notebot` songs.
 - `THM Stash mover` — Keeps named kit-pair deposit storage topped off with full shulker kits.
 - `friends-sync` — Runs commands when friends or THM members join. `%player%` is replaced with their name.
 - `packet-logger-thm` — Logs selected packets to replay-grade JSONL files.
