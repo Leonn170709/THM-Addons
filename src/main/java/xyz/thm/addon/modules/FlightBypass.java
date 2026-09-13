@@ -97,11 +97,19 @@ public class FlightBypass extends Module {
         .build()
     );
 
+    private final Setting<Boolean> pendingSetbackPoc = sgBypass.add(new BoolSetting.Builder()
+        .name("pending-setback-poc")
+        .description("Test only: every few seconds sends one flagged move so an NCP set back stays pending, to check if its untracked-move check then goes silent.")
+        .defaultValue(false)
+        .build()
+    );
+
     private boolean antiKick = false;
     private int downDelayFlying = 10;
     private int downDelay = 4;
     private int flightCounter = 0;
     private int teleportID = 0;
+    private int pocCounter = 0;
 
     public FlightBypass() {
         super(THMAddon.MAIN, "Fly-Bypass", "Fly using packets.");
@@ -121,6 +129,17 @@ public class FlightBypass extends Module {
 
         mc.player.setVelocity(horizontal.x, speed, horizontal.z);
         sendPackets(mc.player.getVelocity().x, mc.player.getVelocity().y, mc.player.getVelocity().z, sendTeleport.get());
+
+        // PoC for the NCP untracked-move hole: one flagged move (> 1/16 block, so it fires a real move event)
+        // leaves a set back pending. On Folia that set back never confirms without a following move event, and
+        // NCP's untracked-move check skips while a set back is pending. If the hole is real, the check goes silent
+        // and flight continues; if it is fixed, you keep getting set back regardless.
+        if (pendingSetbackPoc.get() && ++pocCounter >= 60) {
+            pocCounter = 0;
+            packetSender(new PlayerMoveC2SPacket.PositionAndOnGround(
+                mc.player.getX(), mc.player.getY() + 0.5, mc.player.getZ(),
+                false, mc.player.horizontalCollision));
+        }
     }
 
     @EventHandler
@@ -197,6 +216,7 @@ public class FlightBypass extends Module {
         mc.player.networkHandler.sendPacket(packet);
     }
     public void onActivate() {
+        pocCounter = 0;
         if (mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem() == Items.ELYTRA) {
             warning("You cant have a Elytra equipped");
             toggle();

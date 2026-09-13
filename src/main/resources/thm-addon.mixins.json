@@ -49,6 +49,7 @@
     "meteor.BetterTooltipsMixin",
     "meteor.CrystalAuraMixin",
     "meteor.DefaultSettingsWidgetFactoryMixin",
+    "meteor.EXPThrowerMixin",
     "meteor.GuiThemeMixin",
     "meteor.KillAuraMixin",
     "meteor.LogoutSpotsEntryPoseMixin",

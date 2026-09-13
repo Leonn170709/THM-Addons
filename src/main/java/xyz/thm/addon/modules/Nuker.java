@@ -288,6 +288,7 @@ public class Nuker extends Module {
                 }
             }
 
+            if (!mc.world.getWorldBorder().contains(blockPos)) return;
             if (mode.get() == Mode.Flatten && blockPos.getY() + 0.5 < pY) return;
             if (mode.get() == Mode.Smash && blockState.getHardness(mc.world, blockPos) != 0) return;
             if (suitableTools.get() && !interact.get() && !mc.player.getMainHandStack().isSuitableFor(blockState)) return;
@@ -448,6 +449,7 @@ public class Nuker extends Module {
         if (activeBedrockPos != null && mc.world.getBlockState(activeBedrockPos).getBlock() != Blocks.BEDROCK) activeBedrockPos = null;
         if (activeBedrockPos != null && isOutOfBedrockRange(activeBedrockPos)) activeBedrockPos = null;
         if (activeBedrockPos != null && isOuterLayer(activeBedrockPos)) activeBedrockPos = null;
+        if (activeBedrockPos != null && !mc.world.getWorldBorder().contains(activeBedrockPos)) activeBedrockPos = null;
         if (activeBedrockPos != null && mode.get() == Mode.Flatten && activeBedrockPos.getY() + 0.5 < mc.player.getY()) activeBedrockPos = null;
 
         if (activeBedrockPos == null) {
@@ -593,6 +595,7 @@ public class Nuker extends Module {
                     BlockPos pos = origin.add(dx, dy, dz);
                     if (mc.world.getBlockState(pos).getBlock() != Blocks.BEDROCK) continue;
                     if (isOuterLayer(pos)) continue;
+                    if (!mc.world.getWorldBorder().contains(pos)) continue;
 
                     double distSq = RangeUtils.squaredDistance(pos, mc.player.getEyePos());
                     if (distSq > rangeSq) continue;

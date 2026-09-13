@@ -3062,7 +3062,7 @@ public class HighwayBuilderTHM extends Module {
 
             BlockState state = mc.world.getBlockState(target);
             if (!state.isAir() && !state.isReplaceable()) continue;
-            if (!BlockUtils.canPlace(target)) continue;
+            if (!inBorder(target) || !BlockUtils.canPlace(target)) continue;
 
             int slot = State.Forward.findAndMoveToHotbar(
                 this,
@@ -6490,7 +6490,11 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private boolean isWithinConfiguredForwardRange(BlockPos pos) {
-        return RangeUtils.isInRange(placeRange.get(), pos);
+        return inBorder(pos) && RangeUtils.isInRange(placeRange.get(), pos);
+    }
+
+    private boolean inBorder(BlockPos pos) {
+        return mc.world != null && mc.world.getWorldBorder().contains(pos);
     }
 
     private boolean tryMineBlock(BlockPos pos, BlockState state, boolean rotate) {
@@ -7026,6 +7030,7 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private boolean safeCanBreak(BlockPos pos, BlockState state) {
+        if (!inBorder(pos)) return false;
         try {
             return BlockUtils.canBreak(pos, state);
         } catch (StackOverflowError ignored) {
@@ -11415,7 +11420,7 @@ public class HighwayBuilderTHM extends Module {
                 BlockPos blockPos = pos.getBlockPos();
                 BlockState state = mc.world.getBlockState(blockPos);
                 boolean inRange = RangeUtils.isInRange(placeRange.get(), blockPos);
-                boolean canPlaceHere = BlockUtils.canPlace(blockPos);
+                boolean canPlaceHere = inBorder(blockPos) && BlockUtils.canPlace(blockPos);
 
                 restockDebug("%s probe[%d] pos=%s block=%s replaceable=%s inRange=%s canPlace=%s",
                     label,
@@ -12177,7 +12182,7 @@ public class HighwayBuilderTHM extends Module {
 
             if ((task.type == ForwardTaskType.CORNER_PLACE || task.type == ForwardTaskType.BEHIND_CORNER_PLACE)
                 && !mc.world.getBlockState(task.pos.up()).isReplaceable()) return false;
-            return BlockUtils.canPlace(task.pos);
+            return inBorder(task.pos) && BlockUtils.canPlace(task.pos);
         }
 
     private boolean hasActiveMineOwnership(BlockPos pos) {

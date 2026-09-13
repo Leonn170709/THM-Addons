@@ -214,7 +214,7 @@ public class PlacementUtils {
     }
 
     public static boolean placeBlockPacket(BlockPos pos, int hotbarSlot, boolean offhand, boolean rotate, int rotateTicks) {
-        if (!BlockUtils.canPlace(pos)) return false;
+        if (!BlockUtils.canPlace(pos) || !mc.world.getWorldBorder().contains(pos)) return false;
         if (!offhand && (hotbarSlot < 0 || hotbarSlot > 8)) return false;
 
         Direction side = getPlaceSide(pos);
@@ -268,7 +268,7 @@ public class PlacementUtils {
      *                 Use true (default) for PvP modules that need the hand restored after each place.
      */
     public static boolean placeBlockPacket(BlockPos pos, FindItemResult item, boolean rotate, int rotateTicks, boolean airPlace, boolean swapBack) {
-        if (!BlockUtils.canPlace(pos)) return false;
+        if (!BlockUtils.canPlace(pos) || !mc.world.getWorldBorder().contains(pos)) return false;
 
         Direction side = getPlaceSide(pos);
         if (side == null && !airPlace) return false;

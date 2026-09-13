@@ -98,7 +98,7 @@ public class ScaffoldTHM extends Module {
 
             BlockPos bPos = BlockPos.ofFloored(pos);
 
-            if (!mc.world.getBlockState(bPos).isReplaceable()) {
+            if (!mc.world.getWorldBorder().contains(bPos) || !mc.world.getBlockState(bPos).isReplaceable()) {
                 worked = false;
                 continue;
             }
