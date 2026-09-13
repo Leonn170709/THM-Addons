@@ -538,13 +538,19 @@ public class Speedmine extends Module {
         bedrockPos = null;
         int budget = autoDoubleMine.get() && doubleBreak.get() ? 2 : 1;
 
-        for (BlockPos target : findAutoTargets()) {
+        List<BlockPos> targets = findAutoTargets();
+        // Auto-mine outranks the queue: drop the backlog instead of mining it first
+        if (!targets.isEmpty()) queue.clear();
+
+        for (BlockPos target : targets) {
             if (mc.world.getBlockState(target).getBlock() == Blocks.BEDROCK) {
                 // Bedrock is mined one at a time — it's a vanilla progress bar, not a packet break
                 if (bedrockPos == null) mineBedrock(target);
                 continue;
             }
             if (budget-- <= 0) break;
+            // Both break slots busy: skip rather than queue — auto targets never enter the queue
+            if (primary != null && (secondary != null || !doubleBreak.get())) continue;
             requestBreak(target);
         }
     }
