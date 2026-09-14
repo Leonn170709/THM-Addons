@@ -225,7 +225,6 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new NotebotStealer());
         SongDecoders.registerDecoder("notebot", new FutureSongDecoder());
         FutureSongDecoder.importFutureSongs();
-        Homes.initialize();
         // Baritone is a hard requirement (checked above), so these need no availability guard.
         Modules.get().add(new THMHwyMonitor());
         Modules.get().add(new HighwayTools());

@@ -19,7 +19,6 @@ import xyz.thm.addon.settings.StringMultiSelect;
 import xyz.thm.addon.shaders.ShaderManager;
 import xyz.thm.addon.utils.APIUtils;
 import xyz.thm.addon.utils.CapeManager;
-import xyz.thm.addon.utils.Homes;
 import xyz.thm.addon.utils.kitbot.KitbotChatRouter;
 import xyz.thm.addon.utils.ThmMembers;
 import xyz.thm.addon.waveycapes.CapeStyle;
@@ -46,7 +45,6 @@ public class THMSystem extends System<THMSystem> {
     private final SettingGroup sgRender = settings.createGroup("THM Rendering");
     private final SettingGroup sgPvp = settings.createGroup("PVP");
     private final SettingGroup sgProfiles = settings.createGroup("Highway Profiles");
-    private final SettingGroup sgHomes = settings.createGroup("Homes");
     private final SettingGroup sgKitbot = settings.createGroup("KitBot");
     private final SettingGroup sgPrefix = settings.createGroup("API Token");
 
@@ -177,29 +175,6 @@ public class THMSystem extends System<THMSystem> {
             if (!hasApiToken()) return;
             APIUtils.postCapeSelection(id);
         })
-        .build()
-    );
-
-    // Homes Settings - see xyz.thm.addon.utils.Homes
-    public final Setting<Boolean> homesGui = sgHomes.add(new BoolSetting.Builder()
-        .name("homes-gui")
-        .description("Turns the /homes chat list into a clickable screen.")
-        .defaultValue(true)
-        .build()
-    );
-
-    public final Setting<Homes.GuiStyle> homesGuiStyle = sgHomes.add(new EnumSetting.Builder<Homes.GuiStyle>()
-        .name("homes-gui-style")
-        .description("Which look the homes screen uses.")
-        .defaultValue(Homes.GuiStyle.Minecraft)
-        .visible(homesGui::get)
-        .build()
-    );
-
-    public final Setting<Boolean> homesAutoOpen = sgHomes.add(new BoolSetting.Builder()
-        .name("homes-auto-open")
-        .description("Opens the screen when /homes is answered.")
-        .defaultValue(true)
         .build()
     );
 
