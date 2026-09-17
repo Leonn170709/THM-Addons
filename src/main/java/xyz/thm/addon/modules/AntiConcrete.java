@@ -36,7 +36,7 @@ public class AntiConcrete extends Module {
     // -------------------- General Settings -------------------- //
     private final Setting<Mode> mode = sgGeneral.add(new EnumSetting.Builder<Mode>()
         .name("mode")
-        .description("When to place the button.")
+        .description("When to place the button, or Mine to break concrete inside you.")
         .defaultValue(Mode.Strict)
         .build()
     );
@@ -117,6 +117,11 @@ public class AntiConcrete extends Module {
         if (noButtonCooldown > 0) noButtonCooldown--;
         if (placeCooldown > 0) placeCooldown--;
 
+        if (mode.get() == Mode.Mine) {
+            mineConcreteInside();
+            return;
+        }
+
         // target check
         if (TargetUtils.getPlayerTarget(range.get(), SortPriority.LowestDistance) != null) {
             if (mode.get() == Mode.Smart) {
@@ -128,6 +133,16 @@ public class AntiConcrete extends Module {
     }
 
     // -------------------- Core Logic -------------------- //
+    private void mineConcreteInside() {
+        BlockPos feet = mc.player.getBlockPos();
+        for (BlockPos pos : new BlockPos[]{feet, feet.up()}) {
+            if (!isFallingTrapBlock(mc.world.getBlockState(pos).getBlock())) continue;
+            // Speedmine's auto-rebreak re-mines the spot if more concrete lands
+            if (!Speedmine.INSTANCE.isActive()) Speedmine.INSTANCE.toggle();
+            Speedmine.INSTANCE.requestBreak(pos);
+        }
+    }
+
     private void tryPlaceButton() {
         // don't spam placements
         if (placeCooldown > 0) return;
@@ -223,6 +238,7 @@ public class AntiConcrete extends Module {
     // -------------------- Enums -------------------- //
     public enum Mode {
         Strict,
-        Smart
+        Smart,
+        Mine
     }
 }

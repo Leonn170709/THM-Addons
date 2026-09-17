@@ -29,7 +29,7 @@ import java.util.function.Supplier;
  * <p>None of these are compile-time dependencies. Clients that can run in the same JVM as Meteor
  * (RusherHack, LiquidBounce, AnarchyClient, BleachHack) are reached through their own API by
  * reflection, so they are detected by class presence and their own code handles persistence. The
- * standalone ones are read from the files they leave behind, whose existence is the install check.
+ * rest are read from their friend files, and only count when their jar in mods/ is enabled.
  *
  * <p>Every accessor throws on failure — callers report the failure instead of silently syncing 0.
  */
@@ -177,7 +177,7 @@ public final class FriendClients {
         Path path = gameDir("wurst", "friends.json");
 
         return new Source("Wurst",
-            () -> Files.exists(path),
+            () -> modJar("wurst") && Files.exists(path),
             () -> {
                 List<String> names = new ArrayList<>();
                 for (JsonElement element : JsonParser.parseString(read(path)).getAsJsonArray()) {
@@ -202,48 +202,24 @@ public final class FriendClients {
     // BleachHack, either variant: upstream and Leon's 1.21.11 fork share the package, the
     // BleachHack.friendMang field and the whole FriendManager surface — they differ only in that
     // upstream lowercases names, which the case-insensitive dedupe in FriendsSyncModule absorbs.
-    //
-    // Loaded in this JVM, the live manager is authoritative; a file check alone was wrong twice
-    // over, since bleach/friends.txt only appears once BleachHack has saved a friend (a fresh
-    // install was invisible) and it lives in whichever instance BleachHack runs in. The file stays
-    // as the fallback for a BleachHack that shares the game directory but isn't loaded right now.
     private static Source bleachHack() {
         String main = "org.bleachhack.BleachHack";
-        Path path = gameDir("bleach", "friends.txt");
 
         return new Source("BleachHack",
-            () -> cls(main) != null || Files.exists(path),
-            () -> cls(main) != null
-                ? asNames(call(staticField(main, "friendMang"), "getFriends"))
-                : lines(path),
+            () -> cls(main) != null,
+            () -> asNames(call(staticField(main, "friendMang"), "getFriends")),
             name -> {
-                if (cls(main) != null) {
-                    Object manager = staticField(main, "friendMang");
-                    if ((Boolean) call(manager, "has", new Class[]{String.class}, name)) return false;
+                Object manager = staticField(main, "friendMang");
+                if ((Boolean) call(manager, "has", new Class[]{String.class}, name)) return false;
 
-                    call(manager, "add", new Class[]{String.class}, name);
+                call(manager, "add", new Class[]{String.class}, name);
 
-                    // add() only touches the in-memory set — this is how BleachHack's own friend
-                    // GUI and /friends command get it written back out.
-                    call(staticField("org.bleachhack.util.io.BleachFileHelper", "SCHEDULE_SAVE_FRIENDS"),
-                        "set", new Class[]{boolean.class}, true);
-                    return true;
-                }
-
-                Set<String> merged = new LinkedHashSet<>(lines(path));
-                if (!merged.add(name)) return false;
-                write(path, String.join("\n", merged) + "\n");
+                // add() only touches the in-memory set — this is how BleachHack's own friend
+                // GUI and /friends command get it written back out.
+                call(staticField("org.bleachhack.util.io.BleachFileHelper", "SCHEDULE_SAVE_FRIENDS"),
+                    "set", new Class[]{boolean.class}, true);
                 return true;
             });
-    }
-
-    /** Non-blank trimmed lines — trim also drops the {@code \r} of a CRLF file. */
-    private static List<String> lines(Path path) {
-        List<String> names = new ArrayList<>();
-        for (String line : read(path).split("\n")) {
-            if (!line.isBlank()) names.add(line.trim());
-        }
-        return names;
     }
 
     // <gamedir>/mio-fabric/socials.json — {"socials":[{"name":..,"role":"friend"}]}, and those two
@@ -252,7 +228,7 @@ public final class FriendClients {
         Path path = gameDir("mio-fabric", "socials.json");
 
         return new Source("Mio",
-            () -> Files.exists(path),
+            () -> modJar("mio") && Files.exists(path),
             () -> {
                 List<String> names = new ArrayList<>();
                 for (JsonElement element : socials(path)) {
@@ -294,7 +270,7 @@ public final class FriendClients {
         Path path = homeDir("Future", "friends.json");
 
         return new Source("Future",
-            () -> Files.exists(path),
+            () -> modJar("future") && Files.exists(path),
             () -> {
                 List<String> names = new ArrayList<>();
                 for (JsonElement element : JsonParser.parseString(read(path)).getAsJsonArray()) {
@@ -316,6 +292,16 @@ public final class FriendClients {
                 write(path, PRETTY.toJson(friends));
                 return true;
             });
+    }
+
+    /** A jar in mods/ named after the client; Fabric skips anything not ending in exactly ".jar". */
+    private static boolean modJar(String keyword) {
+        try (var files = Files.list(gameDir("mods", ""))) {
+            return files.map(f -> f.getFileName().toString().toLowerCase())
+                .anyMatch(n -> n.endsWith(".jar") && n.contains(keyword));
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private static Path gameDir(String folder, String file) {

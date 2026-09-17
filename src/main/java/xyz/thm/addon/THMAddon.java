@@ -253,6 +253,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Hud.get().register(THMStashMoverPairHud.INFO);
         Hud.get().register(TotemPopHud.INFO);
         Hud.get().register(PlayerListHud.INFO);
+        Hud.get().register(PacketsHud.INFO);
 
         //Themes
         GuiThemes.add(DarkTheme.INSTANCE);

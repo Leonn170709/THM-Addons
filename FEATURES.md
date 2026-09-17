@@ -73,6 +73,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 - `afk-logout-hud` — Displays AFK Logout remaining time.
 - `totem-pop-hud` — Shows how many totems of undying you've popped, like an item count.
 - `player-list-hud` — Lists players in render distance, with configurable ping/distance/hp/armor/totem columns.
+- `packets-hud` — Sent, received and total packets per second or per tick, with separate sent/received packet filters.
 
 ## Commands
 - `center`
