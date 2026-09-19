@@ -80,6 +80,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | --- | --- | --- |
 | `blocks-to-place` | `Obsidian`; full-cube blocks only | Blocks the builder may place. |
 | `placements-per-tick` | `1.5`, range `0.1-100`, slider `0.1-10`, one decimal place | Maximum averaged place throughput; `1.5` bursts 1-2-1-2 blocks per tick for 30 blocks/s, `0.1` performs about one placement every 10 ticks. |
+| `adaptive-placements` | `false` | Drops the place rate by 0.5 on a rubberband or a server-reverted placement (min `0.5`), raises it 0.1 per 10 stable seconds up to `3`. Starts from `placements-per-tick`; ignored with `packet-build`. |
 | `place-range` | `4.5`, slider max `5.5` | Maximum block placement reach. |
 | `place-delay` | `0`, minimum `0` | Delay between place actions. |
 | `packet-build` | `false` | Uses direct placement packets for higher forward throughput. |
@@ -152,7 +153,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | `fall-save-distance` | `3`, range `3-5` | Monitor management and `fall-save-air-place` are on | Vertical distance below the hitbox used by fall-save placement. |
 | `autosetup-modules` | `true` | Always | Automatically configures Meteor Speed Mine, Reach, Velocity, and HighwayBuilder place range for highway work. |
 | `packet-mode` | `false` | Always | Enables Packet Build and Packet Borer, leaving already-enabled pieces alone. |
-| `check-behind` | `true` | Always | Checks and repairs missing floor or railings behind the player. |
+| `check-behind` | `true` | Always | Repairs missing floor or railings behind the player, every row within `place-range` (Forward scheduler; legacy mode checks one row). |
 | `advertise` | `false` | Always | Sends THM advertisement messages in chat. |
 | `advertise-interval` | `5`, range `1-60` minutes | `advertise` is on | Delay between advertisement messages. |
 | `toggle-perspective` | `true` | Always | Switches to third person while active and restores the previous perspective afterward. |
@@ -189,6 +190,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | `silent-forward-place-swap` | `true` | `legacy-mode` is off | Silently swaps to placement blocks for scheduler work, then restores your selected slot. |
 | `silent-forward-tool-swap` | `true` | `legacy-mode` is off | Silently swaps to scheduler mining tools, then restores your selected slot. |
 | `placements-per-tick` | `1.5`, range `0.1-100`, slider `0.1-10`, one decimal place | Always | Maximum averaged placement rate; `1.5` bursts 1-2-1-2 blocks per tick for 30 blocks/s, `0.1` performs about one placement every 10 ticks. |
+| `adaptive-placements` | `false` | Always | Auto-tunes the place rate between `0.5` and `3` from rubberbands and reverted placements. |
 
 ### THM-HighwayBuilder: Inventory
 

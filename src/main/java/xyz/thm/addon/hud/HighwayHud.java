@@ -22,6 +22,7 @@ import xyz.thm.addon.modules.HighwayBuilderTHM;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
@@ -53,6 +54,12 @@ public class HighwayHud extends HudElement {
         .defaultValue(true)
         .build()
     );
+    private final Setting<Boolean> showPlaceRate = sgGeneral.add(new BoolSetting.Builder()
+        .name("show-place-rate")
+        .description("Displays real blocks placed per second vs. the current cap.")
+        .defaultValue(true)
+        .build()
+    );
     private final Setting<Boolean> showDirection = sgGeneral.add(new BoolSetting.Builder()
         .name("show-direction")
         .description("Displays direction you're heading in")
@@ -78,6 +85,10 @@ public class HighwayHud extends HudElement {
         if (showDistance.get())  l.add(new String[]{"Distance travelled", String.valueOf(lastDistance)});
         if (showBroken.get())   l.add(new String[]{"Blocks broken", String.valueOf(mod.blocksBroken)});
         if (showPlaced.get())   l.add(new String[]{"Blocks placed", String.valueOf(mod.blocksPlaced)});
+        if (showPlaceRate.get()) {
+            double target = mod.getTargetPlacesPerSecond();
+            l.add(new String[]{"Place rate", String.format(Locale.ROOT, "%.1f/s (cap %s)", mod.getMeasuredPlacesPerSecond(), target < 0 ? "none" : String.format(Locale.ROOT, "%.0f/s", target))});
+        }
         if (showDirection.get())l.add(new String[]{"Direction", dir});
         if (showRefill.get())   l.add(new String[]{"Distance till restock", String.valueOf(distanceTillRestock)});
 

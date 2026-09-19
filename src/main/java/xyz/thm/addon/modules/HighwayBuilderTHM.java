@@ -11,6 +11,7 @@
 
 package xyz.thm.addon.modules;
 
+import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
@@ -45,6 +46,7 @@ import meteordevelopment.meteorclient.utils.player.*;
 import meteordevelopment.meteorclient.utils.render.NametagUtils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
+import xyz.thm.addon.utils.RenderUtilsTHM;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.meteorclient.utils.world.TickRate;
 import meteordevelopment.orbit.EventHandler;
@@ -79,6 +81,7 @@ import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.network.packet.s2c.play.EntityPositionSyncS2CPacket;
 import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
+import net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.entry.RegistryEntry;
@@ -123,6 +126,8 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -1020,7 +1025,7 @@ public class HighwayBuilderTHM extends Module {
 
     private final Setting<Boolean> checkBehind = sgGeneral.add(new BoolSetting.Builder()
         .name("check-behind")
-        .description("Checks and repairs missing highway floor and railings behind the player.")
+        .description("Repairs missing floor and railings behind the player, as far back as place range reaches.")
         .defaultValue(true)
         .build()
     );
@@ -1049,6 +1054,18 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+    private final Setting<Boolean> renderReachDebug = sgDebugging.add(new BoolSetting.Builder()
+        .name("render-reach")
+        .description("Outlines every block the scheduler checks within reach: blue ahead, orange behind.")
+        .defaultValue(false)
+        .build()
+    );
+
+    private static final Color REACH_AHEAD_SIDE = new Color(60, 140, 255, 25), REACH_AHEAD_LINE = new Color(60, 140, 255, 200);
+    private static final Color REACH_BEHIND_SIDE = new Color(255, 150, 40, 25), REACH_BEHIND_LINE = new Color(255, 150, 40, 200);
+    private final LongOpenHashSet reachAheadRender = new LongOpenHashSet();
+    private final LongOpenHashSet reachBehindRender = new LongOpenHashSet();
+
     private final Setting<Boolean> forwardSchedulerDebugLog = sgDebugging.add(new BoolSetting.Builder()
         .name("forward-scheduler-debug")
         .description("Logs active row, queue, boundary, and actionability details for the forward scheduler.")
@@ -1071,6 +1088,13 @@ public class HighwayBuilderTHM extends Module {
         .range(0.1, 100)
         .sliderRange(0.1, 10)
         .decimalPlaces(1)
+        .build()
+    );
+
+    public final Setting<Boolean> adaptivePlacements = sgPaving.add(new BoolSetting.Builder()
+        .name("adaptive-placements")
+        .description("Lowers placements-per-tick on rubberbands or reverted placements, raises it back up to 3 when stable.")
+        .defaultValue(false)
         .build()
     );
 
@@ -1482,6 +1506,22 @@ public class HighwayBuilderTHM extends Module {
     private int borerPackets;
     private int placeActionsThisTick;
     private double placeFractionCarry;
+
+    private static final double ADAPTIVE_PLACE_MAX = 3.0; // higher is unstable
+    private static final double ADAPTIVE_PLACE_MIN = 0.5;
+    private static final int ADAPTIVE_PLACE_STABLE_TICKS = 200;
+    private static final int ADAPTIVE_PLACE_REVERT_WINDOW = 40;
+    private double adaptivePlaceRate;
+    private int adaptivePlaceStableTicks;
+    private final Long2LongOpenHashMap recentPlacements = new Long2LongOpenHashMap();
+    // Filled from the netty thread, drained on tick.
+    private final ConcurrentLinkedQueue<Long> revertedBlockUpdates = new ConcurrentLinkedQueue<>();
+    private final AtomicInteger pendingRubberbands = new AtomicInteger();
+
+    private int placedTotal;
+    private int placeRateSampleTotal;
+    private long placeRateSampleTick = Long.MIN_VALUE;
+    private double measuredPlacesPerSecond;
     private int tpsThrottleLastSampleAge = Integer.MIN_VALUE;
     private double tpsThrottleSampledTps = TPS_THROTTLE_NORMAL;
     private double tpsThrottleAdjustedBlocksPerTick = 1.0;
@@ -2277,11 +2317,12 @@ public class HighwayBuilderTHM extends Module {
         kitbotPeriodicUpdatePending = false;
         kitbotPeriodicUpdateNextTick = mc.world.getTime() + KITBOT_PERIODIC_UPDATE_INTERVAL_TICKS;
         forwardSchedulerDebugFileErrorLogged = false;
+        resetAdaptivePlacement();
         resetTpsThrottleRuntime();
         clearSafetyRuntime("module-activate");
         mineActionsThisTick = Math.max(1, (int) Math.floor(sanitizeMineActionRate(blocksPerTick.get())));
         mineFractionCarry = 0.0;
-        placeActionsThisTick = Math.max(0, (int) Math.floor(sanitizePlaceActionRate(placementsPerTick.get())));
+        placeActionsThisTick = Math.max(0, (int) Math.floor(basePlacementsPerTick()));
         placeFractionCarry = 0.0;
         resetEnclosurePlaceCredit();
         clearEnclosurePlacementConfirmation();
@@ -4426,7 +4467,7 @@ public class HighwayBuilderTHM extends Module {
         if (shouldPauseForTpsThrottle()) {
             boolean preserveCenterInput = tickTpsSafetyEnclosureDuringPause();
             handleTpsThrottlePauseTick(!preserveCenterInput);
-            tickDebug("idle: tps throttle paused (%s, sampledTps=%s)", tpsThrottlePauseReason, formatTpsThrottleSample(tpsThrottleSampledTps));
+            if (debugLog.get()) tickDebug("idle: tps throttle paused (%s, sampledTps=%s)", tpsThrottlePauseReason, formatTpsThrottleSample(tpsThrottleSampledTps));
             return;
         }
 
@@ -4493,6 +4534,7 @@ public class HighwayBuilderTHM extends Module {
         forwardMineCount = 0;
         forwardPlaceCount = 0;
         mineActionsThisTick = computeMineActionsThisTick();
+        tickAdaptivePlacement();
         placeActionsThisTick = computePlaceActionsThisTick();
         pruneExpiredForwardBreakCredits();
         refreshCountedForwardStatPositions();
@@ -4525,7 +4567,7 @@ public class HighwayBuilderTHM extends Module {
                     return;
                 }
             }
-            tickDebug("state=%s restock=%s mineActions=%d placeActions=%d creative=%s",
+            if (debugLog.get()) tickDebug("state=%s restock=%s mineActions=%d placeActions=%d creative=%s",
                 stateName(state),
                 restockTask.activeSummary(),
                 mineActionsThisTick,
@@ -4535,7 +4577,7 @@ public class HighwayBuilderTHM extends Module {
             state.tick(this);
             restockWatchdog.tickAfterState();
         } else {
-            tickDebug("idle: restock watchdog owns the tick (restock=%s)", restockTask.activeSummary());
+            if (debugLog.get()) tickDebug("idle: restock watchdog owns the tick (restock=%s)", restockTask.activeSummary());
         }
         maybeLogMovement();
 
@@ -4610,6 +4652,11 @@ public class HighwayBuilderTHM extends Module {
             } else if (event.packet instanceof EntityPositionSyncS2CPacket packet && mc.player != null && packet.id() == mc.player.getId()) {
                 noteDesyncWiggleCorrectionPacket("EntityPositionSyncS2CPacket", packet.id());
             }
+        }
+
+        if (adaptivePlacements.get()) {
+            if (event.packet instanceof PlayerPositionLookS2CPacket) pendingRubberbands.incrementAndGet();
+            else if (event.packet instanceof BlockUpdateS2CPacket u && u.getState().isAir()) revertedBlockUpdates.add(u.getPos().asLong());
         }
 
         if (event.packet instanceof InventoryS2CPacket p) {
@@ -4918,6 +4965,8 @@ public class HighwayBuilderTHM extends Module {
     @EventHandler
     private void onRender3D(Render3DEvent event) {
         if (suspended || blockPosProvider == null || mc.player == null || mc.world == null) return;
+
+        if (renderReachDebug.get() && dir != null) renderReachDebug(event);
 
         if (renderMine.get()) {
             render(event, blockPosProvider.getFront(), mBlockPos -> canMine(mBlockPos, true), true);
@@ -5937,7 +5986,7 @@ public class HighwayBuilderTHM extends Module {
             tpsThrottleSettleUntilMs = System.currentTimeMillis() + TPS_THROTTLE_SETTLE_MS;
         } else {
             tpsThrottleAdjustedBlocksPerTick = sanitizeMineActionRate(blocksPerTick.get());
-            tpsThrottleAdjustedPlacementsPerTick = sanitizePlaceActionRate(placementsPerTick.get());
+            tpsThrottleAdjustedPlacementsPerTick = basePlacementsPerTick();
             tpsThrottlePaused = false;
             tpsThrottlePauseReason = TpsThrottlePauseReason.None;
             tpsThrottleSettleUntilMs = 0L;
@@ -5946,7 +5995,7 @@ public class HighwayBuilderTHM extends Module {
 
     private void updateTpsActionThrottle() {
         double baseBlocksPerTick = sanitizeMineActionRate(blocksPerTick.get());
-        double basePlacementsPerTick = sanitizePlaceActionRate(placementsPerTick.get());
+        double basePlacementsPerTick = basePlacementsPerTick();
         boolean wasPaused = tpsThrottlePaused;
         TpsThrottlePauseReason previousReason = tpsThrottlePauseReason;
 
@@ -6379,6 +6428,7 @@ public class HighwayBuilderTHM extends Module {
         safetyPlacedThisTick = true;
         placeTimer = placeDelay.get();
         count++;
+        notePlacement(target);
         forwardPlaceCount++;
         if (renderPlace.get()) placeTrail.add(BlockPos.asLong(target.getX(), target.getY(), target.getZ()));
         if (debugLog.get()) highwayDebug("HB safety place source=%s target=%s slot=%d.", source, formatBlockPos(target), slot);
@@ -6398,7 +6448,7 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private double effectivePlacementsPerTickActionRate() {
-        return pauseOnLag.get() ? Math.max(0.0, tpsThrottleAdjustedPlacementsPerTick) : sanitizePlaceActionRate(placementsPerTick.get());
+        return pauseOnLag.get() ? Math.max(0.0, tpsThrottleAdjustedPlacementsPerTick) : basePlacementsPerTick();
     }
 
     private double sanitizeMineActionRate(double value) {
@@ -6428,6 +6478,71 @@ public class HighwayBuilderTHM extends Module {
         }
 
         return Math.max(0, whole);
+    }
+
+    private double basePlacementsPerTick() {
+        return adaptivePlacements.get() && adaptivePlaceRate > 0 ? adaptivePlaceRate : sanitizePlaceActionRate(placementsPerTick.get());
+    }
+
+    private void resetAdaptivePlacement() {
+        adaptivePlaceRate = Math.min(ADAPTIVE_PLACE_MAX, sanitizePlaceActionRate(placementsPerTick.get()));
+        adaptivePlaceStableTicks = 0;
+        recentPlacements.clear();
+        revertedBlockUpdates.clear();
+        pendingRubberbands.set(0);
+        placeRateSampleTick = Long.MIN_VALUE;
+        measuredPlacesPerSecond = 0.0;
+    }
+
+    private void notePlacement(BlockPos pos) {
+        placedTotal++;
+        if (adaptivePlacements.get()) recentPlacements.put(pos.asLong(), mc.world.getTime());
+    }
+
+    private void tickAdaptivePlacement() {
+        long now = mc.world.getTime();
+        if (placeRateSampleTick == Long.MIN_VALUE || now < placeRateSampleTick) {
+            placeRateSampleTick = now;
+            placeRateSampleTotal = placedTotal;
+        } else if (now - placeRateSampleTick >= 100) {
+            measuredPlacesPerSecond = (placedTotal - placeRateSampleTotal) * 20.0 / (now - placeRateSampleTick);
+            placeRateSampleTick = now;
+            placeRateSampleTotal = placedTotal;
+        }
+
+        if (!adaptivePlacements.get()) return;
+
+        int rubberbands = pendingRubberbands.getAndSet(0);
+        int reverts = 0;
+        for (Long pos; (pos = revertedBlockUpdates.poll()) != null; ) {
+            if (recentPlacements.containsKey(pos.longValue())) {
+                recentPlacements.remove(pos.longValue());
+                reverts++;
+            }
+        }
+        recentPlacements.values().removeIf(t -> now - t > ADAPTIVE_PLACE_REVERT_WINDOW);
+
+        if (state != State.Forward || packetBuild.get()) return;
+
+        if (rubberbands > 0 || reverts > 0) {
+            double lowered = Math.max(ADAPTIVE_PLACE_MIN, roundToNearestTenth(adaptivePlaceRate - 0.5));
+            if (lowered < adaptivePlaceRate) info("Adaptive placements: %.1f -> %.1f (rubberbands=%d, reverted=%d).", adaptivePlaceRate, lowered, rubberbands, reverts);
+            adaptivePlaceRate = lowered;
+            adaptivePlaceStableTicks = 0;
+        } else if (++adaptivePlaceStableTicks >= ADAPTIVE_PLACE_STABLE_TICKS && adaptivePlaceRate < ADAPTIVE_PLACE_MAX) {
+            adaptivePlaceRate = Math.min(ADAPTIVE_PLACE_MAX, roundToNearestTenth(adaptivePlaceRate + 0.1));
+            adaptivePlaceStableTicks = 0;
+        }
+    }
+
+    /** Real placements per second over the last 5s. */
+    public double getMeasuredPlacesPerSecond() {
+        return measuredPlacesPerSecond;
+    }
+
+    /** Current place-rate cap in blocks/s, or -1 when unlimited (packet build). */
+    public double getTargetPlacesPerSecond() {
+        return packetBuild.get() ? -1 : effectivePlacementsPerTickActionRate() * 20.0;
     }
 
     private int computePlaceActionsThisTick() {
@@ -6538,6 +6653,7 @@ public class HighwayBuilderTHM extends Module {
 
         placeTimer = placeDelay.get();
         count++;
+        notePlacement(pos);
 
         if (renderPlace.get()) placeTrail.add(BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ()));
 
@@ -6676,6 +6792,7 @@ public class HighwayBuilderTHM extends Module {
 
         placeTimer = placeDelay.get();
         count++;
+        notePlacement(pos);
 
         if (renderPlace.get()) placeTrail.add(BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ()));
 
@@ -6844,6 +6961,7 @@ public class HighwayBuilderTHM extends Module {
         if (!placed) return false;
         placeTimer = placeDelay.get();
         count++;
+        notePlacement(pos);
         if (renderPlace.get()) placeTrail.add(BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ()));
         return true;
     }
@@ -11927,34 +12045,34 @@ public class HighwayBuilderTHM extends Module {
 
     private void collectForwardSeedTasks(List<ForwardTask> mineTasks, List<ForwardTask> placeTasks) {
         addForwardLaneTasks(mineTasks, blockPosProvider.getFront(), ForwardTaskType.FRONT_MINE, 0);
-        if (checkBehind.get()) addForwardLaneTasks(mineTasks, blockPosProvider.getBehindFront(), ForwardTaskType.BEHIND_FRONT_MINE, 0);
+        addBehindLaneTasks(mineTasks, blockPosProvider.getBehindFront(), ForwardTaskType.BEHIND_FRONT_MINE);
 
         if (floor.get() == Floor.Replace) {
             addForwardLaneTasks(mineTasks, blockPosProvider.getFloor(), ForwardTaskType.FLOOR_MINE, 0);
-            if (checkBehind.get()) addForwardLaneTasks(mineTasks, blockPosProvider.getBehindFloor(), ForwardTaskType.BEHIND_FLOOR_MINE, 0);
+            addBehindLaneTasks(mineTasks, blockPosProvider.getBehindFloor(), ForwardTaskType.BEHIND_FLOOR_MINE);
         }
 
         if (railings.get()) {
             addForwardLaneTasks(mineTasks, blockPosProvider.getRailings(0), ForwardTaskType.RAILINGS_MINE, 0);
-            if (checkBehind.get()) addForwardLaneTasks(mineTasks, blockPosProvider.getBehindRailings(0), ForwardTaskType.BEHIND_RAILINGS_MINE, 0);
+            addBehindLaneTasks(mineTasks, blockPosProvider.getBehindRailings(0), ForwardTaskType.BEHIND_RAILINGS_MINE);
         }
 
         if (mineAboveRailings.get()) {
             addForwardLaneTasks(mineTasks, blockPosProvider.getRailings(1), ForwardTaskType.ABOVE_RAILINGS_MINE, 0);
-            if (checkBehind.get()) addForwardLaneTasks(mineTasks, blockPosProvider.getBehindRailings(1), ForwardTaskType.BEHIND_ABOVE_RAILINGS_MINE, 0);
+            addBehindLaneTasks(mineTasks, blockPosProvider.getBehindRailings(1), ForwardTaskType.BEHIND_ABOVE_RAILINGS_MINE);
         }
 
         addForwardLaneTasks(placeTasks, blockPosProvider.getLiquids(), ForwardTaskType.LIQUID_PLACE, 0);
         if (railings.get() && cornerBlock.get()) {
             addForwardLaneTasks(placeTasks, blockPosProvider.getRailings(-1), ForwardTaskType.CORNER_PLACE, 0);
-            if (checkBehind.get()) addForwardLaneTasks(placeTasks, blockPosProvider.getBehindRailings(-1), ForwardTaskType.BEHIND_CORNER_PLACE, 0);
+            addBehindLaneTasks(placeTasks, blockPosProvider.getBehindRailings(-1), ForwardTaskType.BEHIND_CORNER_PLACE);
         }
         if (railings.get()) {
             addForwardLaneTasks(placeTasks, blockPosProvider.getRailings(0), ForwardTaskType.RAILINGS_PLACE, 0);
-            if (checkBehind.get()) addForwardLaneTasks(placeTasks, blockPosProvider.getBehindRailings(0), ForwardTaskType.BEHIND_RAILINGS_PLACE, 0);
+            addBehindLaneTasks(placeTasks, blockPosProvider.getBehindRailings(0), ForwardTaskType.BEHIND_RAILINGS_PLACE);
         }
         addForwardLaneTasks(placeTasks, blockPosProvider.getFloor(), ForwardTaskType.FLOOR_PLACE, 0);
-        if (checkBehind.get()) addForwardLaneTasks(placeTasks, blockPosProvider.getBehindFloor(), ForwardTaskType.BEHIND_FLOOR_PLACE, 0);
+        addBehindLaneTasks(placeTasks, blockPosProvider.getBehindFloor(), ForwardTaskType.BEHIND_FLOOR_PLACE);
     }
 
     private ForwardRowSchedule shiftForwardRow(ForwardRowSchedule previous, int rowId) {
@@ -11973,6 +12091,34 @@ public class HighwayBuilderTHM extends Module {
         ForwardRowSchedule row = new ForwardRowSchedule(rowId, mineTasks, placeTasks, mineQueue, placeQueue, new LinkedHashMap<>(), computeForwardBoundaryProjection(mineTasks, placeTasks));
         refreshForwardActiveRow(row);
         return row;
+    }
+
+    private void renderReachDebug(Render3DEvent event) {
+        List<ForwardTask> tasks = new ArrayList<>();
+        collectForwardSeedTasks(tasks, tasks);
+        reachAheadRender.clear();
+        reachBehindRender.clear();
+        for (ForwardTask task : tasks) {
+            if (!isWithinConfiguredForwardRange(task.pos)) continue;
+            (task.type.isBehind() ? reachBehindRender : reachAheadRender).add(task.pos.asLong());
+        }
+        reachAheadRender.removeAll(reachBehindRender);
+        RenderUtilsTHM.renderBlockSet(event, reachAheadRender, REACH_AHEAD_SIDE, REACH_AHEAD_LINE, ShapeMode.Both);
+        RenderUtilsTHM.renderBlockSet(event, reachBehindRender, REACH_BEHIND_SIDE, REACH_BEHIND_LINE, ShapeMode.Both);
+    }
+
+    private void addBehindLaneTasks(List<ForwardTask> tasks, MBPIterator iterator, ForwardTaskType type) {
+        if (iterator == null || !checkBehind.get()) return;
+        int rows = (int) Math.ceil(placeRange.get()) + 1;
+        for (MBlockPos pos : iterator) {
+            BlockPos base = pos.getBlockPos().toImmutable();
+            tasks.add(new ForwardTask(base, type));
+            for (int k = 1; k < rows; k++) {
+                BlockPos back = base.add(-dir.offsetX * k, 0, -dir.offsetZ * k);
+                if (!isWithinConfiguredForwardRange(back)) break;
+                tasks.add(new ForwardTask(back, type));
+            }
+        }
     }
 
     private void addForwardLaneTasks(List<ForwardTask> tasks, MBPIterator iterator, ForwardTaskType type, int rowId) {
@@ -12171,6 +12317,7 @@ public class HighwayBuilderTHM extends Module {
         if (mc.world == null) return false;
         BlockState state = mc.world.getBlockState(task.pos);
         if (shouldSkipSignBreak(task.pos, state)) return false;
+        if (task.type.isBehind() && !isWithinConfiguredForwardRange(task.pos)) return false;
         return safeCanBreak(task.pos, state) && (task.type.mineBlocksToPlace() || !blocksToPlace.get().contains(state.getBlock()));
     }
 
@@ -12179,6 +12326,7 @@ public class HighwayBuilderTHM extends Module {
         BlockState state = mc.world.getBlockState(task.pos);
 
             if (task.type.liquids()) return !state.getFluidState().isEmpty();
+            if (task.type.isBehind() && !isWithinConfiguredForwardRange(task.pos)) return false;
 
             if ((task.type == ForwardTaskType.CORNER_PLACE || task.type == ForwardTaskType.BEHIND_CORNER_PLACE)
                 && !mc.world.getBlockState(task.pos.up()).isReplaceable()) return false;
