@@ -67,6 +67,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | `double-mine` | `true` | Uses normal mine and packet mine together when applicable. |
 | `fast-break` | `true`; shown when `double-mine` is on | Finishes double-mined blocks faster. |
 | `blocks-per-tick` | `7`, range `1-30`, slider max `20` | Maximum instant-break mining throughput, including fractional values. |
+| `adaptive-mining` | `false` | Drops blocks-per-tick by 3 when a broken block comes back (the server refused the break; min `1`), raises it 1 per 10 stable seconds up to `29`. Starts from `blocks-per-tick`. |
 | `break-delay` | `0`, minimum `0` | Delay between normal break actions. |
 | `dont-break-tools` | `false` | Stops using tools before they break. |
 | `save-pickaxes` | `1`, range `0-36`; shown when `dont-break-tools` is off | Pickaxe reserve that triggers restock or shutdown. |
@@ -173,6 +174,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | `restock-pickaxes-amount` | `1`, range `1-36`, slider `1-9` | `dont-break-tools` is off | How many pickaxes to pull during each pickaxe restock task. |
 | `break-delay` | `0`, minimum `0` | Always | Delay in ticks between break actions. |
 | `blocks-per-tick` | `7`, range `1-30`, slider max `20` | Always | Maximum instant-break mining actions per tick; fractional values are averaged over time. |
+| `adaptive-mining` | `false` | Always | Auto-tunes blocks-per-tick between `1` and `29` from broken blocks the server puts back. |
 | `ignore-signs` | `false` | Always | Preserves signs by not mining them. |
 | `break-advertisement-signs` | `true` | `ignore-signs` is off | Only breaks signs that look like advertisements or invites. |
 | `packet-borer` | `false` | Always | Sends instant-break packets around the full highway shape every tick, similar to Packet Build for placing. |
@@ -233,7 +235,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | `debug` | `false` | Always | Logs state transitions and movement input. |
 | `forward-scheduler-debug` | `false` | `legacy-mode` is off | Logs active row, queue, boundary, and actionability details for the forward scheduler. |
 | `statistics-debug` | `false` | Always | Logs detailed stats validation decisions for mine/place work. |
-| `render-reach` | `false` | Always | Outlines every block the scheduler checks within reach: blue ahead, orange behind. |
+| `render-reach` | `false` | Always | Outlines every non-air block within `place-range` through walls (white), with scheduler work in blue (ahead) and orange (behind). |
 | `session-summary` | `false` | Always | When the builder turns off, prints duration, distance, blocks placed (with average/s), broken, restocks, e-chest refills, rubberbands, adaptive drops and ghost blocks. |
 
 ### THM-HighwayBuilder: Render Digging

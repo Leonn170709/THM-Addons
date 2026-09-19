@@ -182,6 +182,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         ThmMembers.initialize();
         CapeManager.initialize();
         TotemTracker.initialize();
+        ChunkResync.init();
 
         // Modules
         Modules.get().add(new HighwayTraveler());

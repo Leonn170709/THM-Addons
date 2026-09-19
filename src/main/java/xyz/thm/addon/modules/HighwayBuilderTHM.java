@@ -12,6 +12,7 @@
 package xyz.thm.addon.modules;
 
 import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
@@ -917,6 +918,13 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+    public final Setting<Boolean> adaptiveMining = sgDigging.add(new BoolSetting.Builder()
+        .name("adaptive-mining")
+        .description("Lowers blocks-per-tick when the server puts broken blocks back, raises it up to 29 when stable.")
+        .defaultValue(false)
+        .build()
+    );
+
     private final Setting<Double> instamineOverrideBlocksPerTick = sgDigging.add(new DoubleSetting.Builder()
         .name("instamine-override-blocks-per-tick")
         .description("Mining speed for basalt/blackstone-type forward instamine override blocks.")
@@ -1075,7 +1083,7 @@ public class HighwayBuilderTHM extends Module {
 
     private final Setting<Boolean> renderReachDebug = sgDebugging.add(new BoolSetting.Builder()
         .name("render-reach")
-        .description("Outlines every block the scheduler checks within reach: blue ahead, orange behind.")
+        .description("Outlines every block within place-range, through walls; scheduler work in blue (ahead) and orange (behind).")
         .defaultValue(false)
         .build()
     );
@@ -1084,6 +1092,8 @@ public class HighwayBuilderTHM extends Module {
     private static final Color REACH_BEHIND_SIDE = new Color(255, 150, 40, 25), REACH_BEHIND_LINE = new Color(255, 150, 40, 200);
     private final LongOpenHashSet reachAheadRender = new LongOpenHashSet();
     private final LongOpenHashSet reachBehindRender = new LongOpenHashSet();
+    private static final Color REACH_ALL_SIDE = new Color(255, 255, 255, 12), REACH_ALL_LINE = new Color(255, 255, 255, 90);
+    private final LongOpenHashSet reachAllRender = new LongOpenHashSet();
 
     private final Setting<Boolean> forwardSchedulerDebugLog = sgDebugging.add(new BoolSetting.Builder()
         .name("forward-scheduler-debug")
@@ -1529,6 +1539,11 @@ public class HighwayBuilderTHM extends Module {
     // Max 3: higher is unstable. -0.5 on trouble, +0.1 per 10 stable seconds.
     private final AdaptiveRate adaptivePlaceRate = new AdaptiveRate(0.5, 3.0, 0.5, 0.1, 200);
     private static final int ADAPTIVE_PLACE_REVERT_WINDOW = 40;
+    // Max 29: everything under 30 works. -3 on trouble, +1 per 10 stable seconds.
+    private final AdaptiveRate adaptiveMineRate = new AdaptiveRate(1.0, 29.0, 3.0, 1.0, 200);
+    // pos -> {sent tick, seen as air (1/0)}. A broken block that turns solid again was refused by the server.
+    private final Long2ObjectOpenHashMap<long[]> breakWatch = new Long2ObjectOpenHashMap<>();
+    private final BlockPos.Mutable breakWatchPos = new BlockPos.Mutable();
     private final Long2LongOpenHashMap recentPlacements = new Long2LongOpenHashMap();
     // Filled from the netty thread, drained on tick.
     private final ConcurrentLinkedQueue<Long> revertedBlockUpdates = new ConcurrentLinkedQueue<>();
@@ -2344,7 +2359,7 @@ public class HighwayBuilderTHM extends Module {
         resetSessionSummary();
         resetTpsThrottleRuntime();
         clearSafetyRuntime("module-activate");
-        mineActionsThisTick = Math.max(1, (int) Math.floor(sanitizeMineActionRate(blocksPerTick.get())));
+        mineActionsThisTick = Math.max(1, (int) Math.floor(baseBlocksPerTick()));
         mineFractionCarry[0] = 0.0;
         placeActionsThisTick = Math.max(0, (int) Math.floor(basePlacementsPerTick()));
         placeFractionCarry[0] = 0.0;
@@ -4558,8 +4573,9 @@ public class HighwayBuilderTHM extends Module {
         count = 0;
         forwardMineCount = 0;
         forwardPlaceCount = 0;
-        mineActionsThisTick = computeMineActionsThisTick();
         tickAdaptivePlacement();
+        tickAdaptiveMining();
+        mineActionsThisTick = computeMineActionsThisTick();
         placeActionsThisTick = computePlaceActionsThisTick();
         pruneExpiredForwardBreakCredits();
         refreshCountedForwardStatPositions();
@@ -4702,6 +4718,10 @@ public class HighwayBuilderTHM extends Module {
     private void onPacketSend(PacketEvent.Send event) {
         if (event.packet instanceof PlayerInteractBlockC2SPacket packet) {
             recordEnclosureInteractPacket(packet);
+        }
+        if (adaptiveMining.get() && mc.world != null && event.packet instanceof PlayerActionC2SPacket a
+            && (a.getAction() == PlayerActionC2SPacket.Action.START_DESTROY_BLOCK || a.getAction() == PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK)) {
+            breakWatch.put(a.getPos().asLong(), new long[]{mc.world.getTime(), 0});
         }
     }
 
@@ -6020,7 +6040,7 @@ public class HighwayBuilderTHM extends Module {
             tpsThrottlePauseReason = TpsThrottlePauseReason.Settling;
             tpsThrottleSettleUntilMs = System.currentTimeMillis() + TPS_THROTTLE_SETTLE_MS;
         } else {
-            tpsThrottleAdjustedBlocksPerTick = sanitizeMineActionRate(blocksPerTick.get());
+            tpsThrottleAdjustedBlocksPerTick = baseBlocksPerTick();
             tpsThrottleAdjustedPlacementsPerTick = basePlacementsPerTick();
             tpsThrottlePaused = false;
             tpsThrottlePauseReason = TpsThrottlePauseReason.None;
@@ -6029,7 +6049,7 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private void updateTpsActionThrottle() {
-        double baseBlocksPerTick = sanitizeMineActionRate(blocksPerTick.get());
+        double baseBlocksPerTick = baseBlocksPerTick();
         double basePlacementsPerTick = basePlacementsPerTick();
         boolean wasPaused = tpsThrottlePaused;
         TpsThrottlePauseReason previousReason = tpsThrottlePauseReason;
@@ -6479,7 +6499,7 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private double effectiveBlocksPerTickActionRate() {
-        return pauseOnLag.get() ? Math.max(0.0, tpsThrottleAdjustedBlocksPerTick) : sanitizeMineActionRate(blocksPerTick.get());
+        return pauseOnLag.get() ? Math.max(0.0, tpsThrottleAdjustedBlocksPerTick) : baseBlocksPerTick();
     }
 
     private double effectivePlacementsPerTickActionRate() {
@@ -6505,12 +6525,54 @@ public class HighwayBuilderTHM extends Module {
         return AdaptiveRate.actionsThisTick(effectiveBlocksPerTickActionRate(), mineFractionCarry);
     }
 
+    private double baseBlocksPerTick() {
+        return adaptiveMining.get() && adaptiveMineRate.get() > 0 ? adaptiveMineRate.get() : sanitizeMineActionRate(blocksPerTick.get());
+    }
+
+    private void tickAdaptiveMining() {
+        if (!adaptiveMining.get()) {
+            breakWatch.clear();
+            return;
+        }
+
+        long now = mc.world.getTime();
+        int reverts = 0;
+        var it = breakWatch.long2ObjectEntrySet().fastIterator();
+        while (it.hasNext()) {
+            var e = it.next();
+            long[] v = e.getValue();
+            breakWatchPos.set(BlockPos.unpackLongX(e.getLongKey()), BlockPos.unpackLongY(e.getLongKey()), BlockPos.unpackLongZ(e.getLongKey()));
+            if (mc.world.getBlockState(breakWatchPos).isReplaceable()) {
+                v[1] = 1;
+            } else if (v[1] == 1) {
+                reverts++;
+                it.remove();
+                continue;
+            }
+            if (now - v[0] > ADAPTIVE_PLACE_REVERT_WINDOW) it.remove();
+        }
+
+        if (state != State.Forward) return;
+
+        if (reverts > 0) {
+            double before = adaptiveMineRate.get();
+            if (adaptiveMineRate.onTrouble()) {
+                sessionAdaptiveDrops++;
+                info("Adaptive mining: %.1f -> %.1f (%d broken block%s came back).", before, adaptiveMineRate.get(), reverts, reverts == 1 ? "" : "s");
+            }
+        } else {
+            adaptiveMineRate.onStableTick();
+        }
+    }
+
     private double basePlacementsPerTick() {
         return adaptivePlacements.get() && adaptivePlaceRate.get() > 0 ? adaptivePlaceRate.get() : sanitizePlaceActionRate(placementsPerTick.get());
     }
 
     private void resetAdaptivePlacement() {
         adaptivePlaceRate.reset(sanitizePlaceActionRate(placementsPerTick.get()));
+        adaptiveMineRate.reset(sanitizeMineActionRate(blocksPerTick.get()));
+        breakWatch.clear();
         recentPlacements.clear();
         revertedBlockUpdates.clear();
         pendingRubberbands.set(0);
@@ -6536,6 +6598,7 @@ public class HighwayBuilderTHM extends Module {
 
     private void notePlacement(BlockPos pos) {
         placedTotal++;
+        breakWatch.remove(pos.asLong()); // filled on purpose, not a refused break
         if (adaptivePlacements.get()) recentPlacements.put(pos.asLong(), mc.world.getTime());
     }
 
@@ -12131,6 +12194,26 @@ public class HighwayBuilderTHM extends Module {
             (task.type.isBehind() ? reachBehindRender : reachAheadRender).add(task.pos.asLong());
         }
         reachAheadRender.removeAll(reachBehindRender);
+
+        // Every non-air block in reach. The server doesn't check line of sight, so walls don't matter.
+        reachAllRender.clear();
+        double range = placeRange.get();
+        Vec3d eye = mc.player.getEyePos();
+        int r = (int) Math.ceil(range) + 1;
+        BlockPos.Mutable pos = new BlockPos.Mutable();
+        int ex = MathHelper.floor(eye.x), ey = MathHelper.floor(eye.y), ez = MathHelper.floor(eye.z);
+        for (int x = ex - r; x <= ex + r; x++) {
+            for (int y = ey - r; y <= ey + r; y++) {
+                for (int z = ez - r; z <= ez + r; z++) {
+                    pos.set(x, y, z);
+                    if (!RangeUtils.isInRange(range, pos, eye) || mc.world.getBlockState(pos).isAir()) continue;
+                    long key = pos.asLong();
+                    if (!reachAheadRender.contains(key) && !reachBehindRender.contains(key)) reachAllRender.add(key);
+                }
+            }
+        }
+
+        RenderUtilsTHM.renderBlockSet(event, reachAllRender, REACH_ALL_SIDE, REACH_ALL_LINE, ShapeMode.Both);
         RenderUtilsTHM.renderBlockSet(event, reachAheadRender, REACH_AHEAD_SIDE, REACH_AHEAD_LINE, ShapeMode.Both);
         RenderUtilsTHM.renderBlockSet(event, reachBehindRender, REACH_BEHIND_SIDE, REACH_BEHIND_LINE, ShapeMode.Both);
     }
@@ -13807,7 +13890,10 @@ public class HighwayBuilderTHM extends Module {
                 if (!b.ensureCenteredBeforeBlockadePlacement(this)) return;
 
                 int slot = findBlocksToPlacePrioritizeTrash(b);
-                if (slot == -1) return;
+                if (slot == -1) {
+                    continueWithPartialBlockade(b, MineEnderChests);
+                    return;
+                }
 
                 place(b, b.blockPosProvider.getBlockade(false, b.getEffectiveBlockadeType()), slot, MineEnderChests);
             }
@@ -16707,6 +16793,7 @@ public class HighwayBuilderTHM extends Module {
                 int slot = findBlocksToPlacePrioritizeTrash(b);
                 if (slot == -1) {
                     b.restockDebug("PlaceShulkerBlockade.tick could not find a block slot for blockade placement.");
+                    continueWithPartialBlockade(b, Restock);
                     return;
                 }
 
@@ -17522,6 +17609,16 @@ public class HighwayBuilderTHM extends Module {
             }
 
             return slot;
+        }
+
+        /** Out of blocks: build what we could and move on instead of waiting forever for the rest. */
+        protected void continueWithPartialBlockade(HighwayBuilderTHM b, State next) {
+            int missing = 0;
+            for (MBlockPos pos : b.blockPosProvider.getBlockade(false, b.getEffectiveBlockadeType())) {
+                if (pos.getState().isReplaceable()) missing++;
+            }
+            if (missing > 0) b.warning("Out of blocks: blockade is missing %d block%s, continuing without them.", missing, missing == 1 ? "" : "s");
+            b.setState(next);
         }
 
         protected int findBlocksToPlacePrioritizeTrash(HighwayBuilderTHM b) {

@@ -75,6 +75,9 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 - `player-list-hud` — Lists players in render distance, with configurable ping/distance/hp/armor/totem columns.
 - `packets-hud` — Sent, received and total packets per second or per tick, with separate sent/received packet filters.
 
+## Keybinds
+- `F3 + A + S` — Hold F3 and A, press S: the server re-sends all chunks (view distance briefly set to 0, then restored).
+
 ## Commands
 - `center`
 - `eclip`
