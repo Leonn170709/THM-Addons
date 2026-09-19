@@ -1066,8 +1066,8 @@ public class HighwayBuilderTHM extends Module {
 
     public final Setting<Double> placementsPerTick = sgPaving.add(new DoubleSetting.Builder()
         .name("placements-per-tick")
-        .description("Max blocks placed per tick, fractional allowed.")
-        .defaultValue(1)
+        .description("Max blocks placed per tick, fractional allowed. 1.5 bursts 1-2-1-2 for 30 blocks/s.")
+        .defaultValue(1.5)
         .range(0.1, 100)
         .sliderRange(0.1, 10)
         .decimalPlaces(1)
@@ -12362,8 +12362,11 @@ public class HighwayBuilderTHM extends Module {
         if (forwardMineCount >= currentMineActionsThisTick()) return false;
 
         if (doubleMine.get()) {
+            // doubleMine() pops at most two (one normal, one packet), so stop scanning at two
             ArrayDeque<BlockPos> toDoubleMine = new ArrayDeque<>();
+            boolean speedMineInstamine = Modules.get().get(SpeedMine.class).instamine();
             for (ForwardTask task : row.mineQueue.values()) {
+                if (toDoubleMine.size() >= 2) break;
                 if (forwardMineCount >= currentMineActionsThisTick()) break;
                 if (!shouldKeepForwardMineTask(task)) continue;
 
@@ -12372,7 +12375,7 @@ public class HighwayBuilderTHM extends Module {
                     safeCanBreak(task.pos, state)
                         && (task.type.mineBlocksToPlace() || !blocksToPlace.get().contains(state.getBlock()))
                         && !safeCanInstaBreakForBreaking(task.pos)
-                        && (!Modules.get().get(SpeedMine.class).instamine() || state.calcBlockBreakingDelta(mc.player, mc.world, task.pos) <= 0.5)
+                        && (!speedMineInstamine || state.calcBlockBreakingDelta(mc.player, mc.world, task.pos) <= 0.5)
                         && (normalMining == null || !task.pos.equals(normalMining.blockPos))
                         && (packetMining == null || !task.pos.equals(packetMining.blockPos))
                 ) {
@@ -16645,21 +16648,24 @@ public class HighwayBuilderTHM extends Module {
             // blocks normally
             if (b.doubleMine.get()) {
                 ArrayDeque<BlockPos> toDoubleMine = new ArrayDeque<>();
+                boolean speedMineInstamine = Modules.get().get(SpeedMine.class).instamine();
 
                 it.save();
-                it.forEach(pos -> {
-                    if (b.shouldSkipSignBreak(pos.getBlockPos(), pos.getState())) return;
+                // doubleMine() pops at most two (one normal, one packet), so stop scanning at two
+                for (MBlockPos pos : it) {
+                    if (toDoubleMine.size() >= 2) break;
+                    if (b.shouldSkipSignBreak(pos.getBlockPos(), pos.getState())) continue;
                     // only want to double mine blocks that we can mine, that are not instamined, and we are not already mining
                     if (
                         b.safeCanBreak(pos.getBlockPos(), pos.getState())
                             && (mineBlocksToPlace || !b.blocksToPlace.get().contains(pos.getState().getBlock()))
-                            && !b.safeCanInstaBreakForBreaking(pos.getBlockPos()) && (!Modules.get().get(SpeedMine.class).instamine() || pos.getState().calcBlockBreakingDelta(b.mc.player, b.mc.world, pos.getBlockPos()) <= 0.5)
+                            && !b.safeCanInstaBreakForBreaking(pos.getBlockPos()) && (!speedMineInstamine || pos.getState().calcBlockBreakingDelta(b.mc.player, b.mc.world, pos.getBlockPos()) <= 0.5)
                             && (b.normalMining == null || !pos.getBlockPos().equals(b.normalMining.blockPos))
                             && (b.packetMining == null || !pos.getBlockPos().equals(b.packetMining.blockPos))
                     ) {
                         toDoubleMine.add(pos.getBlockPos().mutableCopy());
                     }
-                });
+                }
 
                 // have to save and restore the iterator from the beginning to make sure the subsequent loop can use it properly
                 it.restore();

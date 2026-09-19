@@ -17,12 +17,34 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.network.PacketUtils;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
+import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import net.minecraft.network.packet.Packet;
+import net.minecraft.network.packet.c2s.common.CommonPongC2SPacket;
+import net.minecraft.network.packet.c2s.common.KeepAliveC2SPacket;
+import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
+import net.minecraft.network.packet.c2s.play.ClientTickEndC2SPacket;
+import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
+import net.minecraft.network.packet.c2s.play.TeleportConfirmC2SPacket;
+import net.minecraft.network.packet.c2s.play.VehicleMoveC2SPacket;
 import xyz.thm.addon.THMAddon;
 
 import java.util.Set;
 
 public class PaketLimiter extends Module {
+    /** Movement and keep-alive traffic: dropping any of it desyncs you, so it never counts against the limit. */
+    private static final Set<Class<? extends Packet<?>>> PRESET_BYPASS = Set.of(
+        PlayerMoveC2SPacket.class,
+        PlayerMoveC2SPacket.PositionAndOnGround.class,
+        PlayerMoveC2SPacket.LookAndOnGround.class,
+        PlayerMoveC2SPacket.Full.class,
+        VehicleMoveC2SPacket.class,
+        TeleportConfirmC2SPacket.class,
+        KeepAliveC2SPacket.class,
+        CommonPongC2SPacket.class,
+        ClientCommandC2SPacket.class
+    );
+
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
     public final Setting<Integer> limit = sgGeneral.add(new IntSetting.Builder()
@@ -55,12 +77,16 @@ public class PaketLimiter extends Module {
         .name("bypass")
         .description("C2S packets that bypass the limiter.")
         .filter(aClass -> PacketUtils.getC2SPackets().contains(aClass))
+        .defaultValue(new ObjectOpenHashSet<>(PRESET_BYPASS))
         .build()
     );
     public final Setting<Set<Class<? extends Packet<?>>>> alwaysBlock = sgGeneral.add(new PacketListSetting.Builder()
         .name("always-block")
         .description("C2S packets that are always cancelled, even if in bypass.")
-        .defaultValue(java.util.Set.<Class<? extends Packet<?>>>of(net.minecraft.network.packet.c2s.play.HandSwingC2SPacket.class))
+        .defaultValue(new ObjectOpenHashSet<Class<? extends Packet<?>>>(Set.of(
+            HandSwingC2SPacket.class,
+            ClientTickEndC2SPacket.class
+        )))
         .filter(aClass -> PacketUtils.getC2SPackets().contains(aClass))
         .build()
     );
@@ -80,15 +106,7 @@ public class PaketLimiter extends Module {
 
     public void applyPresets() {
         bypass.get().clear();
-        bypass.get().add(net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket.class);
-        bypass.get().add(net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket.PositionAndOnGround.class);
-        bypass.get().add(net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket.LookAndOnGround.class);
-        bypass.get().add(net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket.Full.class);
-        bypass.get().add(net.minecraft.network.packet.c2s.play.VehicleMoveC2SPacket.class);
-        bypass.get().add(net.minecraft.network.packet.c2s.play.TeleportConfirmC2SPacket.class);
-        bypass.get().add(net.minecraft.network.packet.c2s.common.KeepAliveC2SPacket.class);
-        bypass.get().add(net.minecraft.network.packet.c2s.common.CommonPongC2SPacket.class);
-        bypass.get().add(net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket.class);
+        bypass.get().addAll(PRESET_BYPASS);
         if (!isActive()) toggle();
     }
 

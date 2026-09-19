@@ -79,7 +79,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | Setting | Default / Range | What to change it for |
 | --- | --- | --- |
 | `blocks-to-place` | `Obsidian`; full-cube blocks only | Blocks the builder may place. |
-| `placements-per-tick` | `1`, range `0.1-100`, slider `0.1-10`, one decimal place | Maximum averaged place throughput; `0.1` performs about one placement every 10 ticks. |
+| `placements-per-tick` | `1.5`, range `0.1-100`, slider `0.1-10`, one decimal place | Maximum averaged place throughput; `1.5` bursts 1-2-1-2 blocks per tick for 30 blocks/s, `0.1` performs about one placement every 10 ticks. |
 | `place-range` | `4.5`, slider max `5.5` | Maximum block placement reach. |
 | `place-delay` | `0`, minimum `0` | Delay between place actions. |
 | `packet-build` | `false` | Uses direct placement packets for higher forward throughput. |
@@ -188,7 +188,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | `packet-build-lookahead` | `true` | `packet-build` is on | Lets Packet Build place blocks from upcoming rows in the same tick. |
 | `silent-forward-place-swap` | `true` | `legacy-mode` is off | Silently swaps to placement blocks for scheduler work, then restores your selected slot. |
 | `silent-forward-tool-swap` | `true` | `legacy-mode` is off | Silently swaps to scheduler mining tools, then restores your selected slot. |
-| `placements-per-tick` | `1`, range `0.1-100`, slider `0.1-10`, one decimal place | Always | Maximum averaged placement rate; `0.1` performs about one placement every 10 ticks. |
+| `placements-per-tick` | `1.5`, range `0.1-100`, slider `0.1-10`, one decimal place | Always | Maximum averaged placement rate; `1.5` bursts 1-2-1-2 blocks per tick for 30 blocks/s, `0.1` performs about one placement every 10 ticks. |
 
 ### THM-HighwayBuilder: Inventory
 
