@@ -1062,6 +1062,17 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+    private final Setting<Boolean> sessionSummary = sgDebugging.add(new BoolSetting.Builder()
+        .name("session-summary")
+        .description("Prints session stats in chat when the builder turns off.")
+        .defaultValue(false)
+        .build()
+    );
+
+    private long sessionStartMs;
+    private int sessionRestocks, sessionEChestRefills, sessionAdaptiveDrops, sessionGhostBlocks;
+    private final AtomicInteger sessionRubberbands = new AtomicInteger();
+
     private final Setting<Boolean> renderReachDebug = sgDebugging.add(new BoolSetting.Builder()
         .name("render-reach")
         .description("Outlines every block the scheduler checks within reach: blue ahead, orange behind.")
@@ -2330,6 +2341,7 @@ public class HighwayBuilderTHM extends Module {
         forwardSchedulerDebugFileErrorLogged = false;
         resetAdaptivePlacement();
         resetGhostBlockCheck();
+        resetSessionSummary();
         resetTpsThrottleRuntime();
         clearSafetyRuntime("module-activate");
         mineActionsThisTick = Math.max(1, (int) Math.floor(sanitizeMineActionRate(blocksPerTick.get())));
@@ -2389,6 +2401,7 @@ public class HighwayBuilderTHM extends Module {
     }
     @Override
     public void onDeactivate() {
+        if (sessionSummary.get()) printSessionSummary();
         KitbotFrontend.removeLifecycleListener(kitbotRestockLifecycleListener);
         if (input != null) input.stop();
         restoreHotbarManagerAfterTrash("module-deactivate");
@@ -4670,6 +4683,8 @@ public class HighwayBuilderTHM extends Module {
             ghostProbeUpdates.add(new long[]{g.getPos().asLong(), g.getState().isReplaceable() ? 0 : 1});
         }
 
+        if (sessionSummary.get() && event.packet instanceof PlayerPositionLookS2CPacket) sessionRubberbands.incrementAndGet();
+
         if (adaptivePlacements.get()) {
             if (event.packet instanceof PlayerPositionLookS2CPacket) pendingRubberbands.incrementAndGet();
             else if (event.packet instanceof BlockUpdateS2CPacket u && u.getState().isAir()) revertedBlockUpdates.add(u.getPos().asLong());
@@ -5402,6 +5417,10 @@ public class HighwayBuilderTHM extends Module {
         if (state == State.Center && previousState != State.Center) {
             activeCenterTargetBlock = null;
             centerTeleportInvalidLogCooldownTicks = 0;
+        }
+        if (state != previousState) {
+            if (state == State.Restock) sessionRestocks++;
+            else if (state == State.MineEnderChests) sessionEChestRefills++;
         }
         if (previousState == State.MineEnderChests && state != State.MineEnderChests) {
             restoreEChestBreakSpeedIfOwned("echest-exit:" + stateName(state));
@@ -6499,6 +6518,22 @@ public class HighwayBuilderTHM extends Module {
         measuredPlacesPerSecond = 0.0;
     }
 
+    private void resetSessionSummary() {
+        sessionStartMs = System.currentTimeMillis();
+        placedTotal = 0;
+        sessionRestocks = sessionEChestRefills = sessionAdaptiveDrops = sessionGhostBlocks = 0;
+        sessionRubberbands.set(0);
+    }
+
+    private void printSessionSummary() {
+        long seconds = (System.currentTimeMillis() - sessionStartMs) / 1000;
+        int distance = start == null || mc.player == null ? 0 : (int) PlayerUtils.distanceTo(start);
+        info("Session %s: %d blocks travelled, placed %d (%.1f/s avg), broken %d.",
+            TimeFormat.duration(seconds), distance, placedTotal, seconds > 0 ? placedTotal / (double) seconds : 0.0, blocksBroken);
+        info("Restocks %d, e-chest refills %d, rubberbands %d, adaptive drops %d, ghost blocks %d.",
+            sessionRestocks, sessionEChestRefills, sessionRubberbands.get(), sessionAdaptiveDrops, sessionGhostBlocks);
+    }
+
     private void notePlacement(BlockPos pos) {
         placedTotal++;
         if (adaptivePlacements.get()) recentPlacements.put(pos.asLong(), mc.world.getTime());
@@ -6531,7 +6566,8 @@ public class HighwayBuilderTHM extends Module {
 
         if (rubberbands > 0 || reverts > 0) {
             double before = adaptivePlaceRate.get();
-            if (adaptivePlaceRate.onTrouble()) info("Adaptive placements: %.1f -> %.1f (rubberbands=%d, reverted=%d).", before, adaptivePlaceRate.get(), rubberbands, reverts);
+            if (adaptivePlaceRate.onTrouble()) sessionAdaptiveDrops++;
+            if (adaptivePlaceRate.get() < before) info("Adaptive placements: %.1f -> %.1f (rubberbands=%d, reverted=%d).", before, adaptivePlaceRate.get(), rubberbands, reverts);
         } else {
             adaptivePlaceRate.onStableTick();
         }
@@ -12227,7 +12263,10 @@ public class HighwayBuilderTHM extends Module {
 
         switch (ghostProbe.tick(now)) {
             // The server's update already turned the ghost into air client-side, so check-behind re-places it.
-            case GHOST -> info("Ghost block behind you, re-placing before moving on.");
+            case GHOST -> {
+                sessionGhostBlocks++;
+                info("Ghost block behind you, re-placing before moving on.");
+            }
             case TIMEOUT -> sendGhostProbes(ghostProbe.unanswered(now));
             default -> {}
         }

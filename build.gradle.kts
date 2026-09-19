@@ -16,9 +16,9 @@ plugins {
 }
 
 base {
-    archivesName = properties["archives_base_name"] as String
+    archivesName = providers.gradleProperty("archives_base_name").get()
     version = libs.versions.mod.version.get()
-    group = properties["maven_group"] as String
+    group = providers.gradleProperty("maven_group").get()
 }
 
 repositories {
@@ -53,7 +53,7 @@ dependencies {
 // Generates the 7 API endpoint URLs as an AES/GCM-encrypted vault (fresh random key per build,
 // never committed) instead of plain constants - a compromised/decompiled jar still needs to break
 // the cipher to recover an endpoint. APIUtils.java itself stays plain, readable, and untouched.
-val generateApiEndpoints by tasks.registering {
+val generateApiEndpoints = tasks.register("generateApiEndpoints") {
     val secretsFile = file("secrets.properties")
     val secretsExampleFile = file("secrets.properties.example")
     // Falls back to the example (placeholder example.com URLs) so contributors without the

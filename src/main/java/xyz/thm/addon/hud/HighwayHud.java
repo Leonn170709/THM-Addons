@@ -19,6 +19,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.modules.HighwayBuilderTHM;
+import xyz.thm.addon.utils.TimeFormat;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -60,6 +61,12 @@ public class HighwayHud extends HudElement {
         .defaultValue(true)
         .build()
     );
+    private final Setting<Boolean> showRestockEta = sgGeneral.add(new BoolSetting.Builder()
+        .name("show-restock-eta")
+        .description("Time until obsidian and ender chests run out at the current place rate.")
+        .defaultValue(true)
+        .build()
+    );
     private final Setting<Boolean> showDirection = sgGeneral.add(new BoolSetting.Builder()
         .name("show-direction")
         .description("Displays direction you're heading in")
@@ -80,7 +87,8 @@ public class HighwayHud extends HudElement {
 
         List<String[]> l = new ArrayList<>();
         String dir = mod.dir != null ? mod.dir.toString() : "";
-        distanceTillRestock = getDistanceTillRestock();
+        int restockBlocks = getRestockBlocks();
+        distanceTillRestock = restockBlocks / 7;
 
         if (showDistance.get())  l.add(new String[]{"Distance travelled", String.valueOf(lastDistance)});
         if (showBroken.get())   l.add(new String[]{"Blocks broken", String.valueOf(mod.blocksBroken)});
@@ -91,11 +99,13 @@ public class HighwayHud extends HudElement {
         }
         if (showDirection.get())l.add(new String[]{"Direction", dir});
         if (showRefill.get())   l.add(new String[]{"Distance till restock", String.valueOf(distanceTillRestock)});
+        if (showRestockEta.get()) l.add(new String[]{"Restock in", TimeFormat.eta(restockBlocks, mod.getMeasuredPlacesPerSecond())});
 
         return l.toArray(new String[0][0]);
     }
     private int distanceTillRestock = 0;
-    public static int getDistanceTillRestock() {
+    /** Obsidian in the inventory, counting each ender chest as the 8 it mines into. */
+    public static int getRestockBlocks() {
         if (mc.player == null) return 0;
 
         int obsidian = 0;
@@ -114,10 +124,7 @@ public class HighwayHud extends HudElement {
             }
         }
 
-        int totalBlocks = obsidian + (echests * 8);
-
-        // 7 Blocks pro Distanz-Einheit
-        return totalBlocks / 7;
+        return obsidian + (echests * 8);
     }
 
     @Override

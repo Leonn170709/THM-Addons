@@ -6,8 +6,6 @@
 
 package xyz.thm.addon.utils;
 
-import baritone.api.BaritoneAPI;
-import baritone.api.IBaritone;
 import meteordevelopment.meteorclient.mixininterface.IPlayerMoveC2SPacket;
 import meteordevelopment.meteorclient.pathing.BaritoneUtils;
 import meteordevelopment.meteorclient.systems.modules.Modules;
@@ -451,53 +449,6 @@ public class THMUtils {
         while (host.endsWith(".")) host = host.substring(0, host.length() - 1);
         String finalHost = host;
         return anarchyModDomains.stream().noneMatch(finalHost::endsWith);
-    }
-    //Old pickup method
-    public static void pickupAndReturn() {
-        if (mc.player == null) return;
-        int savedX;
-        int savedZ;
-        final boolean[] finishedbar = {false};
-        final IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
-        savedX = (int) mc.player.getX()-1;
-        savedZ = (int) mc.player.getZ()-1;
-
-        baritone.getCommandManager().execute("pickup minecraft:obsidian");
-        async("baritone-pickup", () -> {
-            try {
-                THMAddon.LOG.info("Waiting 10 seconds for baritone to pick up");
-                Thread.sleep(10000);
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
-            baritone.getPathingBehavior().cancelEverything();
-            baritone.getCommandManager().execute("goto " + savedX + " " + savedZ);
-            while (!finishedbar[0]) {
-                if (Math.abs(mc.player.getX() - savedX) == 0 && Math.abs(mc.player.getZ() - savedZ) == 0) {
-                    finishedbar[0] = true;
-                    baritone.getPathingBehavior().cancelEverything();
-                }
-            }
-        });
-
-    }
-    //Unused
-    private boolean checkModLoaded(String... modIds)
-    {
-        boolean loaded = false;
-        for (String id : modIds)
-        {
-            if (FabricLoader.getInstance().isModLoaded(id))
-            {
-                loaded = true;
-                break;
-            }
-        }
-        if (!loaded)
-        {
-            THMAddon.LOG.error("{} not found, disabling modules that require it.", modIds[0]);
-        }
-        return loaded;
     }
     public static boolean checkThreshold(ItemStack i, double threshold) {
         return getDamage(i) <= threshold;

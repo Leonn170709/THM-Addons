@@ -63,7 +63,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 ## HUD Widgets
 - `online-friends` — Displays online friends from your friend list.
 - `Dubs Count` — Displays how many dubs are in render distance.
-- `Highway-hud` — View your stats while paving.
+- `Highway-hud` — View your stats while paving: distance, blocks, place rate, restock ETA.
 - `THM-welcomer` — Advanced Welcomer.
 - `crystal-metrics` — ThunderHack style monitor.
 - `THM Member Hud` — Shows all online THM members and ranks.

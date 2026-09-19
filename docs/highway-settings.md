@@ -233,6 +233,8 @@ After that first seed, each profile loads its own saved values rather than reapp
 | `debug` | `false` | Always | Logs state transitions and movement input. |
 | `forward-scheduler-debug` | `false` | `legacy-mode` is off | Logs active row, queue, boundary, and actionability details for the forward scheduler. |
 | `statistics-debug` | `false` | Always | Logs detailed stats validation decisions for mine/place work. |
+| `render-reach` | `false` | Always | Outlines every block the scheduler checks within reach: blue ahead, orange behind. |
+| `session-summary` | `false` | Always | When the builder turns off, prints duration, distance, blocks placed (with average/s), broken, restocks, e-chest refills, rubberbands, adaptive drops and ghost blocks. |
 
 ### THM-HighwayBuilder: Render Digging
 
