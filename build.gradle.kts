@@ -22,6 +22,7 @@ base {
 }
 
 repositories {
+    mavenCentral()
     maven {
         name = "meteor-maven"
         url = uri("https://maven.meteordev.org/releases")
@@ -44,6 +45,9 @@ dependencies {
 
     // Baritone
     modCompileOnly(libs.baritone)
+
+    testImplementation(libs.junit.jupiter)
+    testRuntimeOnly(libs.junit.platform.launcher)
 }
 
 // Generates the 7 API endpoint URLs as an AES/GCM-encrypted vault (fresh random key per build,
@@ -169,12 +173,8 @@ val generateApiEndpoints by tasks.registering {
     }
 }
 
-// Runs the SSRF guard self-check (TrustedHttpSelfCheck) - the only security boundary in the addon.
-val checkSsrf by tasks.registering(JavaExec::class) {
-    group = "verification"
-    description = "Verifies TrustedHttp's SSRF/URL guards. Needs no network."
-    classpath = sourceSets["main"].runtimeClasspath
-    mainClass = "xyz.thm.addon.utils.TrustedHttpSelfCheck"
+tasks.test {
+    useJUnitPlatform()
 }
 
 tasks {

@@ -22,6 +22,10 @@ meteor = "1.21.11-SNAPSHOT"
 # Mods
 
 [libraries]
+# Tests
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version = "5.13.4" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version = "1.13.4" }
+
 # Fabric base
 minecraft = { module = "com.mojang:minecraft", version.ref = "minecraft" }
 yarn = { module = "net.fabricmc:yarn", version.ref = "yarn-mappings" }

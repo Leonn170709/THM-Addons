@@ -1030,6 +1030,14 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+    private final Setting<Boolean> ghostBlockCheck = sgGeneral.add(new BoolSetting.Builder()
+        .name("ghost-block-check")
+        .description("Has the server confirm the row behind before moving on; ghost blocks get re-placed.")
+        .defaultValue(false)
+        .visible(checkBehind::get)
+        .build()
+    );
+
     private final Setting<Boolean> advertise = sgGeneral.add(new BoolSetting.Builder()
         .name("advertise")
         .description("Sends THM Advertisements in chat")
@@ -1502,21 +1510,24 @@ public class HighwayBuilderTHM extends Module {
     private int forwardLatchedPlaceSlot = -1;
     private int forwardLatchedMineSlot = -1;
     private int mineActionsThisTick;
-    private double mineFractionCarry;
+    private final double[] mineFractionCarry = new double[1];
     private int borerPackets;
     private int placeActionsThisTick;
-    private double placeFractionCarry;
+    private final double[] placeFractionCarry = new double[1];
 
-    private static final double ADAPTIVE_PLACE_MAX = 3.0; // higher is unstable
-    private static final double ADAPTIVE_PLACE_MIN = 0.5;
-    private static final int ADAPTIVE_PLACE_STABLE_TICKS = 200;
+    // Max 3: higher is unstable. -0.5 on trouble, +0.1 per 10 stable seconds.
+    private final AdaptiveRate adaptivePlaceRate = new AdaptiveRate(0.5, 3.0, 0.5, 0.1, 200);
     private static final int ADAPTIVE_PLACE_REVERT_WINDOW = 40;
-    private double adaptivePlaceRate;
-    private int adaptivePlaceStableTicks;
     private final Long2LongOpenHashMap recentPlacements = new Long2LongOpenHashMap();
     // Filled from the netty thread, drained on tick.
     private final ConcurrentLinkedQueue<Long> revertedBlockUpdates = new ConcurrentLinkedQueue<>();
     private final AtomicInteger pendingRubberbands = new AtomicInteger();
+
+    private final GhostBlockProbe ghostProbe = new GhostBlockProbe(20);
+    private volatile boolean ghostProbeListening;
+    // {pos, solid ? 1 : 0}, filled from the netty thread.
+    private final ConcurrentLinkedQueue<long[]> ghostProbeUpdates = new ConcurrentLinkedQueue<>();
+    private boolean ghostProbeNoHandWarned;
 
     private int placedTotal;
     private int placeRateSampleTotal;
@@ -2318,12 +2329,13 @@ public class HighwayBuilderTHM extends Module {
         kitbotPeriodicUpdateNextTick = mc.world.getTime() + KITBOT_PERIODIC_UPDATE_INTERVAL_TICKS;
         forwardSchedulerDebugFileErrorLogged = false;
         resetAdaptivePlacement();
+        resetGhostBlockCheck();
         resetTpsThrottleRuntime();
         clearSafetyRuntime("module-activate");
         mineActionsThisTick = Math.max(1, (int) Math.floor(sanitizeMineActionRate(blocksPerTick.get())));
-        mineFractionCarry = 0.0;
+        mineFractionCarry[0] = 0.0;
         placeActionsThisTick = Math.max(0, (int) Math.floor(basePlacementsPerTick()));
-        placeFractionCarry = 0.0;
+        placeFractionCarry[0] = 0.0;
         resetEnclosurePlaceCredit();
         clearEnclosurePlacementConfirmation();
         clearDesyncWiggleProbe("module-activate");
@@ -2391,9 +2403,9 @@ public class HighwayBuilderTHM extends Module {
         placeTrail.clear();
         forwardSchedulerDebugFileErrorLogged = false;
         mineActionsThisTick = 0;
-        mineFractionCarry = 0.0;
+        mineFractionCarry[0] = 0.0;
         placeActionsThisTick = 0;
-        placeFractionCarry = 0.0;
+        placeFractionCarry[0] = 0.0;
         resetTpsThrottleRuntime();
         clearSafetyRuntime("module-deactivate");
         resetEnclosurePlaceCredit();
@@ -4654,6 +4666,10 @@ public class HighwayBuilderTHM extends Module {
             }
         }
 
+        if (ghostProbeListening && event.packet instanceof BlockUpdateS2CPacket g) {
+            ghostProbeUpdates.add(new long[]{g.getPos().asLong(), g.getState().isReplaceable() ? 0 : 1});
+        }
+
         if (adaptivePlacements.get()) {
             if (event.packet instanceof PlayerPositionLookS2CPacket) pendingRubberbands.incrementAndGet();
             else if (event.packet instanceof BlockUpdateS2CPacket u && u.getState().isAir()) revertedBlockUpdates.add(u.getPos().asLong());
@@ -6467,26 +6483,15 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private int computeMineActionsThisTick() {
-        double configured = Math.max(0.0, effectiveBlocksPerTickActionRate());
-        int whole = (int) Math.floor(configured);
-        double fractional = configured - whole;
-
-        mineFractionCarry += fractional;
-        if (mineFractionCarry >= 1.0) {
-            whole += 1;
-            mineFractionCarry -= 1.0;
-        }
-
-        return Math.max(0, whole);
+        return AdaptiveRate.actionsThisTick(effectiveBlocksPerTickActionRate(), mineFractionCarry);
     }
 
     private double basePlacementsPerTick() {
-        return adaptivePlacements.get() && adaptivePlaceRate > 0 ? adaptivePlaceRate : sanitizePlaceActionRate(placementsPerTick.get());
+        return adaptivePlacements.get() && adaptivePlaceRate.get() > 0 ? adaptivePlaceRate.get() : sanitizePlaceActionRate(placementsPerTick.get());
     }
 
     private void resetAdaptivePlacement() {
-        adaptivePlaceRate = Math.min(ADAPTIVE_PLACE_MAX, sanitizePlaceActionRate(placementsPerTick.get()));
-        adaptivePlaceStableTicks = 0;
+        adaptivePlaceRate.reset(sanitizePlaceActionRate(placementsPerTick.get()));
         recentPlacements.clear();
         revertedBlockUpdates.clear();
         pendingRubberbands.set(0);
@@ -6525,13 +6530,10 @@ public class HighwayBuilderTHM extends Module {
         if (state != State.Forward || packetBuild.get()) return;
 
         if (rubberbands > 0 || reverts > 0) {
-            double lowered = Math.max(ADAPTIVE_PLACE_MIN, roundToNearestTenth(adaptivePlaceRate - 0.5));
-            if (lowered < adaptivePlaceRate) info("Adaptive placements: %.1f -> %.1f (rubberbands=%d, reverted=%d).", adaptivePlaceRate, lowered, rubberbands, reverts);
-            adaptivePlaceRate = lowered;
-            adaptivePlaceStableTicks = 0;
-        } else if (++adaptivePlaceStableTicks >= ADAPTIVE_PLACE_STABLE_TICKS && adaptivePlaceRate < ADAPTIVE_PLACE_MAX) {
-            adaptivePlaceRate = Math.min(ADAPTIVE_PLACE_MAX, roundToNearestTenth(adaptivePlaceRate + 0.1));
-            adaptivePlaceStableTicks = 0;
+            double before = adaptivePlaceRate.get();
+            if (adaptivePlaceRate.onTrouble()) info("Adaptive placements: %.1f -> %.1f (rubberbands=%d, reverted=%d).", before, adaptivePlaceRate.get(), rubberbands, reverts);
+        } else {
+            adaptivePlaceRate.onStableTick();
         }
     }
 
@@ -6548,17 +6550,7 @@ public class HighwayBuilderTHM extends Module {
     private int computePlaceActionsThisTick() {
         if (packetBuild.get()) return Integer.MAX_VALUE;
 
-        double configured = Math.max(0.0, effectivePlacementsPerTickActionRate());
-        int whole = (int) Math.floor(configured);
-        double fractional = configured - whole;
-
-        placeFractionCarry += fractional;
-        if (placeFractionCarry >= 1.0) {
-            whole += 1;
-            placeFractionCarry -= 1.0;
-        }
-
-        return Math.max(0, whole);
+        return AdaptiveRate.actionsThisTick(effectivePlacementsPerTickActionRate(), placeFractionCarry);
     }
 
     private int computeEnclosurePlaceCreditGainTenths() {
@@ -12203,6 +12195,96 @@ public class HighwayBuilderTHM extends Module {
         return (x * rightDir.offsetX + z * rightDir.offsetZ) / magnitude;
     }
 
+    private long currentForwardRow() {
+        return (long) Math.floor(currentForwardProjection() / directionStepLength());
+    }
+
+    private void resetGhostBlockCheck() {
+        ghostProbe.reset();
+        ghostProbeUpdates.clear();
+        ghostProbeListening = false;
+        ghostProbeNoHandWarned = false;
+    }
+
+    /** Stops before the next row until the row behind is server-confirmed. */
+    private boolean ghostBlockCheckHold() {
+        if (!ghostBlockCheck.get() || !checkBehind.get()) return false;
+        long row = currentForwardRow();
+        if (ghostProbe.isVerified(row - 1)) return false;
+        double fraction = currentForwardProjection() / directionStepLength() - row;
+        return fraction > 0.6;
+    }
+
+    private void tickGhostBlockCheck() {
+        if (!ghostBlockCheck.get() || !checkBehind.get()) {
+            if (ghostProbeListening) resetGhostBlockCheck();
+            return;
+        }
+        ghostProbeListening = true;
+
+        long now = mc.world.getTime();
+        for (long[] u; (u = ghostProbeUpdates.poll()) != null; ) ghostProbe.onBlockUpdate(u[0], u[1] != 0);
+
+        switch (ghostProbe.tick(now)) {
+            // The server's update already turned the ghost into air client-side, so check-behind re-places it.
+            case GHOST -> info("Ghost block behind you, re-placing before moving on.");
+            case TIMEOUT -> sendGhostProbes(ghostProbe.unanswered(now));
+            default -> {}
+        }
+        if (ghostProbe.isProbing()) return;
+
+        long behindRow = currentForwardRow() - 1;
+        if (ghostProbe.isVerified(behindRow)) return;
+
+        List<BlockPos> targets = new ArrayList<>();
+        List<MBPIterator> required = new ArrayList<>(2);
+        required.add(blockPosProvider.getBehindFloor());
+        if (railings.get()) required.add(blockPosProvider.getBehindRailings(0));
+        for (MBPIterator it : required) {
+            for (MBlockPos pos : it) {
+                if (pos.getState().isReplaceable()) return; // hole: check-behind fills it first
+                targets.add(pos.getBlockPos().toImmutable());
+            }
+        }
+        if (railings.get() && cornerBlock.get()) {
+            for (MBlockPos pos : blockPosProvider.getBehindRailings(-1)) {
+                if (!pos.getState().isReplaceable()) targets.add(pos.getBlockPos().toImmutable());
+            }
+        }
+
+        if (ghostProbeHand() == null) {
+            if (!ghostProbeNoHandWarned) warning("Ghost block check needs an empty hand, pickaxe or totem; skipping it.");
+            ghostProbeNoHandWarned = true;
+            ghostProbe.start(behindRow, List.of(), now);
+            return;
+        }
+
+        ghostProbe.start(behindRow, targets, now);
+        sendGhostProbes(targets);
+    }
+
+    private void sendGhostProbes(List<BlockPos> targets) {
+        Hand hand = ghostProbeHand();
+        if (hand == null || mc.getNetworkHandler() == null) return;
+        for (GhostBlockProbe.Probe probe : GhostBlockProbe.plan(targets)) {
+            Direction side = probe.side();
+            Vec3d hit = Vec3d.ofCenter(probe.pos()).add(side.getOffsetX() * 0.5, side.getOffsetY() * 0.5, side.getOffsetZ() * 0.5);
+            // Sequence 0 is never a pending client prediction, so the ack changes nothing client-side.
+            mc.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(hand, new BlockHitResult(hit, side, probe.pos(), false), 0));
+        }
+    }
+
+    /** A hand whose item does nothing when used on a block, so the probe can't place or strip anything. */
+    private Hand ghostProbeHand() {
+        if (isInertProbeStack(mc.player.getOffHandStack())) return Hand.OFF_HAND;
+        if (isInertProbeStack(mc.player.getMainHandStack())) return Hand.MAIN_HAND;
+        return null;
+    }
+
+    private static boolean isInertProbeStack(ItemStack stack) {
+        return stack.isEmpty() || stack.isIn(ItemTags.PICKAXES) || stack.isOf(Items.TOTEM_OF_UNDYING);
+    }
+
     private double currentForwardProjection() {
         return projectedForwardCoordinate(mc.player.getX(), mc.player.getZ());
     }
@@ -12419,7 +12501,10 @@ public class HighwayBuilderTHM extends Module {
         mc.player.setPitch(20);
         mc.player.setYaw(dir.yaw);
 
-        if (activeRow == null || activeRow.isComplete() || currentForwardProjection() < activeRow.frontBoundaryProjection) {
+        if (ghostBlockCheckHold()) {
+            input.stop();
+            logForwardSchedulerStatus("hold", activeRow, "waiting for server to confirm the row behind", false);
+        } else if (activeRow == null || activeRow.isComplete() || currentForwardProjection() < activeRow.frontBoundaryProjection) {
             logForwardSchedulerStatus("move", activeRow, activeRow == null ? "no active row" : "moving toward boundary", true);
             input.setState(true, false, false, false, false, false, false);
             applyForwardDriftCorrection();
@@ -12443,6 +12528,7 @@ public class HighwayBuilderTHM extends Module {
             return;
         }
 
+        tickGhostBlockCheck();
         ForwardRowSchedule activeRow = getActiveForwardRow();
         refreshCountedForwardStatPositions();
         logForwardSchedulerStatus("tick", activeRow, "pre-work", false);

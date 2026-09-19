@@ -154,6 +154,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | `autosetup-modules` | `true` | Always | Automatically configures Meteor Speed Mine, Reach, Velocity, and HighwayBuilder place range for highway work. |
 | `packet-mode` | `false` | Always | Enables Packet Build and Packet Borer, leaving already-enabled pieces alone. |
 | `check-behind` | `true` | Always | Repairs missing floor or railings behind the player, every row within `place-range` (Forward scheduler; legacy mode checks one row). |
+| `ghost-block-check` | `false` | `check-behind` is on | Before moving into the next row, has the server confirm the floor/railings of the row behind (one use-on-block packet per two blocks, needs an empty hand, pickaxe or totem). A ghost block turns into a hole client-side and is re-placed first. Forward scheduler only. |
 | `advertise` | `false` | Always | Sends THM advertisement messages in chat. |
 | `advertise-interval` | `5`, range `1-60` minutes | `advertise` is on | Delay between advertisement messages. |
 | `toggle-perspective` | `true` | Always | Switches to third person while active and restores the previous perspective afterward. |

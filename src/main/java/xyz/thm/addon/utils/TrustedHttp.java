@@ -50,7 +50,7 @@ import java.util.regex.Pattern;
  */
 public final class TrustedHttp {
     // Own logger, not THMAddon.LOG: that class static-inits against a live FabricLoader, which
-    // would make this class unloadable outside the game (see TrustedHttpSelfCheck).
+    // would make this class unloadable outside the game (see TrustedHttpTest).
     private static final Logger LOG = LoggerFactory.getLogger(TrustedHttp.class);
     public static final int MAX_JSON_BYTES = 1_048_576;
     /** Screenshot attachments are far bigger than any JSON body. */

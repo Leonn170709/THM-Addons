@@ -107,7 +107,7 @@ public class AntiConcrete extends Module {
                     // guard: ensure indexes are sane
                     try {
                         InvUtils.move().from(hotbarIndex).to(originalSlot);
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) { THMAddon.LOG.debug("AntiConcrete: returning swapped button failed", e); }
                 }
                 waitingToReturn = false;
                 originalSlot = -1;

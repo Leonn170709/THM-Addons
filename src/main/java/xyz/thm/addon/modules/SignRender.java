@@ -300,7 +300,7 @@ public class SignRender extends Module {
                 signData.color = new Color(textColor.get());
                 tempSignList.add(signData);
                 signCache.put(signPos, signData);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { THMAddon.LOG.debug("SignRender: skipped sign", e); }
         }
         if (prioritizeClosest.get()) {
             tempSignList.sort(Comparator.comparingDouble(s -> s.distance));
@@ -615,7 +615,7 @@ public class SignRender extends Module {
                     lines.addAll(backLines);
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { THMAddon.LOG.debug("SignRender: reading sign text failed", e); }
         return lines;
     }
     private List<String> extractTextLines(SignText signText) {
@@ -631,7 +631,7 @@ public class SignRender extends Module {
                     }
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { THMAddon.LOG.debug("SignRender: extracting sign lines failed", e); }
         return lines;
     }
     private String safeExtractString(Text text) {
@@ -646,7 +646,7 @@ public class SignRender extends Module {
                 if (literal != null) {
                     return cleanSignText(literal);
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e2) { THMAddon.LOG.debug("SignRender: literal fallback failed", e2); }
             return "";
         }
     }
