@@ -1536,11 +1536,11 @@ public class HighwayBuilderTHM extends Module {
     private int placeActionsThisTick;
     private final double[] placeFractionCarry = new double[1];
 
-    // Max 3: higher is unstable. -0.5 on trouble, +0.1 per 10 stable seconds.
-    private final AdaptiveRate adaptivePlaceRate = new AdaptiveRate(0.5, 3.0, 0.5, 0.1, 200);
+    // Max 3: higher is unstable. -0.5 on trouble, +0.1 per 10 stable seconds, retry a failed rate after 5 min.
+    private final AdaptiveRate adaptivePlaceRate = new AdaptiveRate(0.5, 3.0, 0.5, 0.1, 200, 6000);
     private static final int ADAPTIVE_PLACE_REVERT_WINDOW = 40;
-    // Max 29: everything under 30 works. -3 on trouble, +1 per 10 stable seconds.
-    private final AdaptiveRate adaptiveMineRate = new AdaptiveRate(1.0, 29.0, 3.0, 1.0, 200);
+    // Max 29: everything under 30 works. -3 on trouble, +1 per 10 stable seconds, retry a failed rate after 5 min.
+    private final AdaptiveRate adaptiveMineRate = new AdaptiveRate(1.0, 29.0, 3.0, 1.0, 200, 6000);
     // pos -> {sent tick, seen as air (1/0)}. A broken block that turns solid again was refused by the server.
     private final Long2ObjectOpenHashMap<long[]> breakWatch = new Long2ObjectOpenHashMap<>();
     private final BlockPos.Mutable breakWatchPos = new BlockPos.Mutable();

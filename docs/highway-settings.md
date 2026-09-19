@@ -67,7 +67,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | `double-mine` | `true` | Uses normal mine and packet mine together when applicable. |
 | `fast-break` | `true`; shown when `double-mine` is on | Finishes double-mined blocks faster. |
 | `blocks-per-tick` | `7`, range `1-30`, slider max `20` | Maximum instant-break mining throughput, including fractional values. |
-| `adaptive-mining` | `false` | Drops blocks-per-tick by 3 when a broken block comes back (the server refused the break; min `1`), raises it 1 per 10 stable seconds up to `29`. Starts from `blocks-per-tick`. |
+| `adaptive-mining` | `false` | Drops blocks-per-tick by 3 when a broken block comes back (the server refused the break; min `1`), raises it 1 per 10 stable seconds up to `29`, staying one step below the last rate that failed (retried after 5 calm minutes). Starts from `blocks-per-tick`. |
 | `break-delay` | `0`, minimum `0` | Delay between normal break actions. |
 | `dont-break-tools` | `false` | Stops using tools before they break. |
 | `save-pickaxes` | `1`, range `0-36`; shown when `dont-break-tools` is off | Pickaxe reserve that triggers restock or shutdown. |
@@ -81,7 +81,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | --- | --- | --- |
 | `blocks-to-place` | `Obsidian`; full-cube blocks only | Blocks the builder may place. |
 | `placements-per-tick` | `1.5`, range `0.1-100`, slider `0.1-10`, one decimal place | Maximum averaged place throughput; `1.5` bursts 1-2-1-2 blocks per tick for 30 blocks/s, `0.1` performs about one placement every 10 ticks. |
-| `adaptive-placements` | `false` | Drops the place rate by 0.5 on a rubberband or a server-reverted placement (min `0.5`), raises it 0.1 per 10 stable seconds up to `3`. Starts from `placements-per-tick`; ignored with `packet-build`. |
+| `adaptive-placements` | `false` | Drops the place rate by 0.5 on a rubberband or a server-reverted placement (min `0.5`), raises it 0.1 per 10 stable seconds up to `3`, staying one step below the last rate that failed (retried after 5 calm minutes). Starts from `placements-per-tick`; ignored with `packet-build`. |
 | `place-range` | `4.5`, slider max `5.5` | Maximum block placement reach. |
 | `place-delay` | `0`, minimum `0` | Delay between place actions. |
 | `packet-build` | `false` | Uses direct placement packets for higher forward throughput. |

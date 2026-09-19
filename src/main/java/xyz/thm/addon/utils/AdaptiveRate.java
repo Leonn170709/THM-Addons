@@ -6,33 +6,46 @@
 
 package xyz.thm.addon.utils;
 
-/** Drops fast on trouble, climbs back slowly while stable. Values are kept to one decimal. */
+/**
+ * Drops fast on trouble, climbs back slowly while stable, and remembers the rate that failed:
+ * it settles one step below it and only retries it after {@code probeTicks} of calm, so it holds
+ * the best working rate instead of sawtoothing into the bad one. Values are kept to one decimal.
+ */
 public final class AdaptiveRate {
     private final double min, max, down, up;
-    private final int stableTicksPerStep;
+    private final int stableTicksPerStep, probeTicks;
     private double rate;
-    private int stableTicks;
+    private double ceiling = Double.POSITIVE_INFINITY;
+    private int stableTicks, capTicks;
 
-    public AdaptiveRate(double min, double max, double down, double up, int stableTicksPerStep) {
+    public AdaptiveRate(double min, double max, double down, double up, int stableTicksPerStep, int probeTicks) {
         this.min = min;
         this.max = max;
         this.down = down;
         this.up = up;
         this.stableTicksPerStep = stableTicksPerStep;
+        this.probeTicks = probeTicks;
     }
 
     public void reset(double start) {
         rate = Math.max(min, Math.min(max, tenth(start)));
-        stableTicks = 0;
+        ceiling = Double.POSITIVE_INFINITY;
+        stableTicks = capTicks = 0;
     }
 
     public double get() {
         return rate;
     }
 
+    /** Lowest rate known to fail, or infinity. */
+    public double ceiling() {
+        return ceiling;
+    }
+
     /** @return true if the rate went down */
     public boolean onTrouble() {
-        stableTicks = 0;
+        stableTicks = capTicks = 0;
+        ceiling = rate;
         double lowered = Math.max(min, tenth(rate - down));
         boolean changed = lowered < rate;
         rate = lowered;
@@ -41,8 +54,21 @@ public final class AdaptiveRate {
 
     /** @return true if the rate went up */
     public boolean onStableTick() {
-        if (++stableTicks < stableTicksPerStep || rate >= max) return false;
-        stableTicks = 0;
+        if (rate >= max) return false;
+
+        double cap = Double.isInfinite(ceiling) ? max : Math.max(min, Math.min(max, tenth(ceiling - up)));
+        if (rate < cap - 1e-9) {
+            capTicks = 0;
+            if (++stableTicks < stableTicksPerStep) return false;
+            stableTicks = 0;
+            rate = Math.min(cap, tenth(rate + up));
+            return true;
+        }
+
+        // Sitting just under the known-bad rate: retry it now and then, conditions change.
+        if (++capTicks < probeTicks) return false;
+        capTicks = stableTicks = 0;
+        ceiling = Double.POSITIVE_INFINITY;
         rate = Math.min(max, tenth(rate + up));
         return true;
     }

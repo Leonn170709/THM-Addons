@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class AdaptiveRateTest {
     /** Same numbers HighwayBuilder uses for adaptive-placements. */
     private static AdaptiveRate placements(double start) {
-        AdaptiveRate r = new AdaptiveRate(0.5, 3.0, 0.5, 0.1, 200);
+        AdaptiveRate r = new AdaptiveRate(0.5, 3.0, 0.5, 0.1, 200, 6000);
         r.reset(start);
         return r;
     }
@@ -71,7 +71,7 @@ class AdaptiveRateTest {
 
     /** Same numbers HighwayBuilder uses for adaptive-mining. */
     private static AdaptiveRate mining(double start) {
-        AdaptiveRate r = new AdaptiveRate(1.0, 29.0, 3.0, 1.0, 200);
+        AdaptiveRate r = new AdaptiveRate(1.0, 29.0, 3.0, 1.0, 200, 6000);
         r.reset(start);
         return r;
     }
@@ -100,6 +100,114 @@ class AdaptiveRateTest {
         assertEquals(28, r.get(), 1e-9);
         for (int i = 0; i < 200 * 10; i++) r.onStableTick();
         assertEquals(29, r.get(), 1e-9);
+    }
+
+    // ---- ceiling: settle below the rate that failed ----
+
+    /** Runs a fake server where any rate at or above {@code limit} causes trouble. Returns ticks spent at each rate x10. */
+    private static int[] simulate(AdaptiveRate r, double limit, int ticks, int[] troubles) {
+        int[] timeAt = new int[400];
+        for (int t = 0; t < ticks; t++) {
+            if (r.get() >= limit - 1e-9) {
+                r.onTrouble();
+                troubles[0]++;
+            } else {
+                r.onStableTick();
+            }
+            timeAt[(int) Math.round(r.get() * 10)]++;
+        }
+        return timeAt;
+    }
+
+    @Test
+    void settlesOneStepBelowTheFailingRate() {
+        AdaptiveRate r = mining(7);
+        int[] troubles = {0};
+        int ticks = 20 * 60 * 30; // 30 minutes
+        int[] timeAt = simulate(r, 11, ticks, troubles);
+
+        assertTrue(timeAt[100] > ticks * 0.9, "at 10 most of the time, was " + timeAt[100] * 100 / ticks + "%");
+        // One probe of 11 about every 5 minutes, not every ~30 seconds.
+        assertTrue(troubles[0] <= 7, "troubles: " + troubles[0]);
+    }
+
+    @Test
+    void withoutMemoryItWouldSawtoothMoreOften() {
+        // Same fake server, but the ceiling is forgotten instantly: shows the ceiling is what cuts the troubles.
+        AdaptiveRate r = new AdaptiveRate(1.0, 29.0, 3.0, 1.0, 200, 1);
+        int[] troubles = {0};
+        simulate(r, 11, 20 * 60 * 30, troubles);
+        assertTrue(troubles[0] > 30, "troubles: " + troubles[0]);
+    }
+
+    @Test
+    void placementsSettleBelowFailingRateToo() {
+        AdaptiveRate r = placements(1.5);
+        int[] troubles = {0};
+        int ticks = 20 * 60 * 30;
+        int[] timeAt = simulate(r, 2.3, ticks, troubles);
+        assertTrue(timeAt[22] > ticks * 0.8, "at 2.2 " + timeAt[22] * 100 / ticks + "% of the time");
+    }
+
+    @Test
+    void recordsTheFailingRateAsCeiling() {
+        AdaptiveRate r = mining(12);
+        assertTrue(Double.isInfinite(r.ceiling()));
+        r.onTrouble();
+        assertEquals(12, r.ceiling(), 1e-9);
+        assertEquals(9, r.get(), 1e-9);
+        for (int i = 0; i < 200 * 10; i++) r.onStableTick();
+        assertEquals(11, r.get(), 1e-9, "climbs back, stops one below the ceiling");
+    }
+
+    @Test
+    void retriesTheCeilingAfterFiveCalmMinutes() {
+        AdaptiveRate r = mining(12);
+        r.onTrouble();                                     // ceiling 12, rate 9
+        for (int i = 0; i < 400; i++) r.onStableTick();    // back up to 11
+        assertEquals(11, r.get(), 1e-9);
+        for (int i = 0; i < 5999; i++) assertFalse(r.onStableTick());
+        assertTrue(r.onStableTick(), "probe after 6000 ticks at the cap");
+        assertEquals(12, r.get(), 1e-9);
+        assertTrue(Double.isInfinite(r.ceiling()), "probe clears the ceiling");
+    }
+
+    @Test
+    void recoversFromAOneOffSpike() {
+        // A single lag spike at 8 must not pin it at 7 forever: after the probe holds it climbs normally again.
+        AdaptiveRate r = mining(8);
+        r.onTrouble();                                                  // ceiling 8, rate 5
+        for (int i = 0; i < 200 * 2 + 6000 + 200 * 10; i++) r.onStableTick();
+        assertTrue(r.get() >= 15, "was " + r.get());
+    }
+
+    @Test
+    void newTroubleBelowTheCeilingLowersIt() {
+        AdaptiveRate r = mining(12);
+        r.onTrouble();              // ceiling 12, rate 9
+        r.onTrouble();              // 9 failed too: ceiling 9, rate 6
+        assertEquals(9, r.ceiling(), 1e-9);
+        for (int i = 0; i < 200 * 10; i++) r.onStableTick();
+        assertEquals(8, r.get(), 1e-9);
+    }
+
+    @Test
+    void resetForgetsTheCeiling() {
+        AdaptiveRate r = mining(12);
+        r.onTrouble();
+        r.reset(12);
+        assertTrue(Double.isInfinite(r.ceiling()));
+        for (int i = 0; i < 200; i++) r.onStableTick();
+        assertEquals(13, r.get(), 1e-9);
+    }
+
+    @Test
+    void troubleAtTheFloorStillProbesLater() {
+        AdaptiveRate r = mining(1);
+        r.onTrouble();                               // ceiling 1, rate stays 1
+        assertEquals(1, r.get(), 1e-9);
+        for (int i = 0; i < 6000; i++) r.onStableTick();
+        assertEquals(2, r.get(), 1e-9);
     }
 
     // ---- actionsThisTick ----
