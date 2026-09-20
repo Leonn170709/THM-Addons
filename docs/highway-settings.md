@@ -96,9 +96,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | --- | --- | --- |
 | `enable-experimental` | `false` | Master switch: nothing else in this group does anything while it is off. |
 | `packet-budget` | `false` | Caps mining and placing per tick so the tick stays under the server's packet limit. |
-| `keep-moving-in-reach` | `false` | Keeps walking past a row while its leftover blocks stay in reach. |
 | `mine-lookahead` | `false` | Mines into upcoming rows with the tick's leftover mine actions. |
-| `rebreak-on-place` | `false`; shown when `mine-ender-chests` is on | Sends the instant-rebreak packet in the same tick as the e-chest placement instead of the next tick. |
 | `packets-per-tick` | `23`, range `4-200`; shown when `packet-budget` is on | Packets one tick may send. |
 | `packet-build-once` | `false`; shown when `packet-build` is on | Experimental: one packet per block instead of one per block per tick. |
 | `packet-build-resend` | `20`, range `2-200`; shown when `packet-build-once` is on | Ticks before asking the server what is at a block it never answered for. |
@@ -114,13 +112,18 @@ After that first seed, each profile loads its own saved values rather than reapp
 | `food-types` | Empty list; shown when food restock or food management is active | Food items counted for restock/food management. Multiple allowed — selection order is priority, top item preferred (its max stack size is used for restock math). Its own picker has Up/Down buttons to reorder. |
 | `save-food` | `16`, range `1-32`; shown when `food-restock` is on | Food count threshold that queues restock. |
 | `minimum-empty-slots` | `1`, minimum `0`, slider `0-9` | Empty inventory slots to preserve after mining obsidian. |
+
+### Ender Chests
+
+| Setting | Default / Range | What to change it for |
+| --- | --- | --- |
 | `mine-ender-chests` | `true` | Mines ender chests to convert them into obsidian. |
 | `save-ender-chests` | `4`, range `4-64` | Loose ender chest reserve to keep in inventory. |
-| `speedmine-rebreak` | `true`; shown when `mine-ender-chests` is on | On breaks e-chests with THM Speedmine (forcing its auto-rebreak on for the cycle) with the normal obby-restock target amount while preserving the saved e-chest reserve. Off uses the legacy packet breaker, the selected target, and the saved reserve. |
-| `instantly-rebreak-echests` | `true`; shown when `speedmine-rebreak` is off | Repeatedly sends the legacy instant-rebreak packet after replacing an e-chest. |
-| `rebreak-delay` | `0`, slider max `20`; shown when legacy instant rebreak is on | Ticks between legacy instant-rebreak attempts. |
+| `break-mode` | `Speedmine rebreak`; shown when `mine-ender-chests` is on | How a placed chest is broken again: `Speedmine rebreak`, `Instant rebreak`, `Instant rebreak on place (experimental)` or `Normal breaking`. |
+| `rebreak-delay` | `0`, slider max `20`; shown for `Instant rebreak` | Ticks between rebreak packets. |
+| `silent-rebreak-swap` | `true`; shown unless the mode is `Normal breaking` | Restores your selected slot after a rebreak or chest placement. |
 | `use-break-speed-multiplier` | `true`; shown when `mine-ender-chests` is on | Temporarily boosts Timer while mining ender chests. |
-| `silent-rebreak-swap` | `true`; shown for new breaking or legacy instant rebreak | Silently swaps for legacy rebreak packets and e-chest placement. |
+| `break-speed-multiplier` | `1.5`, range `1-3`; shown when the boost is on | How much Timer is boosted. |
 
 ### KitBot Updates
 
@@ -230,14 +233,18 @@ After that first seed, each profile loads its own saved values rather than reapp
 | `offhand-build` | `false` | Always | Mines with the pickaxe in hand and places your block from the offhand, taking over AutoTotem to swap a totem in there at low health or with an enemy near. While ender chests are being mined the offhand holds the chests instead, so a chest can be placed and mined in the same tick without swapping; the offhand returns to your placement block afterwards. |
 | `Anti-hunger` | `true` | Always | Turns Meteor's AntiHunger on while building and off again when it stops. If you already had it on, it is left alone. |
 | `minimum-empty-slots` | `1`, minimum `0`, slider `0-9` | Always | Empty inventory slots to preserve after obsidian mining. |
+
+### THM-HighwayBuilder: Ender Chests
+
+| Setting | Default / Range / Options | Visible when | Behavior |
+| --- | --- | --- | --- |
 | `mine-ender-chests` | `true` | Always | Mines ender chests to create obsidian. |
 | `save-ender-chests` | `4`, range `4-64` | Always | Loose ender chests to reserve; falling one below this queues restock, and failure to replenish can hard-fail the module. |
-| `speedmine-rebreak` | `true` | `mine-ender-chests` is on | Selects the e-chest breaking method for the next mining cycle. On uses THM Speedmine, turning its `auto-rebreak` on for the cycle and putting your own setting back afterwards, while keeping the normal obby-restock target amount and stopping at the saved reserve. Off restores the legacy normal/instant-rebreak method and also stops at the saved reserve. |
-| `instantly-rebreak-echests` | `true` | `mine-ender-chests` is on and `speedmine-rebreak` is off | Repeatedly sends legacy `STOP_DESTROY_BLOCK` packets after placing an e-chest; after 60 ticks without success the cycle falls back to a normal break. |
-| `rebreak-delay` | `0`, slider max `20` | Legacy instant rebreak is on | Delay in ticks between legacy instant-rebreak attempts. |
+| `break-mode` | `Speedmine rebreak`; options below | `mine-ender-chests` is on | Picks one breaking method for the mining cycle. **Speedmine rebreak**: breaks with THM Speedmine, turning its `auto-rebreak` on for the cycle and putting your own setting back afterwards. **Instant rebreak**: after placing a chest, sends a sequenced `STOP_DESTROY_BLOCK` plus a swing (the same shape Meteor's InstantRebreak uses); the server breaks it at once when its stored mining progress for that spot is far enough along, otherwise it records the attempt and finishes the block itself a few ticks later. **Instant rebreak on place (experimental)**: same packet, but sent in the same tick as the placement instead of the next one; with `offhand-build` the chest comes from the offhand and the pickaxe never leaves the main hand, so no slot swap happens at all. **Normal breaking**: plain mining, no packet tricks. |
+| `rebreak-delay` | `0`, slider max `20` | Mode is `Instant rebreak` | Delay in ticks between rebreak packets. |
+| `silent-rebreak-swap` | `true` | Mode is not `Normal breaking` | Restores your previously selected slot after a rebreak packet or a chest placement. |
 | `use-break-speed-multiplier` | `true` | `mine-ender-chests` is on | Temporarily boosts Timer while mining ender chests, then restores the previous Timer state. |
 | `break-speed-multiplier` | `1.5`, range `1-3` | `mine-ender-chests` and `use-break-speed-multiplier` are on | Timer multiplier used during ender chest mining. |
-| `silent-rebreak-swap` | `true` | `mine-ender-chests` is on and either new breaking or legacy instant rebreak is enabled | Silently swaps to the best pickaxe for legacy instant-rebreak packets and when placing e-chests for restock. |
 
 ### THM-HighwayBuilder: KitBot Updates
 
@@ -251,9 +258,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | Setting | Default / Range | Shown when | What it does |
 | --- | --- | --- | --- |
 | `enable-experimental` | `false` | Always | Master switch for this group: every setting below is ignored (and hidden) while it is off. |
-| `keep-moving-in-reach` | `false` | `enable-experimental` is on | Normally the builder walks to a row's edge and waits there until that row is done. With this on it keeps walking while every leftover block of that row stays within `place-range` (minus 0.75 for travel). Floor and liquid work always stops it — that is the ground you would walk onto. |
 | `mine-lookahead` | `false` | `enable-experimental` is on | Spends mine actions the active row didn't need on the rows ahead. Blocks out of reach are skipped, so it only runs when the active row is already served. |
-| `rebreak-on-place` | `false` | `enable-experimental` and `mine-ender-chests` are on | Breaks the chest in the same tick it is placed: one `STOP_DESTROY_BLOCK` right after the place packet, using the mining progress the server still holds for that spot. With `offhand-build` the chest comes from the offhand and the pickaxe never leaves the main hand, so no slot swap happens at all; otherwise it swaps to a pickaxe first (and back when `silent-rebreak-swap` is on). |
 | `packet-budget` | `false` | `enable-experimental` is on | Caps mine and place actions each tick so their packet cost stays under `packets-per-tick`. Mining is served first (you cannot place into rock), and one mine action always goes through so the builder can't stall. Counts start+stop per mined block, one use-on-block per placed block, movement, slot swaps, and the swing packets unless PaketLimiter filters them. |
 | `packets-per-tick` | `23`, range `4-200` | `packet-budget` is on | The tick's packet allowance. Set it below the server's own limit. |
 
@@ -264,22 +269,17 @@ After that first seed, each profile loads its own saved values rather than reapp
 | `debug` | `false` | Always | Logs state transitions and movement input. |
 | `forward-scheduler-debug` | `false` | `legacy-mode` is off | Logs active row, queue, boundary, and actionability details for the forward scheduler. |
 | `statistics-debug` | `false` | Always | Logs detailed stats validation decisions for mine/place work. |
-| `render-reach` | `false` | Always | Outlines every non-air block within `place-range` through walls (white), with scheduler work in blue (ahead) and orange (behind). |
 | `session-summary` | `false` | Always | When the builder turns off, prints duration, distance, blocks placed (with average/s), broken, restocks, e-chest refills, rubberbands, adaptive drops and ghost blocks. |
 
-### THM-HighwayBuilder: Render Digging
+### THM-HighwayBuilder: Render
 
 | Setting | Default / Range / Options | Visible when | Behavior |
 | --- | --- | --- | --- |
+| `render-reach` | `false` | Always | Outlines every non-air block within `place-range` through walls (white), with scheduler work in blue (ahead) and orange (behind). |
 | `render-blocks-to-mine` | `true` | Always | Renders blocks selected for mining. |
 | `blocks-to-mine-shape-mode` | `Both`; Meteor `ShapeMode` | Always | Controls whether mine targets render sides, lines, or both. |
 | `blocks-to-mine-side-color` | RGBA `225,25,25,25` | Always | Fill color for mine target rendering. |
 | `blocks-to-mine-line-color` | RGBA `225,25,25,255` | Always | Outline color for mine target rendering. |
-
-### THM-HighwayBuilder: Render Paving
-
-| Setting | Default / Range / Options | Visible when | Behavior |
-| --- | --- | --- | --- |
 | `render-blocks-to-place` | `true` | Always | Renders blocks selected for placement. |
 | `blocks-to-place-shape-mode` | `Both`; Meteor `ShapeMode` | Always | Controls whether place targets render sides, lines, or both. |
 | `blocks-to-place-side-color` | RGBA `25,25,225,25` | Always | Fill color for place target rendering. |

@@ -50,6 +50,7 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
+import xyz.thm.addon.mixin.accessor.ClientPlayerInteractionManagerTHMAccessor;
 import xyz.thm.addon.utils.RenderUtilsTHM;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.meteorclient.utils.world.TickRate;
@@ -345,6 +346,25 @@ public class HighwayBuilderTHM extends Module {
         Always
     }
 
+    /** One breaking method at a time; the old speedmine/instant/on-place toggles collapsed into this. */
+    public enum EChestBreakMode {
+        Speedmine("Speedmine rebreak"),
+        InstantRebreak("Instant rebreak"),
+        OnPlace("Instant rebreak on place (experimental)"),
+        Normal("Normal breaking");
+
+        private final String title;
+
+        EChestBreakMode(String title) {
+            this.title = title;
+        }
+
+        @Override
+        public String toString() {
+            return title;
+        }
+    }
+
     public enum FoodManagement {
         None("None"),
         AutoEat("Auto Eat"),
@@ -487,10 +507,10 @@ public class HighwayBuilderTHM extends Module {
     private final SettingGroup sgNotifies = settings.createGroup("Notifies");
     private final SettingGroup sgStatistics = settings.createGroup("Logging");
     private final SettingGroup sgKitBotIntegration = settings.createGroup("KitBot Integration", false);
+    private final SettingGroup sgEChests = settings.createGroup("Ender Chests");
     private final SettingGroup sgExperimental = settings.createGroup("Experimental", false);
     private final SettingGroup sgDebugging = settings.createGroup("Debugging", false);
-    private final SettingGroup sgRenderDigging = settings.createGroup("Render Digging");
-    private final SettingGroup sgRenderPaving = settings.createGroup("Render Paving");
+    private final SettingGroup sgRender = settings.createGroup("Render");
 
     public final Setting<Integer> width = sgGeneral.add(new IntSetting.Builder()
         .name("width")
@@ -1045,27 +1065,11 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Boolean> keepMovingInReach = sgExperimental.add(new BoolSetting.Builder()
-        .name("keep-moving-in-reach")
-        .description("Keeps walking past a row while its leftover blocks stay in reach.")
-        .defaultValue(false)
-        .visible(enableExperimental::get)
-        .build()
-    );
-
     private final Setting<Boolean> mineLookahead = sgExperimental.add(new BoolSetting.Builder()
         .name("mine-lookahead")
         .description("Mines into upcoming rows with the tick's leftover mine actions.")
         .defaultValue(false)
         .visible(enableExperimental::get)
-        .build()
-    );
-
-    private final Setting<Boolean> rebreakOnPlace = sgExperimental.add(new BoolSetting.Builder()
-        .name("rebreak-on-place")
-        .description("Sends the instant-rebreak packet in the same tick as the ender chest placement.")
-        .defaultValue(false)
-        .visible(() -> enableExperimental.get() && this.mineEnderChests.get())
         .build()
     );
 
@@ -1152,13 +1156,6 @@ public class HighwayBuilderTHM extends Module {
     private long sessionStartMs;
     private int sessionRestocks, sessionEChestRefills, sessionAdaptiveDrops, sessionGhostBlocks, sessionBudgetClipped;
     private final AtomicInteger sessionRubberbands = new AtomicInteger();
-
-    private final Setting<Boolean> renderReachDebug = sgDebugging.add(new BoolSetting.Builder()
-        .name("render-reach")
-        .description("Outlines every block within place-range, through walls; scheduler work in blue (ahead) and orange (behind).")
-        .defaultValue(false)
-        .build()
-    );
 
     private static final Color REACH_AHEAD_SIDE = new Color(60, 140, 255, 25), REACH_AHEAD_LINE = new Color(60, 140, 255, 200);
     private static final Color REACH_BEHIND_SIDE = new Color(255, 150, 40, 25), REACH_BEHIND_LINE = new Color(255, 150, 40, 200);
@@ -1341,14 +1338,14 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Boolean> mineEnderChests = sgInventory.add(new BoolSetting.Builder()
+    private final Setting<Boolean> mineEnderChests = sgEChests.add(new BoolSetting.Builder()
         .name("mine-ender-chests")
         .description("Mines ender chests for obsidian.")
         .defaultValue(true)
         .build()
     );
 
-    private final Setting<BlockadeType> blockadeType = sgInventory.add(new EnumSetting.Builder<BlockadeType>()
+    private final Setting<BlockadeType> blockadeType = sgEChests.add(new EnumSetting.Builder<BlockadeType>()
         .name("echest-blockade-type")
         .description("Locked to FullRoof while KitBot shares the normal blockade geometry.")
         .defaultValue(BlockadeType.FullRoof)
@@ -1356,7 +1353,7 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    public final Setting<Integer> saveEchests = sgInventory.add(new IntSetting.Builder()
+    public final Setting<Integer> saveEchests = sgEChests.add(new IntSetting.Builder()
         .name("save-ender-chests")
         .description("How many ender chests to keep in reserve. Falling below queues a restock.")
         .defaultValue(4)
@@ -1365,32 +1362,32 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Boolean> speedmineRebreak = sgInventory.add(new BoolSetting.Builder()
-        .name("speedmine-rebreak")
-        .description("Breaks ender chests with THM Speedmine, turning its auto-rebreak on while it does.")
-        .defaultValue(true)
+    public final Setting<EChestBreakMode> echestBreakMode = sgEChests.add(new EnumSetting.Builder<EChestBreakMode>()
+        .name("break-mode")
+        .description("How a placed ender chest is broken again.")
+        .defaultValue(EChestBreakMode.Speedmine)
         .visible(mineEnderChests::get)
         .build()
     );
 
-    private final Setting<Boolean> rebreakEchests = sgInventory.add(new BoolSetting.Builder()
-        .name("instantly-rebreak-echests")
-        .description("Uses the legacy instant-rebreak packet method after placing an ender chest.")
-        .defaultValue(true)
-        .visible(() -> mineEnderChests.get() && !speedmineRebreak.get())
-        .build()
-    );
-
-    private final Setting<Integer> rebreakTimer = sgInventory.add(new IntSetting.Builder()
+    private final Setting<Integer> rebreakTimer = sgEChests.add(new IntSetting.Builder()
         .name("rebreak-delay")
-        .description("Delay in ticks between legacy instant-rebreak attempts.")
+        .description("Ticks between instant-rebreak packets.")
         .defaultValue(0)
         .sliderMax(20)
-        .visible(() -> mineEnderChests.get() && !speedmineRebreak.get() && rebreakEchests.get())
+        .visible(() -> mineEnderChests.get() && echestBreakMode.get() == EChestBreakMode.InstantRebreak)
         .build()
     );
 
-    private final Setting<Boolean> useBreakSpeedMultiplier = sgInventory.add(new BoolSetting.Builder()
+    private final Setting<Boolean> silentRebreakSwap = sgEChests.add(new BoolSetting.Builder()
+        .name("silent-rebreak-swap")
+        .description("Restores your selected slot after a rebreak or chest placement.")
+        .defaultValue(true)
+        .visible(() -> mineEnderChests.get() && echestBreakMode.get() != EChestBreakMode.Normal)
+        .build()
+    );
+
+    private final Setting<Boolean> useBreakSpeedMultiplier = sgEChests.add(new BoolSetting.Builder()
         .name("use-break-speed-multiplier")
         .description("Boosts Timer while mining ender chests, then restores it.")
         .defaultValue(true)
@@ -1398,9 +1395,9 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Double> breakSpeedMultiplier = sgInventory.add(new DoubleSetting.Builder()
+    private final Setting<Double> breakSpeedMultiplier = sgEChests.add(new DoubleSetting.Builder()
         .name("break-speed-multiplier")
-        .description("Break Speed Multiplier")
+        .description("How much Timer is boosted while mining ender chests.")
         .defaultValue(1.5)
         .range(1, 3)
         .sliderRange(1, 3)
@@ -1408,68 +1405,65 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Boolean> silentRebreakSwap = sgInventory.add(new BoolSetting.Builder()
-        .name("silent-rebreak-swap")
-        .description("Silently swaps for rebreak packets and ender chest placement.")
-        .defaultValue(true)
-        .visible(() -> mineEnderChests.get() && (speedmineRebreak.get() || rebreakEchests.get()))
+    // Render
+
+    private final Setting<Boolean> renderReachDebug = sgRender.add(new BoolSetting.Builder()
+        .name("render-reach")
+        .description("Outlines every block within place-range, through walls; scheduler work in blue (ahead) and orange (behind).")
+        .defaultValue(false)
         .build()
     );
 
-    // Render Digging
-
-    private final Setting<Boolean> renderMine = sgRenderDigging.add(new BoolSetting.Builder()
+    private final Setting<Boolean> renderMine = sgRender.add(new BoolSetting.Builder()
         .name("render-blocks-to-mine")
         .description("Render blocks to be mined.")
         .defaultValue(true)
         .build()
     );
 
-    private final Setting<ShapeMode> renderMineShape = sgRenderDigging.add(new EnumSetting.Builder<ShapeMode>()
+    private final Setting<ShapeMode> renderMineShape = sgRender.add(new EnumSetting.Builder<ShapeMode>()
         .name("blocks-to-mine-shape-mode")
         .description("How the blocks to be mined are rendered.")
         .defaultValue(ShapeMode.Both)
         .build()
     );
 
-    private final Setting<SettingColor> renderMineSideColor = sgRenderDigging.add(new ColorSetting.Builder()
+    private final Setting<SettingColor> renderMineSideColor = sgRender.add(new ColorSetting.Builder()
         .name("blocks-to-mine-side-color")
         .description("Color of blocks to be mined.")
         .defaultValue(new SettingColor(225, 25, 25, 25))
         .build()
     );
 
-    private final Setting<SettingColor> renderMineLineColor = sgRenderDigging.add(new ColorSetting.Builder()
+    private final Setting<SettingColor> renderMineLineColor = sgRender.add(new ColorSetting.Builder()
         .name("blocks-to-mine-line-color")
         .description("Color of blocks to be mined.")
         .defaultValue(new SettingColor(225, 25, 25, 255))
         .build()
     );
 
-    // Render Paving
-
-    private final Setting<Boolean> renderPlace = sgRenderPaving.add(new BoolSetting.Builder()
+    private final Setting<Boolean> renderPlace = sgRender.add(new BoolSetting.Builder()
         .name("render-blocks-to-place")
         .description("Render blocks to be placed.")
         .defaultValue(true)
         .build()
     );
 
-    private final Setting<ShapeMode> renderPlaceShape = sgRenderPaving.add(new EnumSetting.Builder<ShapeMode>()
+    private final Setting<ShapeMode> renderPlaceShape = sgRender.add(new EnumSetting.Builder<ShapeMode>()
         .name("blocks-to-place-shape-mode")
         .description("How the blocks to be placed are rendered.")
         .defaultValue(ShapeMode.Both)
         .build()
     );
 
-    private final Setting<SettingColor> renderPlaceSideColor = sgRenderPaving.add(new ColorSetting.Builder()
+    private final Setting<SettingColor> renderPlaceSideColor = sgRender.add(new ColorSetting.Builder()
         .name("blocks-to-place-side-color")
         .description("Color of blocks to be placed.")
         .defaultValue(new SettingColor(25, 25, 225, 25))
         .build()
     );
 
-    private final Setting<SettingColor> renderPlaceLineColor = sgRenderPaving.add(new ColorSetting.Builder()
+    private final Setting<SettingColor> renderPlaceLineColor = sgRender.add(new ColorSetting.Builder()
         .name("blocks-to-place-line-color")
         .description("Color of blocks to be placed.")
         .defaultValue(new SettingColor(25, 25, 225, 255))
@@ -1618,8 +1612,6 @@ public class HighwayBuilderTHM extends Module {
     // Max 3: higher is unstable. -0.5 on trouble, +0.1 per 10 stable seconds, retry a failed rate after 5 min.
     private final AdaptiveRate adaptivePlaceRate = new AdaptiveRate(0.5, 3.0, 0.5, 0.1, 200, 6000);
     private static final int ADAPTIVE_PLACE_REVERT_WINDOW = 40;
-    /** Reach kept spare for the movement of the ticks it takes to notice. */
-    private static final double LEAVE_ROW_REACH_MARGIN = 0.75;
     // Max 29: everything under 30 works. -3 on trouble, +1 per 10 stable seconds, retry a failed rate after 5 min.
     private final AdaptiveRate adaptiveMineRate = new AdaptiveRate(1.0, 29.0, 3.0, 1.0, 200, 6000);
     // pos -> {sent tick, seen as air (1/0)}. A broken block that turns solid again was refused by the server.
@@ -4844,9 +4836,11 @@ public class HighwayBuilderTHM extends Module {
         if (event.packet instanceof PlayerInteractBlockC2SPacket packet) {
             recordEnclosureInteractPacket(packet);
         }
-        if (adaptiveMining.get() && mc.world != null && event.packet instanceof PlayerActionC2SPacket a
-            && (a.getAction() == PlayerActionC2SPacket.Action.START_DESTROY_BLOCK || a.getAction() == PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK)) {
-            breakWatch.put(a.getPos().asLong(), new long[]{mc.world.getTime(), 0});
+        if (mc.world != null && event.packet instanceof PlayerActionC2SPacket a) {
+            if (adaptiveMining.get()
+                && (a.getAction() == PlayerActionC2SPacket.Action.START_DESTROY_BLOCK || a.getAction() == PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK)) {
+                breakWatch.put(a.getPos().asLong(), new long[]{mc.world.getTime(), 0});
+            }
         }
     }
 
@@ -7129,7 +7123,8 @@ public class HighwayBuilderTHM extends Module {
 
         int selected = mc.player.getInventory().getSelectedSlot();
         boolean swapped = false;
-        // Placed from the offhand: the pickaxe never left the main hand, so nothing to swap.
+        // The server reads the held item for the break, so hold the pickaxe. With offhand-build it
+        // never left the main hand.
         if (!placedFromOffhand && !mc.player.getInventory().getStack(selected).isIn(ItemTags.PICKAXES)) {
             FindItemResult pick = InvUtils.findInHotbar(stack -> stack.isIn(ItemTags.PICKAXES));
             if (!pick.found() || !pick.isHotbar()) return;
@@ -7137,12 +7132,24 @@ public class HighwayBuilderTHM extends Module {
             swapped = true;
         }
 
-        Runnable send = () -> mc.getNetworkHandler().sendPacket(
-            new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, BlockUtils.getDirection(pos)));
+        sendInstantRebreakPacket(pos);
+        if (swapped && silentRebreakSwap.get()) InvUtils.swap(selected, false);
+    }
+
+    /**
+     * Same shape as Meteor's InstantRebreak: a sequenced stop-destroy plus a swing. Sent even when the
+     * server's progress isn't there yet - it then records the attempt and finishes the block itself a
+     * few ticks later ({@code ServerPlayerInteractionManager.update}), which is still far quicker.
+     */
+    private void sendInstantRebreakPacket(BlockPos pos) {
+        Direction direction = BlockUtils.getDirection(pos);
+        Runnable send = () -> {
+            ((ClientPlayerInteractionManagerTHMAccessor) mc.interactionManager).thm$sendSequencedPacket(mc.world, sequence ->
+                new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, direction, sequence));
+            mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
+        };
         if (rotation.get().mine) Rotations.rotate(Rotations.getYaw(pos), Rotations.getPitch(pos), send);
         else send.run();
-
-        if (swapped && silentRebreakSwap.get()) InvUtils.swap(selected, false);
     }
 
     /** With offhand-build the chests take the offhand while they are being mined, so the pickaxe keeps the main hand. */
@@ -12903,25 +12910,6 @@ public class HighwayBuilderTHM extends Module {
         input.right(drift < 0.0);
     }
 
-    /**
-     * Walking on past a row is fine while its leftovers stay in reach - but never with floor or liquid
-     * work pending, that is the ground you would walk onto.
-     */
-    private boolean canLeaveRowBehind(ForwardRowSchedule row) {
-        if (!experimental(keepMovingInReach) || row == null) return false;
-
-        double range = placeRange.get() - LEAVE_ROW_REACH_MARGIN;
-        if (range <= 0) return false;
-
-        for (LinkedHashMap<BlockPos, ForwardTask> queue : List.of(row.mineQueue, row.placeQueue, row.conflictQueue)) {
-            for (ForwardTask task : queue.values()) {
-                if (task.type == ForwardTaskType.FLOOR_PLACE || task.type == ForwardTaskType.BEHIND_FLOOR_PLACE || task.type.liquids()) return false;
-                if (!RangeUtils.isInRange(range, task.pos)) return false;
-            }
-        }
-        return true;
-    }
-
     private void applyForwardSchedulerMovement(ForwardRowSchedule activeRow) {
         mc.player.setPitch(20);
         mc.player.setYaw(dir.yaw);
@@ -12929,8 +12917,7 @@ public class HighwayBuilderTHM extends Module {
         if (ghostBlockCheckHold()) {
             input.stop();
             logForwardSchedulerStatus("hold", activeRow, "waiting for server to confirm the row behind", false);
-        } else if (activeRow == null || activeRow.isComplete() || currentForwardProjection() < activeRow.frontBoundaryProjection
-            || canLeaveRowBehind(activeRow)) {
+        } else if (activeRow == null || activeRow.isComplete() || currentForwardProjection() < activeRow.frontBoundaryProjection) {
             logForwardSchedulerStatus("move", activeRow, activeRow == null ? "no active row" : "moving toward boundary", true);
             input.setState(true, false, false, false, false, false, false);
             applyForwardDriftCorrection();
@@ -14275,7 +14262,7 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 RestockTask.RestockSession session = b.restockTask.getSession();
-                speedmineRebreakMode = b.speedmineRebreak.get();
+                speedmineRebreakMode = b.echestBreakMode.get() == EChestBreakMode.Speedmine;
                 session.refreshProgress();
                 b.restockTask.clampObsidianTargetToMineableEChests("mine-echests-start");
                 session.refreshProgress();
@@ -14431,7 +14418,8 @@ public class HighwayBuilderTHM extends Module {
                         int selectedSlot = b.mc.player.getInventory().getSelectedSlot();
                         boolean swappedForRebreak = false;
 
-                        if (b.rebreakEchests.get() && primed) {
+                        boolean instantRebreak = false;
+                        if (b.echestBreakMode.get() == EChestBreakMode.InstantRebreak && primed) {
                             timeout++;
                             if (timeout > 60) {
                                 primed = false;
@@ -14444,22 +14432,17 @@ public class HighwayBuilderTHM extends Module {
                                 return;
                             }
 
-                            Runnable sendRebreakPackets = () ->
-                                b.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, bp, BlockUtils.getDirection(bp)));
-                            rebreakTimer = b.rebreakTimer.get();
-
-                            if (b.silentRebreakSwap.get()) {
-                                if (selectedSlot != slot) {
-                                    InvUtils.swap(slot, false);
-                                    swappedForRebreak = true;
-                                }
-                            } else if (selectedSlot != slot) {
+                            // The server reads the held item for the break.
+                            if (selectedSlot != slot) {
                                 InvUtils.swap(slot, false);
+                                swappedForRebreak = b.silentRebreakSwap.get();
                             }
+                            instantRebreak = true;
+                        }
 
-                            if (b.rotation.get().mine) Rotations.rotate(Rotations.getYaw(bp), Rotations.getPitch(bp), sendRebreakPackets);
-                            else sendRebreakPackets.run();
-
+                        if (instantRebreak) {
+                            rebreakTimer = b.rebreakTimer.get();
+                            b.sendInstantRebreakPacket(bp);
                             if (swappedForRebreak) InvUtils.swap(selectedSlot, false);
                         } else {
                             if (selectedSlot != slot) InvUtils.swap(slot, false);
@@ -14495,7 +14478,7 @@ public class HighwayBuilderTHM extends Module {
                         BlockUtils.place(bp, Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, b.silentRebreakSwap.get());
                     }
 
-                    if (b.experimental(b.rebreakOnPlace)) {
+                    if (b.echestBreakMode.get() == EChestBreakMode.OnPlace) {
                         b.sendEChestRebreak(bp, fromOffhand);
                         primed = false;
                         timeout = 0;
