@@ -27,7 +27,6 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.metadata.ModMetadata;
 import net.minecraft.SharedConstants;
 import net.minecraft.item.Items;
-import org.lwjgl.util.tinyfd.TinyFileDialogs;
 import org.slf4j.Logger;
 import xyz.thm.addon.commands.*;
 import xyz.thm.addon.gui.themes.*;
@@ -131,43 +130,19 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
             }
 
             boolean hasDownload = !downloadUrls.isEmpty();
+            String downloadUrl = hasDownload ? downloadUrls.getFirst() : null;
             msg.append(hasDownload
-                ? "Click \"Download\" to open the download page, or \"No thanks\" to just close."
+                ? "Click \"Download\" to open the download page, or \"Close\" to just close.\nThe game will now close."
                 : "The game will now close.");
 
             String depList = missing.stream().map(RequiredMod::groupName).collect(Collectors.joining(", "));
             LOG.error("[THM Addon] Missing dependencies: {}", depList);
 
-            // ponytail: TinyFileDialogs (native GLFW popup), not javax.swing - Minecraft's client
-            // process runs with -Djava.awt.headless=true, so JOptionPane throws HeadlessException
-            // here (confirmed by crash log). Swing only works in Main.java's standalone double-click
-            // launch, which is a separate JVM without that flag. TinyFileDialogs can't set custom
-            // button captions, so "Download"/"No thanks" live in the message text instead.
-            boolean openDownload = TinyFileDialogs.tinyfd_messageBox(
-                "THM Addon - Missing Dependencies",
-                msg.toString(),
-                hasDownload ? "okcancel" : "ok",
-                "error",
-                true
-            );
-
-            if (hasDownload && openDownload) {
-                for (String url : downloadUrls) {
-                    try {
-                        String os = System.getProperty("os.name").toLowerCase();
-                        ProcessBuilder pb;
-                        if (os.contains("win")) {
-                            pb = new ProcessBuilder("rundll32", "url.dll,FileProtocolHandler", url);
-                        } else if (os.contains("mac")) {
-                            pb = new ProcessBuilder("open", url);
-                        } else {
-                            pb = new ProcessBuilder("xdg-open", url);
-                        }
-                        pb.start();
-                    } catch (Exception e) {
-                        LOG.error("Failed to open URL: {}", url, e);
-                    }
-                }
+            if (!StartupDialog.show("THM Addon - Missing Dependencies", msg.toString(), downloadUrl)) {
+                // Nothing could be shown (no display at all): say it where it can still be read.
+                LOG.error("[THM Addon] Could not show a popup. {}", msg.toString().replace('\n', ' '));
+                System.err.println(msg);
+                if (hasDownload) StartupDialog.openBrowser(downloadUrl);
             }
 
             System.exit(1);
