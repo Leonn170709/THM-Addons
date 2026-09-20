@@ -87,6 +87,8 @@ After that first seed, each profile loads its own saved values rather than reapp
 | `packet-build` | `false` | Uses direct placement packets for higher forward throughput. |
 | `air-place-mode` | `Never`; options `Never`, `Smart`, `Always`; shown when `packet-build` is on | Controls packet-build air placement. |
 | `packet-build-lookahead` | `true`; shown when `packet-build` is on | Also places upcoming rows in the same tick. |
+| `packet-build-once` | `false`; shown when `packet-build` is on | Experimental: one packet per block instead of one per block per tick. |
+| `packet-build-resend` | `20`, range `2-200`; shown when `packet-build-once` is on | Ticks before asking the server what is at a block it never answered for. |
 | `silent-forward-place-swap` | `true`; hidden in legacy mode | Restores your selected slot after scheduler placement. |
 | `silent-forward-tool-swap` | `true`; hidden in legacy mode | Restores your selected slot after scheduler mining. |
 
@@ -190,6 +192,8 @@ After that first seed, each profile loads its own saved values rather than reapp
 | `packet-build` | `false` | Always | Sends forward placement packets directly and automatically enables Packet Limiter on activation. |
 | `air-place-mode` | `Never`; options `Never`, `Smart`, `Always` | `packet-build` is on | `Never` skips no-face placements, `Smart` packet-air-places only when needed, and `Always` always uses packet air placement. |
 | `packet-build-lookahead` | `true` | `packet-build` is on | Lets Packet Build place blocks from upcoming rows in the same tick. |
+| `packet-build-once` | `false` | `packet-build` is on | Experimental: sends one packet per block. Without it the same block is re-sent every tick until the server answers (about one packet per block per ping tick), which wastes the packet budget. Combine with `air-place-mode` `Never` or `Always` for the two variants. |
+| `packet-build-resend` | `20`, range `2-200` | `packet-build-once` is on | How long to wait before asking the server for that block's real state (a silent use-on-block with an empty hand, pickaxe or totem). The place itself is only repeated once the server says the spot is still air, so air-place can never stack a second block on top. |
 | `silent-forward-place-swap` | `true` | `legacy-mode` is off | Silently swaps to placement blocks for scheduler work, then restores your selected slot. |
 | `silent-forward-tool-swap` | `true` | `legacy-mode` is off | Silently swaps to scheduler mining tools, then restores your selected slot. |
 | `placements-per-tick` | `1.5`, range `0.1-100`, slider `0.1-10`, one decimal place | Always | Maximum averaged placement rate; `1.5` bursts 1-2-1-2 blocks per tick for 30 blocks/s, `0.1` performs about one placement every 10 ticks. |

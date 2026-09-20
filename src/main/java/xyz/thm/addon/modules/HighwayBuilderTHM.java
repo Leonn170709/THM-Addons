@@ -1018,6 +1018,24 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+    public final Setting<Boolean> packetBuildOnce = sgPaving.add(new BoolSetting.Builder()
+        .name("packet-build-once")
+        .description("Experimental: one packet per block instead of one per block per tick.")
+        .defaultValue(false)
+        .visible(packetBuild::get)
+        .build()
+    );
+
+    private final Setting<Integer> packetBuildResend = sgPaving.add(new IntSetting.Builder()
+        .name("packet-build-resend")
+        .description("Ticks before asking the server what is at a block it never answered for.")
+        .defaultValue(20)
+        .range(2, 200)
+        .sliderRange(5, 60)
+        .visible(() -> packetBuild.get() && packetBuildOnce.get())
+        .build()
+    );
+
     private final Setting<Boolean> silentForwardPlaceSwap = sgPaving.add(new BoolSetting.Builder()
         .name("silent-forward-place-swap")
         .description("Silently swaps to scheduler forward placement blocks, then restores your selected slot.")
@@ -1566,6 +1584,11 @@ public class HighwayBuilderTHM extends Module {
     private boolean ghostProbeNoHandWarned;
 
     private boolean antiHungerOwned;
+
+    // Packet build sends without client prediction, so a block stays "air" here until the server
+    // answers: without this the same block is re-sent every tick until then.
+    private final Long2LongOpenHashMap packetPlaceSent = new Long2LongOpenHashMap();
+    private final ConcurrentLinkedQueue<Long> packetPlaceUpdates = new ConcurrentLinkedQueue<>();
 
     private int placedTotal;
     private int placeRateSampleTotal;
@@ -2393,6 +2416,8 @@ public class HighwayBuilderTHM extends Module {
         resetAdaptivePlacement();
         resetGhostBlockCheck();
         resetSessionSummary();
+        packetPlaceSent.clear();
+        packetPlaceUpdates.clear();
         resetTpsThrottleRuntime();
         clearSafetyRuntime("module-activate");
         mineActionsThisTick = Math.max(1, (int) Math.floor(baseBlocksPerTick()));
@@ -4613,6 +4638,8 @@ public class HighwayBuilderTHM extends Module {
         forwardPlaceCount = 0;
         tickAdaptivePlacement();
         tickAdaptiveMining();
+        if (packetBuildOnce.get()) tickPacketPlaceAnswers();
+        else if (!packetPlaceSent.isEmpty()) packetPlaceSent.clear();
         mineActionsThisTick = computeMineActionsThisTick();
         placeActionsThisTick = computePlaceActionsThisTick();
         pruneExpiredForwardBreakCredits();
@@ -4731,6 +4758,10 @@ public class HighwayBuilderTHM extends Module {
             } else if (event.packet instanceof EntityPositionSyncS2CPacket packet && mc.player != null && packet.id() == mc.player.getId()) {
                 noteDesyncWiggleCorrectionPacket("EntityPositionSyncS2CPacket", packet.id());
             }
+        }
+
+        if (packetBuildOnce.get() && event.packet instanceof BlockUpdateS2CPacket p2) {
+            packetPlaceUpdates.add(p2.getPos().asLong());
         }
 
         if (ghostProbeListening && event.packet instanceof BlockUpdateS2CPacket g) {
@@ -7103,6 +7134,7 @@ public class HighwayBuilderTHM extends Module {
 
     private boolean tryForwardPlaceBlockPacket(BlockPos pos, int slot, ItemStack stack) {
         if (!isForwardPlaceableBlock(stack) && !isForwardTrashPlacementStack(stack)) return false;
+        if (packetBuildOnce.get() && packetPlaceAwaitingAnswer(pos)) return false;
         Direction side = BlockUtils.getPlaceSide(pos);
         // offhand-build: place straight from the offhand obsidian instead of swapping the main hand.
         FindItemResult item = (slot == SlotUtils.OFFHAND || placeFromOffhand())
@@ -7129,11 +7161,50 @@ public class HighwayBuilderTHM extends Module {
         }
 
         if (!placed) return false;
+        if (packetBuildOnce.get()) packetPlaceSent.put(pos.asLong(), mc.world.getTime());
         placeTimer = placeDelay.get();
         count++;
         notePlacement(pos);
         if (renderPlace.get()) placeTrail.add(BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ()));
         return true;
+    }
+
+    private boolean packetPlaceAwaitingAnswer(BlockPos pos) {
+        return packetPlaceSent.containsKey(pos.asLong());
+    }
+
+    /**
+     * A place is only sent again once the server itself says the spot is still air. Re-sending on a
+     * guess makes air-place stack a block on top of the one that did go through.
+     */
+    private void tickPacketPlaceAnswers() {
+        for (Long pos; (pos = packetPlaceUpdates.poll()) != null; ) packetPlaceSent.remove(pos.longValue());
+        if (packetPlaceSent.isEmpty()) return;
+
+        long now = mc.world.getTime();
+        int resend = packetBuildResend.get();
+        List<BlockPos> ask = null;
+        var it = packetPlaceSent.long2LongEntrySet().fastIterator();
+        while (it.hasNext()) {
+            var entry = it.next();
+            BlockPos pos = BlockPos.fromLong(entry.getLongKey());
+            if (!mc.world.getBlockState(pos).isReplaceable()) {
+                it.remove();
+                continue;
+            }
+            if (now - entry.getLongValue() < resend && now >= entry.getLongValue()) continue;
+
+            // Silent nudge: the server answers any in-reach use-on-block with that block's real state.
+            if (ghostProbeHand() == null) {
+                // Nothing safe to nudge with: let it be placed again rather than stalling the row.
+                it.remove();
+                continue;
+            }
+            if (ask == null) ask = new ArrayList<>();
+            ask.add(pos);
+            entry.setValue(now);
+        }
+        if (ask != null) sendGhostProbes(ask);
     }
 
     private void debugStateTransition(State nextState, String reason) {
