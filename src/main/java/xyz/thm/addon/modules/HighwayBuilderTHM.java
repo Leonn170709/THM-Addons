@@ -80,6 +80,7 @@ import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.*;
+import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
@@ -486,6 +487,7 @@ public class HighwayBuilderTHM extends Module {
     private final SettingGroup sgNotifies = settings.createGroup("Notifies");
     private final SettingGroup sgStatistics = settings.createGroup("Logging");
     private final SettingGroup sgKitBotIntegration = settings.createGroup("KitBot Integration", false);
+    private final SettingGroup sgExperimental = settings.createGroup("Experimental", false);
     private final SettingGroup sgDebugging = settings.createGroup("Debugging", false);
     private final SettingGroup sgRenderDigging = settings.createGroup("Render Digging");
     private final SettingGroup sgRenderPaving = settings.createGroup("Render Paving");
@@ -1018,21 +1020,70 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    public final Setting<Boolean> packetBuildOnce = sgPaving.add(new BoolSetting.Builder()
-        .name("packet-build-once")
-        .description("Experimental: one packet per block instead of one per block per tick.")
+    private final Setting<Boolean> enableExperimental = sgExperimental.add(new BoolSetting.Builder()
+        .name("enable-experimental")
+        .description("Master switch: nothing in this group does anything while it is off.")
         .defaultValue(false)
-        .visible(packetBuild::get)
         .build()
     );
 
-    private final Setting<Integer> packetBuildResend = sgPaving.add(new IntSetting.Builder()
+    public final Setting<Boolean> packetBudget = sgExperimental.add(new BoolSetting.Builder()
+        .name("packet-budget")
+        .description("Caps mining and placing so the tick stays under the server's packet limit.")
+        .defaultValue(false)
+        .visible(enableExperimental::get)
+        .build()
+    );
+
+    private final Setting<Integer> packetBudgetLimit = sgExperimental.add(new IntSetting.Builder()
+        .name("packets-per-tick")
+        .description("Packets one tick may send. Keep it below the server's limit.")
+        .defaultValue(23)
+        .range(4, 200)
+        .sliderRange(8, 40)
+        .visible(packetBudget::get)
+        .build()
+    );
+
+    private final Setting<Boolean> keepMovingInReach = sgExperimental.add(new BoolSetting.Builder()
+        .name("keep-moving-in-reach")
+        .description("Keeps walking past a row while its leftover blocks stay in reach.")
+        .defaultValue(false)
+        .visible(enableExperimental::get)
+        .build()
+    );
+
+    private final Setting<Boolean> mineLookahead = sgExperimental.add(new BoolSetting.Builder()
+        .name("mine-lookahead")
+        .description("Mines into upcoming rows with the tick's leftover mine actions.")
+        .defaultValue(false)
+        .visible(enableExperimental::get)
+        .build()
+    );
+
+    private final Setting<Boolean> rebreakOnPlace = sgExperimental.add(new BoolSetting.Builder()
+        .name("rebreak-on-place")
+        .description("Sends the instant-rebreak packet in the same tick as the ender chest placement.")
+        .defaultValue(false)
+        .visible(() -> enableExperimental.get() && this.mineEnderChests.get())
+        .build()
+    );
+
+    public final Setting<Boolean> packetBuildOnce = sgExperimental.add(new BoolSetting.Builder()
+        .name("packet-build-once")
+        .description("Experimental: one packet per block instead of one per block per tick.")
+        .defaultValue(false)
+        .visible(() -> enableExperimental.get() && packetBuild.get())
+        .build()
+    );
+
+    private final Setting<Integer> packetBuildResend = sgExperimental.add(new IntSetting.Builder()
         .name("packet-build-resend")
         .description("Ticks before asking the server what is at a block it never answered for.")
         .defaultValue(20)
         .range(2, 200)
         .sliderRange(5, 60)
-        .visible(() -> packetBuild.get() && packetBuildOnce.get())
+        .visible(() -> enableExperimental.get() && packetBuild.get() && packetBuildOnce.get())
         .build()
     );
 
@@ -1059,11 +1110,11 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Boolean> ghostBlockCheck = sgGeneral.add(new BoolSetting.Builder()
+    private final Setting<Boolean> ghostBlockCheck = sgExperimental.add(new BoolSetting.Builder()
         .name("ghost-block-check")
         .description("Has the server confirm the row behind before moving on; ghost blocks get re-placed.")
         .defaultValue(false)
-        .visible(checkBehind::get)
+        .visible(() -> enableExperimental.get() && checkBehind.get())
         .build()
     );
 
@@ -1099,7 +1150,7 @@ public class HighwayBuilderTHM extends Module {
     );
 
     private long sessionStartMs;
-    private int sessionRestocks, sessionEChestRefills, sessionAdaptiveDrops, sessionGhostBlocks;
+    private int sessionRestocks, sessionEChestRefills, sessionAdaptiveDrops, sessionGhostBlocks, sessionBudgetClipped;
     private final AtomicInteger sessionRubberbands = new AtomicInteger();
 
     private final Setting<Boolean> renderReachDebug = sgDebugging.add(new BoolSetting.Builder()
@@ -1314,9 +1365,9 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Boolean> newBreaking = sgInventory.add(new BoolSetting.Builder()
-        .name("new-breaking")
-        .description("Breaks ender chests with THM Speedmine instead of the legacy method.")
+    private final Setting<Boolean> speedmineRebreak = sgInventory.add(new BoolSetting.Builder()
+        .name("speedmine-rebreak")
+        .description("Breaks ender chests with THM Speedmine, turning its auto-rebreak on while it does.")
         .defaultValue(true)
         .visible(mineEnderChests::get)
         .build()
@@ -1326,7 +1377,7 @@ public class HighwayBuilderTHM extends Module {
         .name("instantly-rebreak-echests")
         .description("Uses the legacy instant-rebreak packet method after placing an ender chest.")
         .defaultValue(true)
-        .visible(() -> mineEnderChests.get() && !newBreaking.get())
+        .visible(() -> mineEnderChests.get() && !speedmineRebreak.get())
         .build()
     );
 
@@ -1335,7 +1386,7 @@ public class HighwayBuilderTHM extends Module {
         .description("Delay in ticks between legacy instant-rebreak attempts.")
         .defaultValue(0)
         .sliderMax(20)
-        .visible(() -> mineEnderChests.get() && !newBreaking.get() && rebreakEchests.get())
+        .visible(() -> mineEnderChests.get() && !speedmineRebreak.get() && rebreakEchests.get())
         .build()
     );
 
@@ -1361,7 +1412,7 @@ public class HighwayBuilderTHM extends Module {
         .name("silent-rebreak-swap")
         .description("Silently swaps for rebreak packets and ender chest placement.")
         .defaultValue(true)
-        .visible(() -> mineEnderChests.get() && (newBreaking.get() || rebreakEchests.get()))
+        .visible(() -> mineEnderChests.get() && (speedmineRebreak.get() || rebreakEchests.get()))
         .build()
     );
 
@@ -1567,6 +1618,8 @@ public class HighwayBuilderTHM extends Module {
     // Max 3: higher is unstable. -0.5 on trouble, +0.1 per 10 stable seconds, retry a failed rate after 5 min.
     private final AdaptiveRate adaptivePlaceRate = new AdaptiveRate(0.5, 3.0, 0.5, 0.1, 200, 6000);
     private static final int ADAPTIVE_PLACE_REVERT_WINDOW = 40;
+    /** Reach kept spare for the movement of the ticks it takes to notice. */
+    private static final double LEAVE_ROW_REACH_MARGIN = 0.75;
     // Max 29: everything under 30 works. -3 on trouble, +1 per 10 stable seconds, retry a failed rate after 5 min.
     private final AdaptiveRate adaptiveMineRate = new AdaptiveRate(1.0, 29.0, 3.0, 1.0, 200, 6000);
     // pos -> {sent tick, seen as air (1/0)}. A broken block that turns solid again was refused by the server.
@@ -1584,6 +1637,7 @@ public class HighwayBuilderTHM extends Module {
     private boolean ghostProbeNoHandWarned;
 
     private boolean antiHungerOwned;
+    private Boolean speedmineAutoRebreakSnapshot;
 
     // Packet build sends without client prediction, so a block stays "air" here until the server
     // answers: without this the same block is re-sent every tick until then.
@@ -2479,6 +2533,7 @@ public class HighwayBuilderTHM extends Module {
     @Override
     public void onDeactivate() {
         if (sessionSummary.get()) printSessionSummary();
+        restoreSpeedmineAutoRebreak();
         KitbotFrontend.removeLifecycleListener(kitbotRestockLifecycleListener);
         if (input != null) input.stop();
         restoreHotbarManagerAfterTrash("module-deactivate");
@@ -4638,10 +4693,11 @@ public class HighwayBuilderTHM extends Module {
         forwardPlaceCount = 0;
         tickAdaptivePlacement();
         tickAdaptiveMining();
-        if (packetBuildOnce.get()) tickPacketPlaceAnswers();
+        if (experimental(packetBuildOnce)) tickPacketPlaceAnswers();
         else if (!packetPlaceSent.isEmpty()) packetPlaceSent.clear();
         mineActionsThisTick = computeMineActionsThisTick();
         placeActionsThisTick = computePlaceActionsThisTick();
+        applyPacketBudget();
         pruneExpiredForwardBreakCredits();
         refreshCountedForwardStatPositions();
 
@@ -4760,7 +4816,7 @@ public class HighwayBuilderTHM extends Module {
             }
         }
 
-        if (packetBuildOnce.get() && event.packet instanceof BlockUpdateS2CPacket p2) {
+        if (experimental(packetBuildOnce) && event.packet instanceof BlockUpdateS2CPacket p2) {
             packetPlaceUpdates.add(p2.getPos().asLong());
         }
 
@@ -6594,6 +6650,31 @@ public class HighwayBuilderTHM extends Module {
         return AdaptiveRate.actionsThisTick(effectiveBlocksPerTickActionRate(), mineFractionCarry);
     }
 
+    /** Mining sends start+stop per block, placing one use-on-block; a swing follows each unless it is filtered. */
+    private void applyPacketBudget() {
+        if (!experimental(packetBudget)) return;
+
+        int swing = swingPacketCost();
+        int overhead = 1 + ((silentForwardPlaceSwap.get() || silentForwardToolSwap.get()) ? 2 : 0);
+        PacketBudget.Plan plan = PacketBudget.split(
+            packetBudgetLimit.get(), overhead, 2 + swing, 1 + swing, mineActionsThisTick, placeActionsThisTick);
+
+        if (plan.mine() < mineActionsThisTick || plan.place() < placeActionsThisTick) sessionBudgetClipped++;
+        mineActionsThisTick = plan.mine();
+        placeActionsThisTick = plan.place();
+    }
+
+    private int swingPacketCost() {
+        PaketLimiter limiter = Modules.get().get(PaketLimiter.class);
+        boolean filtered = limiter != null && limiter.isActive() && limiter.alwaysBlock.get().contains(HandSwingC2SPacket.class);
+        return filtered ? 0 : 1;
+    }
+
+    /** Experimental settings only count while the group's master switch is on. */
+    private boolean experimental(Setting<Boolean> setting) {
+        return enableExperimental.get() && setting.get();
+    }
+
     private double baseBlocksPerTick() {
         return adaptiveMining.get() && adaptiveMineRate.get() > 0 ? adaptiveMineRate.get() : sanitizeMineActionRate(blocksPerTick.get());
     }
@@ -6652,7 +6733,7 @@ public class HighwayBuilderTHM extends Module {
     private void resetSessionSummary() {
         sessionStartMs = System.currentTimeMillis();
         placedTotal = 0;
-        sessionRestocks = sessionEChestRefills = sessionAdaptiveDrops = sessionGhostBlocks = 0;
+        sessionRestocks = sessionEChestRefills = sessionAdaptiveDrops = sessionGhostBlocks = sessionBudgetClipped = 0;
         sessionRubberbands.set(0);
     }
 
@@ -6661,8 +6742,8 @@ public class HighwayBuilderTHM extends Module {
         int distance = start == null || mc.player == null ? 0 : (int) PlayerUtils.distanceTo(start);
         info("Session %s: %d blocks travelled, placed %d (%.1f/s avg), broken %d.",
             TimeFormat.duration(seconds), distance, placedTotal, seconds > 0 ? placedTotal / (double) seconds : 0.0, blocksBroken);
-        info("Restocks %d, e-chest refills %d, rubberbands %d, adaptive drops %d, ghost blocks %d.",
-            sessionRestocks, sessionEChestRefills, sessionRubberbands.get(), sessionAdaptiveDrops, sessionGhostBlocks);
+        info("Restocks %d, e-chest refills %d, rubberbands %d, adaptive drops %d, ghost blocks %d, packet-budget caps %d.",
+            sessionRestocks, sessionEChestRefills, sessionRubberbands.get(), sessionAdaptiveDrops, sessionGhostBlocks, sessionBudgetClipped);
     }
 
     private void notePlacement(BlockPos pos) {
@@ -7025,6 +7106,54 @@ public class HighwayBuilderTHM extends Module {
      * the builder just stops placing — they return {@link SlotUtils#OFFHAND} instead, which every place path
      * below understands.
      */
+    /** Speedmine only rebreaks a reappearing block with auto-rebreak on, so it is forced for the cycle. */
+    private void applySpeedmineAutoRebreak() {
+        if (Speedmine.INSTANCE == null) return;
+        if (speedmineAutoRebreakSnapshot == null) speedmineAutoRebreakSnapshot = Speedmine.INSTANCE.autoRebreak.get();
+        Speedmine.INSTANCE.autoRebreak.set(true);
+    }
+
+    private void restoreSpeedmineAutoRebreak() {
+        if (Speedmine.INSTANCE != null && speedmineAutoRebreakSnapshot != null) {
+            Speedmine.INSTANCE.autoRebreak.set(speedmineAutoRebreakSnapshot);
+        }
+        speedmineAutoRebreakSnapshot = null;
+    }
+
+    /**
+     * Instant rebreak: the server still holds this spot's mining progress from the chest before, so a
+     * single stop-destroy right after the place breaks the new one at once - no waiting a tick for it.
+     */
+    private void sendEChestRebreak(BlockPos pos, boolean placedFromOffhand) {
+        if (mc.player == null || mc.getNetworkHandler() == null) return;
+
+        int selected = mc.player.getInventory().getSelectedSlot();
+        boolean swapped = false;
+        // Placed from the offhand: the pickaxe never left the main hand, so nothing to swap.
+        if (!placedFromOffhand && !mc.player.getInventory().getStack(selected).isIn(ItemTags.PICKAXES)) {
+            FindItemResult pick = InvUtils.findInHotbar(stack -> stack.isIn(ItemTags.PICKAXES));
+            if (!pick.found() || !pick.isHotbar()) return;
+            InvUtils.swap(pick.slot(), false);
+            swapped = true;
+        }
+
+        Runnable send = () -> mc.getNetworkHandler().sendPacket(
+            new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, BlockUtils.getDirection(pos)));
+        if (rotation.get().mine) Rotations.rotate(Rotations.getYaw(pos), Rotations.getPitch(pos), send);
+        else send.run();
+
+        if (swapped && silentRebreakSwap.get()) InvUtils.swap(selected, false);
+    }
+
+    /** With offhand-build the chests take the offhand while they are being mined, so the pickaxe keeps the main hand. */
+    private boolean wantsEnderChestOffhand() {
+        return noSwapLoadout.get() && state == State.MineEnderChests;
+    }
+
+    private boolean offhandHoldsEnderChest() {
+        return mc.player != null && mc.player.getOffHandStack().getItem() == Items.ENDER_CHEST;
+    }
+
     private boolean placeFromOffhand() {
         return noSwapLoadout.get() && offhandHoldsPlaceable();
     }
@@ -7089,6 +7218,11 @@ public class HighwayBuilderTHM extends Module {
                 FindItemResult totem = InvUtils.find(Items.TOTEM_OF_UNDYING);
                 if (totem.found()) InvUtils.move().from(totem.slot()).toOffhand();
             }
+        } else if (wantsEnderChestOffhand()) {
+            if (!offhandHoldsEnderChest()) {
+                FindItemResult chest = InvUtils.find(stack -> stack.getItem() == Items.ENDER_CHEST, 0, 35);
+                if (chest.found()) InvUtils.move().from(chest.slot()).toOffhand();
+            }
         } else {
             ItemStack offhand = mc.player.getOffHandStack();
             if (!offhandHoldsPlaceable()) {
@@ -7134,7 +7268,7 @@ public class HighwayBuilderTHM extends Module {
 
     private boolean tryForwardPlaceBlockPacket(BlockPos pos, int slot, ItemStack stack) {
         if (!isForwardPlaceableBlock(stack) && !isForwardTrashPlacementStack(stack)) return false;
-        if (packetBuildOnce.get() && packetPlaceAwaitingAnswer(pos)) return false;
+        if (experimental(packetBuildOnce) && packetPlaceAwaitingAnswer(pos)) return false;
         Direction side = BlockUtils.getPlaceSide(pos);
         // offhand-build: place straight from the offhand obsidian instead of swapping the main hand.
         FindItemResult item = (slot == SlotUtils.OFFHAND || placeFromOffhand())
@@ -7161,7 +7295,7 @@ public class HighwayBuilderTHM extends Module {
         }
 
         if (!placed) return false;
-        if (packetBuildOnce.get()) packetPlaceSent.put(pos.asLong(), mc.world.getTime());
+        if (experimental(packetBuildOnce)) packetPlaceSent.put(pos.asLong(), mc.world.getTime());
         placeTimer = placeDelay.get();
         count++;
         notePlacement(pos);
@@ -12477,7 +12611,7 @@ public class HighwayBuilderTHM extends Module {
 
     /** Stops before the next row until the row behind is server-confirmed. */
     private boolean ghostBlockCheckHold() {
-        if (!ghostBlockCheck.get() || !checkBehind.get()) return false;
+        if (!experimental(ghostBlockCheck) || !checkBehind.get()) return false;
         long row = currentForwardRow();
         if (ghostProbe.isVerified(row - 1)) return false;
         double fraction = currentForwardProjection() / directionStepLength() - row;
@@ -12485,7 +12619,7 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private void tickGhostBlockCheck() {
-        if (!ghostBlockCheck.get() || !checkBehind.get()) {
+        if (!experimental(ghostBlockCheck) || !checkBehind.get()) {
             if (ghostProbeListening) resetGhostBlockCheck();
             return;
         }
@@ -12769,6 +12903,25 @@ public class HighwayBuilderTHM extends Module {
         input.right(drift < 0.0);
     }
 
+    /**
+     * Walking on past a row is fine while its leftovers stay in reach - but never with floor or liquid
+     * work pending, that is the ground you would walk onto.
+     */
+    private boolean canLeaveRowBehind(ForwardRowSchedule row) {
+        if (!experimental(keepMovingInReach) || row == null) return false;
+
+        double range = placeRange.get() - LEAVE_ROW_REACH_MARGIN;
+        if (range <= 0) return false;
+
+        for (LinkedHashMap<BlockPos, ForwardTask> queue : List.of(row.mineQueue, row.placeQueue, row.conflictQueue)) {
+            for (ForwardTask task : queue.values()) {
+                if (task.type == ForwardTaskType.FLOOR_PLACE || task.type == ForwardTaskType.BEHIND_FLOOR_PLACE || task.type.liquids()) return false;
+                if (!RangeUtils.isInRange(range, task.pos)) return false;
+            }
+        }
+        return true;
+    }
+
     private void applyForwardSchedulerMovement(ForwardRowSchedule activeRow) {
         mc.player.setPitch(20);
         mc.player.setYaw(dir.yaw);
@@ -12776,7 +12929,8 @@ public class HighwayBuilderTHM extends Module {
         if (ghostBlockCheckHold()) {
             input.stop();
             logForwardSchedulerStatus("hold", activeRow, "waiting for server to confirm the row behind", false);
-        } else if (activeRow == null || activeRow.isComplete() || currentForwardProjection() < activeRow.frontBoundaryProjection) {
+        } else if (activeRow == null || activeRow.isComplete() || currentForwardProjection() < activeRow.frontBoundaryProjection
+            || canLeaveRowBehind(activeRow)) {
             logForwardSchedulerStatus("move", activeRow, activeRow == null ? "no active row" : "moving toward boundary", true);
             input.setState(true, false, false, false, false, false, false);
             applyForwardDriftCorrection();
@@ -12808,6 +12962,17 @@ public class HighwayBuilderTHM extends Module {
         boolean minedChangedWorld = runForwardMineWork(activeRow);
         if (minedChangedWorld) logForwardSchedulerStatus("mine", activeRow, "mine changed world", true);
         if (state != State.Forward) return;
+
+        // Leftover mine actions go into the rows ahead; out-of-reach blocks are skipped there anyway.
+        if (experimental(mineLookahead) && forwardMineCount < currentMineActionsThisTick()) {
+            boolean skippedActive = false;
+            for (ForwardRowSchedule lookaheadRow : forwardSchedulerRuntime.rows) {
+                if (!skippedActive) { skippedActive = true; continue; }
+                if (state != State.Forward || forwardMineCount >= currentMineActionsThisTick()) break;
+                if (runForwardMineWork(lookaheadRow)) minedChangedWorld = true;
+            }
+            if (state != State.Forward) return;
+        }
 
         // In paket mode, skip place work while mine tasks are pending so the UpdateSelectedSlot
         // packet (pickaxe switch) and the mine packets are not dropped by the packet rate limiter.
@@ -14061,7 +14226,7 @@ public class HighwayBuilderTHM extends Module {
             private int targetEchestsToBreak;
             private int targetObsidianCount;
             private int lastObservedObsidianCount;
-            private boolean first, primed, breakRequested, newBreakingMode;
+            private boolean first, primed, breakRequested, speedmineRebreakMode;
             private boolean stopTimerEnabled;
             private int stopTimer, moveTimer, rebreakTimer, timeout;
             private double returnX, returnY, returnZ;
@@ -14110,7 +14275,7 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 RestockTask.RestockSession session = b.restockTask.getSession();
-                newBreakingMode = b.newBreaking.get();
+                speedmineRebreakMode = b.speedmineRebreak.get();
                 session.refreshProgress();
                 b.restockTask.clampObsidianTargetToMineableEChests("mine-echests-start");
                 session.refreshProgress();
@@ -14139,7 +14304,10 @@ public class HighwayBuilderTHM extends Module {
                 stopTimerEnabled = false;
                 primed = false;
                 breakRequested = false;
-                if (newBreakingMode && Speedmine.INSTANCE != null && !Speedmine.INSTANCE.isActive()) Speedmine.INSTANCE.toggle();
+                if (speedmineRebreakMode && Speedmine.INSTANCE != null) {
+                    if (!Speedmine.INSTANCE.isActive()) Speedmine.INSTANCE.toggle();
+                    b.applySpeedmineAutoRebreak();
+                }
                 b.applyEChestBreakSpeedOverrideIfPossible("mine-echests-start");
             }
 
@@ -14233,7 +14401,10 @@ public class HighwayBuilderTHM extends Module {
                     // Mine ender chest
                     int slot = findAndMoveBestToolToHotbar(b, blockState, true);
                     if (slot == -1) {
-                        if (newBreakingMode && Speedmine.INSTANCE != null && Speedmine.INSTANCE.isActive()) Speedmine.INSTANCE.toggle();
+                        if (speedmineRebreakMode && Speedmine.INSTANCE != null && Speedmine.INSTANCE.isActive()) {
+                            b.restoreSpeedmineAutoRebreak();
+                            Speedmine.INSTANCE.toggle();
+                        }
                         if (b.restockTask.isActiveMaterials() && b.restockTask.hasPendingPickaxes()) {
                             completeAndReturnToAnchor(b);
                         } else if (!b.restockTask.pickaxes
@@ -14248,7 +14419,7 @@ public class HighwayBuilderTHM extends Module {
                         return;
                     }
 
-                    if (newBreakingMode && Speedmine.INSTANCE != null) {
+                    if (speedmineRebreakMode && Speedmine.INSTANCE != null) {
                         if (!breakRequested) {
                             b.info("MineEnderChests: requesting first break at %s", bp);
                             Speedmine.INSTANCE.requestBreak(bp);
@@ -14311,17 +14482,32 @@ public class HighwayBuilderTHM extends Module {
 
                     if (!first) primed = true;
 
-                    if (newBreakingMode) {
+                    if (speedmineRebreakMode) {
                         b.restockDebug("MineEnderChests: placing echest at %s (breakRequested=%s, primed=%s)", bp, breakRequested, primed);
                     } else {
                         timeout = 0;
                     }
-                    BlockUtils.place(bp, Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, b.silentRebreakSwap.get());
+                    boolean fromOffhand = b.noSwapLoadout.get() && b.offhandHoldsEnderChest();
+                    if (fromOffhand) {
+                        // Offhand holds the chests, so the pickaxe keeps the main hand: place and mine share the tick.
+                        BlockUtils.place(bp, Hand.OFF_HAND, b.mc.player.getInventory().getSelectedSlot(), b.rotation.get().place, 0, true, true, false);
+                    } else {
+                        BlockUtils.place(bp, Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, b.silentRebreakSwap.get());
+                    }
+
+                    if (b.experimental(b.rebreakOnPlace)) {
+                        b.sendEChestRebreak(bp, fromOffhand);
+                        primed = false;
+                        timeout = 0;
+                    }
                 }
             }
 
             private void completeAndReturnToAnchor(HighwayBuilderTHM b) {
-                if (newBreakingMode && Speedmine.INSTANCE != null && Speedmine.INSTANCE.isActive()) Speedmine.INSTANCE.toggle();
+                if (speedmineRebreakMode && Speedmine.INSTANCE != null) {
+                    b.restoreSpeedmineAutoRebreak();
+                    if (Speedmine.INSTANCE.isActive()) Speedmine.INSTANCE.toggle();
+                }
                 if (returnAnchorSaved) {
                     b.input.stop();
                     b.mc.player.setPosition(returnX, returnY, returnZ);
