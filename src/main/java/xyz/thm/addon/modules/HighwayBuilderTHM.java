@@ -47,6 +47,9 @@ import meteordevelopment.meteorclient.utils.player.*;
 import meteordevelopment.meteorclient.utils.render.NametagUtils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
+import meteordevelopment.meteorclient.gui.GuiTheme;
+import meteordevelopment.meteorclient.gui.widgets.WWidget;
+import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import xyz.thm.addon.utils.RenderUtilsTHM;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.meteorclient.utils.world.TickRate;
@@ -1235,6 +1238,13 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+    public final Setting<Boolean> manageAntiHunger = sgInventory.add(new BoolSetting.Builder()
+        .name("Anti-hunger")
+        .description("Turns Meteor's AntiHunger on while building, unless you already had it on.")
+        .defaultValue(true)
+        .build()
+    );
+
     public final Setting<Boolean> noSwapLoadout = sgInventory.add(new BoolSetting.Builder()
         .name("offhand-build")
         .description("Mines with the pickaxe in hand and places obsidian from the offhand, taking over AutoTotem to swap in a totem there at low health or when an enemy is nearby.")
@@ -1554,6 +1564,8 @@ public class HighwayBuilderTHM extends Module {
     // {pos, solid ? 1 : 0}, filled from the netty thread.
     private final ConcurrentLinkedQueue<long[]> ghostProbeUpdates = new ConcurrentLinkedQueue<>();
     private boolean ghostProbeNoHandWarned;
+
+    private boolean antiHungerOwned;
 
     private int placedTotal;
     private int placeRateSampleTotal;
@@ -2231,6 +2243,30 @@ public class HighwayBuilderTHM extends Module {
                 if (THMUtils.isBaritoneInstalled()) manageThmHwyMonitor.set(true);
                 kitbotEChestRestockKit.set(KitbotEChestRestockKit.Highway);
                 kitbotPickaxeRestockKit.set(KitbotPickaxeRestockKit.Highway);
+
+                // Proven paving setup.
+                useThmSpeed.set(true);
+                highwaySpeed.set(4.98);
+                blocksPerTick.set(6.96);
+                savePickaxes.set(0);
+                placeRange.set(5.4);
+                placementsPerTick.set(1.0);
+                breakSpeedMultiplier.set(1.465);
+                foodRestock.set(true);
+                foodTypes.get().selected().clear();
+                foodTypes.get().selected().add(Items.ENCHANTED_GOLDEN_APPLE);
+                saveFood.set(14);
+                searchEnderChest.set(true);
+                saveEchests.set(11);
+                sendStatisticsWebhhok.set(true);
+                sendStatisticsapi.set(true);
+                kitbotRestock.set(true);
+                kitbotEChestRestockAmount.set(6);
+                kitbotPickaxeRestock.set(false);
+                kitbotPickaxeRestockAmount.set(1);
+                restockSecondarySourceOrder.set(RestockSecondarySourceOrder.KitBotThenEnderChest);
+                kitbotUpdateOnFinish.set(false);
+                kitbotPeriodicUpdate.set(false);
             }
             case HighwayDigging -> {
                 width.set(5);
@@ -2410,6 +2446,7 @@ public class HighwayBuilderTHM extends Module {
         if (!Modules.get().get(HotbarManager.class).isActive() && hotbarmanager.get()) { Modules.get().get(HotbarManager.class).toggle();}
         validateManagedHotbarReserveSlots();
         if (!Modules.get().get(AntiDrop.class).isActive() && antidrop.get()) { Modules.get().get(AntiDrop.class).toggle();}
+        enableAntiHungerIfNeeded();
         syncManagedSpeedMineOwnership();
         syncNoSwapAutoTotem();
 
@@ -2512,6 +2549,7 @@ public class HighwayBuilderTHM extends Module {
         }
         if (Modules.get().get(HotbarManager.class).isActive() && hotbarmanager.get()) { Modules.get().get(HotbarManager.class).toggle();}
         if (Modules.get().get(AntiDrop.class).isActive() && antidrop.get()) { Modules.get().get(AntiDrop.class).toggle();}
+        restoreAntiHunger();
         if (disabledAutoTotem) { // no-swap-loadout no longer owns the offhand; give AutoTotem back
             AutoTotem autoTotem = Modules.get().get(AutoTotem.class);
             if (autoTotem != null && !autoTotem.isActive()) autoTotem.toggle();
@@ -6634,6 +6672,47 @@ public class HighwayBuilderTHM extends Module {
         } else {
             adaptivePlaceRate.onStableTick();
         }
+    }
+
+    @Override
+    public WWidget getWidget(GuiTheme theme) {
+        WButton tabbed = theme.button("Tabbed control screen");
+        tabbed.action = () -> {
+            THMSystem.get().tabbedHighwayGui.set(true);
+            mc.setScreen(theme.moduleScreen(this));
+        };
+        return tabbed;
+    }
+
+    /** Only turns AntiHunger off again if we were the ones who turned it on. */
+    private void enableAntiHungerIfNeeded() {
+        AntiHunger antiHunger = Modules.get().get(AntiHunger.class);
+        if (!manageAntiHunger.get() || antiHunger == null || antiHunger.isActive()) return;
+
+        antiHunger.toggle();
+        antiHungerOwned = true;
+    }
+
+    private void restoreAntiHunger() {
+        if (!antiHungerOwned) return;
+        antiHungerOwned = false;
+
+        AntiHunger antiHunger = Modules.get().get(AntiHunger.class);
+        if (antiHunger != null && antiHunger.isActive()) antiHunger.toggle();
+    }
+
+    /** Current state name for the control screen. */
+    public String currentStateName() {
+        return state == null ? "-" : stateName(state);
+    }
+
+    /** Mine/place actions per tick actually in use (adaptive and TPS throttle applied). */
+    public double currentMineRate() {
+        return effectiveBlocksPerTickActionRate();
+    }
+
+    public double currentPlaceRate() {
+        return effectivePlacementsPerTickActionRate();
     }
 
     /** Real placements per second over the last 5s. */

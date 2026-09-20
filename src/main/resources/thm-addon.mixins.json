@@ -48,6 +48,7 @@
     "meteor.BetterTabMixin",
     "meteor.BetterTooltipsMixin",
     "meteor.CrystalAuraMixin",
+    "meteor.GuiThemeModuleScreenMixin",
     "meteor.DefaultSettingsWidgetFactoryMixin",
     "meteor.EXPThrowerMixin",
     "meteor.GuiThemeMixin",

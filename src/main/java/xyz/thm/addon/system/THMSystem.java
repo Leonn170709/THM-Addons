@@ -82,6 +82,13 @@ public class THMSystem extends System<THMSystem> {
         .build()
     );
 
+    public final Setting<Boolean> tabbedHighwayGui = sgGeneral.add(new BoolSetting.Builder()
+        .name("tabbed-highway-gui")
+        .description("Opens HighwayBuilder in the tabbed control screen instead of Meteor's list.")
+        .defaultValue(true)
+        .build()
+    );
+
     // Highway Profiles Settings
     public final Setting<Mode> mode = sgProfiles.add(new EnumSetting.Builder<Mode>()
         .name("profile")

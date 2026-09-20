@@ -25,7 +25,7 @@ The first time `HighwayBuilding` or `HighwayDigging` is applied, it starts from 
 | Profile | Initial public seed values |
 | --- | --- |
 | `None` | No forced changes; preserves the current HighwayBuilder configuration. |
-| `HighwayBuilding` | Width `5`, height `3`, `Replace` floor, railings and mine-above-railings enabled, Obsidian placement, and Highway Monitor management enabled when Baritone is installed. |
+| `HighwayBuilding` | Width `5`, height `3`, `Replace` floor, railings and mine-above-railings enabled, Obsidian placement, Highway Monitor management when Baritone is installed, plus the proven paving setup: THM speed `4.98`, `blocks-per-tick` `6.96`, `save-pickaxes` `0`, `place-range` `5.4`, `placements-per-tick` `1.0`, `break-speed-multiplier` `1.465`, egap food restock at `14`, ender-chest search on with `11` saved, stats webhook+API on, KitBot restock with `6` ender chests (KitBotThenEnderChest). |
 | `HighwayDigging` | Width `5`, height `4`, `Replace` floor, railings and mine-above-railings enabled, Netherrack/Basalt/Blackstone/Soul Soil placement, and Highway Monitor management enabled when Baritone is installed. |
 
 After that first seed, each profile loads its own saved values rather than reapplying defaults. The `toggle-modules` setting defaults to `true`; when enabled, **Apply Profile** also activates HighwayBuilder if it is currently off.
@@ -211,6 +211,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | `search-shulkers` | `true` | Always | Searches shulker contents for usable items. |
 | `Manage-hotbar` | `true` | Always | Automatically sorts the hotbar. |
 | `Anti-drop` | `false` | Always | Prevents dropping items the module considers needed. |
+| `Anti-hunger` | `true` | Always | Turns Meteor's AntiHunger on while building and off again when it stops. If you already had it on, it is left alone. |
 | `minimum-empty-slots` | `1`, minimum `0`, slider `0-9` | Always | Empty inventory slots to preserve after obsidian mining. |
 | `mine-ender-chests` | `true` | Always | Mines ender chests to create obsidian. |
 | `save-ender-chests` | `4`, range `4-64` | Always | Loose ender chests to reserve; falling one below this queues restock, and failure to replenish can hard-fail the module. |
