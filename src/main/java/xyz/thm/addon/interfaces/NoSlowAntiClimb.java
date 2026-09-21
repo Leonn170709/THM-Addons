@@ -8,5 +8,7 @@ package xyz.thm.addon.interfaces;
 
 /** Implemented by Meteor's NoSlow through NoSlowMixin. */
 public interface NoSlowAntiClimb {
-    boolean thm$antiClimb();
+    enum Mode { Off, Always, Smart }
+
+    Mode thm$antiClimbMode();
 }

@@ -10,6 +10,7 @@ import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
+import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.movement.NoSlow;
@@ -49,7 +50,7 @@ public abstract class NoSlowMixin implements NoSlowAntiClimb {
     @Unique private Setting<Boolean> bephax$grimWebBypass;
     @Unique private Setting<Boolean> bephax$strictMode;
     @Unique private Setting<Boolean> bephax$disableOnElytra;
-    @Unique private Setting<Boolean> thm$antiClimb;
+    @Unique private Setting<NoSlowAntiClimb.Mode> thm$antiClimb;
     @Unique private Setting<Double> bephax$inputMultiplier;
     @Unique private Setting<Double> bephax$grimV3Multiplier;
     @Unique private boolean bephax$sneaking = false;
@@ -80,10 +81,10 @@ public abstract class NoSlowMixin implements NoSlowAntiClimb {
             .defaultValue(true)
             .build()
         );
-        thm$antiClimb = sgGeneral.add(new BoolSetting.Builder()
+        thm$antiClimb = sgGeneral.add(new EnumSetting.Builder<NoSlowAntiClimb.Mode>()
             .name("anti-climb")
-            .description("Ladders, vines and scaffolding don't pull you up or slow your fall.")
-            .defaultValue(false)
+            .description("Stops ladders, vines and scaffolding from lifting you. Smart keeps catching falls over a block.")
+            .defaultValue(NoSlowAntiClimb.Mode.Off)
             .build()
         );
         bephax$disableOnElytra = sgGeneral.add(new BoolSetting.Builder()
@@ -137,8 +138,8 @@ public abstract class NoSlowMixin implements NoSlowAntiClimb {
         }
     }
     @Override
-    public boolean thm$antiClimb() {
-        return thm$antiClimb != null && thm$antiClimb.get();
+    public NoSlowAntiClimb.Mode thm$antiClimbMode() {
+        return thm$antiClimb == null ? NoSlowAntiClimb.Mode.Off : thm$antiClimb.get();
     }
 
     @Unique
