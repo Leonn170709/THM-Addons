@@ -52,7 +52,9 @@ public final class StartupDialog {
                 process.destroy();
                 return true; // it was on screen, the player just left it open
             }
-            return process.exitValue() == 0;
+            if (process.exitValue() == 0) return true;
+            THMAddon.LOG.warn("Dialog process exited with code {} (2 = no display available).", process.exitValue());
+            return false;
         } catch (Throwable e) {
             THMAddon.LOG.warn("Could not open the dialog in a separate process: {}", e.toString());
             return false;
@@ -78,13 +80,19 @@ public final class StartupDialog {
     private static boolean viaTinyFileDialogs(String title, String message, String downloadUrl) {
         try {
             boolean hasUrl = downloadUrl != null && !downloadUrl.isEmpty();
-            boolean download = TinyFileDialogs.tinyfd_messageBox(title, message, hasUrl ? "okcancel" : "ok", "error", true);
+            // tinyfd refuses any text containing quotes and shows its own error instead of the message.
+            boolean download = TinyFileDialogs.tinyfd_messageBox(
+                withoutQuotes(title), withoutQuotes(message), hasUrl ? "okcancel" : "ok", "error", true);
             if (hasUrl && download) openBrowser(downloadUrl);
             return true;
         } catch (Throwable e) {
             THMAddon.LOG.warn("Native message box unavailable: {}", e.toString());
             return false;
         }
+    }
+
+    static String withoutQuotes(String text) {
+        return text.replace('"', '`').replace('\'', '`');
     }
 
     public static void openBrowser(String url) {

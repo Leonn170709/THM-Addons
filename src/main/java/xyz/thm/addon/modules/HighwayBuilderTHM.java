@@ -6916,9 +6916,15 @@ public class HighwayBuilderTHM extends Module {
 
     private boolean tryPlaceBlock(BlockPos pos, int slot, boolean rotate) {
         if (!isWithinConfiguredForwardRange(pos)) return false;
+        boolean offhand = slot == SlotUtils.OFFHAND;
+
+        if (packetBuild.get()) {
+            ItemStack stack = offhand ? mc.player.getOffHandStack() : mc.player.getInventory().getStack(slot);
+            return stack.getItem() instanceof BlockItem && placeWithoutPrediction(pos, slot, stack);
+        }
+
         // Meteor's place() rejects anything outside the hotbar, so an offhand place keeps the selected slot
         // (making its internal swap a no-op) and only switches the hand.
-        boolean offhand = slot == SlotUtils.OFFHAND;
         boolean placed = BlockUtils.place(
             pos,
             offhand ? Hand.OFF_HAND : Hand.MAIN_HAND,
@@ -7275,6 +7281,14 @@ public class HighwayBuilderTHM extends Module {
 
     private boolean tryForwardPlaceBlockPacket(BlockPos pos, int slot, ItemStack stack) {
         if (!isForwardPlaceableBlock(stack) && !isForwardTrashPlacementStack(stack)) return false;
+        return placeWithoutPrediction(pos, slot, stack);
+    }
+
+    /**
+     * Packet build: only the place packet goes out, the client never sets the block itself. It shows up
+     * when the server says so, so the client's world is always the server's - no ghost blocks.
+     */
+    private boolean placeWithoutPrediction(BlockPos pos, int slot, ItemStack stack) {
         if (experimental(packetBuildOnce) && packetPlaceAwaitingAnswer(pos)) return false;
         Direction side = BlockUtils.getPlaceSide(pos);
         // offhand-build: place straight from the offhand obsidian instead of swapping the main hand.
@@ -13593,7 +13607,10 @@ public class HighwayBuilderTHM extends Module {
                     if (slot == -1) return;
                 }
 
-                if (BlockUtils.place(pos.toImmutable(), Hand.MAIN_HAND, slot, b.rotation.get().place, 100, true, true, true)) {
+                boolean placed = b.packetBuild.get()
+                    ? b.tryPlaceBlock(pos.toImmutable(), slot, b.rotation.get().place)
+                    : BlockUtils.place(pos.toImmutable(), Hand.MAIN_HAND, slot, b.rotation.get().place, 100, true, true, true);
+                if (placed) {
                     if (b.renderPlace.get()) b.placeTrail.add(BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ()));
                     b.placeTimer = b.placeDelay.get();
                 }

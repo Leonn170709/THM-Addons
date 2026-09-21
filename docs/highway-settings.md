@@ -84,7 +84,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | `adaptive-placements` | `false` | Drops the place rate by 0.5 on a rubberband or a server-reverted placement (min `0.5`), raises it 0.1 per 10 stable seconds up to `3`, staying one step below the last rate that failed (retried after 5 calm minutes). Starts from `placements-per-tick`; ignored with `packet-build`. |
 | `place-range` | `4.5`, slider max `5.5` | Maximum block placement reach. |
 | `place-delay` | `0`, minimum `0` | Delay between place actions. |
-| `packet-build` | `false` | Uses direct placement packets for higher forward throughput. |
+| `packet-build` | `false` | Places with raw packets only: the client never sets a block itself, so what you see is always the server's state (no ghost blocks). |
 | `air-place-mode` | `Never`; options `Never`, `Smart`, `Always`; shown when `packet-build` is on | Controls packet-build air placement. |
 | `packet-build-lookahead` | `true`; shown when `packet-build` is on | Also places upcoming rows in the same tick. |
 | `silent-forward-place-swap` | `true`; hidden in legacy mode | Restores your selected slot after scheduler placement. |
@@ -204,7 +204,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | `place-range` | `4.5`, slider max `5.5` | Always | Maximum distance for block placement. |
 | `place-delay` | `0`, minimum `0` | Always | Delay in ticks between place actions. |
 | `tps-safety-enclosure` | `true` | Always | Builds a small enclosure during confirmed low or unknown TPS pauses after TPS settling. |
-| `packet-build` | `false` | Always | Sends forward placement packets directly and automatically enables Packet Limiter on activation. |
+| `packet-build` | `false` | Always | Every highway placement — forward rows, legacy-mode rows, liquid fills, corner blocks, blockades and ReLevel — goes out as a raw place packet and the client never sets the block itself; it appears only when the server's block update arrives, so the client's world always matches the server and ghost blocks can't happen. Also removes the per-tick placement cap and automatically enables Packet Limiter on activation. Restock containers (ender chests, shulkers) are still placed the normal way. |
 | `air-place-mode` | `Never`; options `Never`, `Smart`, `Always` | `packet-build` is on | `Never` skips no-face placements, `Smart` packet-air-places only when needed, and `Always` always uses packet air placement. |
 | `packet-build-lookahead` | `true` | `packet-build` is on | Lets Packet Build place blocks from upcoming rows in the same tick. |
 | `packet-build-once` | `false` | `enable-experimental` and `packet-build` are on | Experimental: sends one packet per block. Without it the same block is re-sent every tick until the server answers (about one packet per block per ping tick), which wastes the packet budget. Combine with `air-place-mode` `Never` or `Always` for the two variants. |

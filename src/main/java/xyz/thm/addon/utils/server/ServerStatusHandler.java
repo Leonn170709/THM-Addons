@@ -6,6 +6,10 @@
 
 package xyz.thm.addon.utils.server;
 
+import net.minecraft.world.chunk.WorldChunk;
+import net.minecraft.world.chunk.ChunkSection;
+import net.minecraft.util.math.ChunkPos;
+import net.minecraft.block.Blocks;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
@@ -112,6 +116,10 @@ import static meteordevelopment.meteorclient.MeteorClient.mc;
 
 
 public final class ServerStatusHandler {
+    private static final long PORTAL_SCAN_INTERVAL_MS = 1000L;
+    private long lastPortalScanAtMs;
+    private boolean lastPortalNearby;
+
     public enum ServerState {
         UNKNOWN,
         MAIN_LOBBY,
@@ -381,7 +389,8 @@ public final class ServerStatusHandler {
             ServerState old = committedState;
             committedState = candidateState;
             lastTransitionAtMs = now;
-            debugInfo(
+            // Always logged: a handful per reconnect, and the only evidence a lobby bug report has.
+            THMAddon.LOG.info(
                 "ServerStatus committed transition: {} -> {} (stableTicks={}, confidence={}, evidence={})",
                 old,
                 committedState,
@@ -395,7 +404,7 @@ public final class ServerStatusHandler {
             ServerState old = committedState;
             committedState = ServerState.UNKNOWN;
             lastTransitionAtMs = now;
-            debugInfo(
+            THMAddon.LOG.info(
                 "ServerStatus committed transition: {} -> UNKNOWN (stableTicks={}, confidence={}, evidence={})",
                 old,
                 candidateStableTicks,
@@ -442,6 +451,14 @@ public final class ServerStatusHandler {
             return score;
         }
 
+        // Everyone is in adventure in the lobby, but the lobby world isn't always the overworld (custom
+        // lobby worlds, the end). A portal in render distance is what makes it a lobby for us: that is what we path to.
+        if (gm == GameMode.ADVENTURE && netherPortalNearby()) {
+            score.lobby = 100;
+            score.reasons.add("strict:gamemode:ADVENTURE+nether-portal-nearby+dimension:" + dimensionId + "->main-lobby+gm-source:" + gmSource);
+            return score;
+        }
+
         if (crackedAdventureEnd) {
             score.transfer = 100;
             score.reasons.add("strict:gamemode:ADVENTURE+dimension:the_end+no-cracked-evidence->transfer+gm-source:" + gmSource);
@@ -477,6 +494,33 @@ public final class ServerStatusHandler {
 
         score.reasons.add("strict:no-consistent-signal");
         return score;
+    }
+
+    /** Palette check of every chunk in render distance, so it stays cheap; rescanned once a second. */
+    private boolean netherPortalNearby() {
+        if (mc == null || mc.world == null || mc.player == null) return false;
+
+        long now = System.currentTimeMillis();
+        if (now - lastPortalScanAtMs < PORTAL_SCAN_INTERVAL_MS) return lastPortalNearby;
+        lastPortalScanAtMs = now;
+
+        ChunkPos center = mc.player.getChunkPos();
+        int radius = mc.options.getClampedViewDistance();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                WorldChunk chunk = mc.world.getChunkManager().getWorldChunk(center.x + dx, center.z + dz);
+                if (chunk == null) continue;
+                for (ChunkSection section : chunk.getSectionArray()) {
+                    if (section == null || section.isEmpty()) continue;
+                    if (section.hasAny(state -> state.isOf(Blocks.NETHER_PORTAL))) {
+                        lastPortalNearby = true;
+                        return true;
+                    }
+                }
+            }
+        }
+        lastPortalNearby = false;
+        return false;
     }
 
     private GameMode resolvePlayerListGameMode() {
