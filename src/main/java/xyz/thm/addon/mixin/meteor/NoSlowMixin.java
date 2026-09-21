@@ -33,6 +33,7 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import xyz.thm.addon.interfaces.NoSlowAntiClimb;
 import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
 import xyz.thm.addon.utils.InventoryManager;
 
@@ -41,13 +42,14 @@ import java.util.List;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 @Mixin(value = NoSlow.class, remap = false)
-public abstract class NoSlowMixin {
+public abstract class NoSlowMixin implements NoSlowAntiClimb {
     @Shadow @Final protected SettingGroup sgGeneral;
     @Unique private Setting<Boolean> bephax$grimBypass;
     @Unique private Setting<Boolean> bephax$grimV3Bypass;
     @Unique private Setting<Boolean> bephax$grimWebBypass;
     @Unique private Setting<Boolean> bephax$strictMode;
     @Unique private Setting<Boolean> bephax$disableOnElytra;
+    @Unique private Setting<Boolean> thm$antiClimb;
     @Unique private Setting<Double> bephax$inputMultiplier;
     @Unique private Setting<Double> bephax$grimV3Multiplier;
     @Unique private boolean bephax$sneaking = false;
@@ -76,6 +78,12 @@ public abstract class NoSlowMixin {
             .name("strict-mode")
             .description("Strict NCP bypass for ground slowdowns")
             .defaultValue(true)
+            .build()
+        );
+        thm$antiClimb = sgGeneral.add(new BoolSetting.Builder()
+            .name("anti-climb")
+            .description("Ladders, vines and scaffolding don't pull you up or slow your fall.")
+            .defaultValue(false)
             .build()
         );
         bephax$disableOnElytra = sgGeneral.add(new BoolSetting.Builder()
@@ -128,6 +136,11 @@ public abstract class NoSlowMixin {
             }
         }
     }
+    @Override
+    public boolean thm$antiClimb() {
+        return thm$antiClimb != null && thm$antiClimb.get();
+    }
+
     @Unique
     private boolean bephax$checkStack(ItemStack stack) {
         return !stack.getComponents().contains(DataComponentTypes.FOOD)

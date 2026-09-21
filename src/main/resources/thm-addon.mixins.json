@@ -16,6 +16,7 @@
     "HighwayBuilderEntityMixin",
     "ImHighMixin",
     "InactivityFpsLimitMixin",
+    "LivingEntityClimbMixin",
     "InactivityFpsLimiterMixin",
     "MinecraftClientMixin",
     "NativeImageWebpMixin",
