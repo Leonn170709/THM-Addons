@@ -8,16 +8,26 @@ package xyz.thm.addon.mixin;
 
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.network.ClientPlayerInteractionManager;
 import net.minecraft.entity.player.PlayerEntity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import xyz.thm.addon.gui.HighwayBuilderScreen;
 import xyz.thm.addon.modules.HighwayBuilderTHM;
 
 @Mixin(MinecraftClient.class)
 public abstract class MinecraftClientMixin {
+
+    // Themes like Catppuccin override GuiTheme.moduleScreen, so the swap happens where every theme's
+    // screen ends up: opening it.
+    @ModifyVariable(method = "setScreen", at = @At("HEAD"), argsOnly = true)
+    private Screen thm$highwayBuilderScreen(Screen screen) {
+        return HighwayBuilderScreen.replaceModuleScreen(screen);
+    }
 
     // Vanilla's doItemUse returns early while ClientPlayerEntity#isRiding() - true only while
     // steering a boat with a movement key held - so item use in a moving boat is a client-side

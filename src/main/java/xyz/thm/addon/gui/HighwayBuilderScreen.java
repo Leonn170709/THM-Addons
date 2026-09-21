@@ -7,6 +7,15 @@
 package xyz.thm.addon.gui;
 
 import meteordevelopment.meteorclient.gui.GuiTheme;
+import meteordevelopment.meteorclient.gui.GuiThemes;
+import meteordevelopment.meteorclient.gui.WidgetScreen;
+import meteordevelopment.meteorclient.systems.modules.Module;
+import net.minecraft.client.gui.screen.Screen;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import meteordevelopment.meteorclient.gui.WindowScreen;
 import meteordevelopment.meteorclient.gui.widgets.WKeybind;
 import meteordevelopment.meteorclient.gui.widgets.WLabel;
@@ -58,6 +67,48 @@ public class HighwayBuilderScreen extends WindowScreen {
         for (SettingGroup group : module.settings) tabs.put(group.name, view(group));
         tabs.put(ALL, module.settings);
         if (!tabs.containsKey(activeTab)) activeTab = BASICS;
+    }
+
+    // Module fields of each theme's module screen class, found once.
+    private static final Map<Class<?>, List<Field>> MODULE_FIELDS = new HashMap<>();
+
+    /**
+     * Any theme's module screen for HighwayBuilder becomes this one. Found by the module the screen holds,
+     * because themes build their own module screens (Meteor's ModuleScreen, CatppuccinModuleScreen, ...).
+     */
+    public static Screen replaceModuleScreen(Screen screen) {
+        if (!(screen instanceof WidgetScreen) || screen instanceof HighwayBuilderScreen) return screen;
+        if (!screen.getClass().getSimpleName().endsWith("ModuleScreen")) return screen;
+        if (THMSystem.get() == null || !THMSystem.get().tabbedHighwayGui.get()) return screen;
+
+        HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
+        if (builder == null || !holdsModule(screen, builder)) return screen;
+        return new HighwayBuilderScreen(GuiThemes.get(), builder);
+    }
+
+    private static boolean holdsModule(Screen screen, Module module) {
+        for (Field field : MODULE_FIELDS.computeIfAbsent(screen.getClass(), HighwayBuilderScreen::moduleFields)) {
+            try {
+                if (field.get(screen) == module) return true;
+            } catch (IllegalAccessException ignored) {
+            }
+        }
+        return false;
+    }
+
+    private static List<Field> moduleFields(Class<?> type) {
+        List<Field> fields = new ArrayList<>();
+        for (Class<?> c = type; c != null && c != Object.class; c = c.getSuperclass()) {
+            for (Field field : c.getDeclaredFields()) {
+                if (Modifier.isStatic(field.getModifiers()) || !Module.class.isAssignableFrom(field.getType())) continue;
+                try {
+                    field.setAccessible(true);
+                    fields.add(field);
+                } catch (RuntimeException ignored) {
+                }
+            }
+        }
+        return fields;
     }
 
     /** Views over settings that stay owned by the module, so editing and saving are unchanged. */
