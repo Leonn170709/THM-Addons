@@ -365,6 +365,24 @@ public class HighwayBuilderTHM extends Module {
         }
     }
 
+    /** Break modes offered without offhand-build: on-place needs the chest in the offhand. */
+    public enum EChestBreakModeNoOffhand {
+        Speedmine(EChestBreakMode.Speedmine),
+        InstantRebreak(EChestBreakMode.InstantRebreak),
+        Normal(EChestBreakMode.Normal);
+
+        private final EChestBreakMode mode;
+
+        EChestBreakModeNoOffhand(EChestBreakMode mode) {
+            this.mode = mode;
+        }
+
+        @Override
+        public String toString() {
+            return mode.toString();
+        }
+    }
+
     public enum FoodManagement {
         None("None"),
         AutoEat("Auto Eat"),
@@ -1362,11 +1380,20 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+    // Two selects because an enum setting can't hide one option: on-place is only offered with offhand-build.
     public final Setting<EChestBreakMode> echestBreakMode = sgEChests.add(new EnumSetting.Builder<EChestBreakMode>()
         .name("break-mode")
         .description("How a placed ender chest is broken again.")
         .defaultValue(EChestBreakMode.Speedmine)
-        .visible(mineEnderChests::get)
+        .visible(() -> mineEnderChests.get() && noSwapLoadout.get())
+        .build()
+    );
+
+    private final Setting<EChestBreakModeNoOffhand> echestBreakModeNoOffhand = sgEChests.add(new EnumSetting.Builder<EChestBreakModeNoOffhand>()
+        .name("break-mode-no-offhand")
+        .description("How a placed ender chest is broken again.")
+        .defaultValue(EChestBreakModeNoOffhand.Speedmine)
+        .visible(() -> mineEnderChests.get() && !noSwapLoadout.get())
         .build()
     );
 
@@ -1375,7 +1402,7 @@ public class HighwayBuilderTHM extends Module {
         .description("Ticks between instant-rebreak packets.")
         .defaultValue(0)
         .sliderMax(20)
-        .visible(() -> mineEnderChests.get() && echestBreakMode.get() == EChestBreakMode.InstantRebreak)
+        .visible(() -> mineEnderChests.get() && effectiveEChestBreakMode() == EChestBreakMode.InstantRebreak)
         .build()
     );
 
@@ -1383,7 +1410,7 @@ public class HighwayBuilderTHM extends Module {
         .name("silent-rebreak-swap")
         .description("Restores your selected slot after a rebreak or chest placement.")
         .defaultValue(true)
-        .visible(() -> mineEnderChests.get() && echestBreakMode.get() != EChestBreakMode.Normal)
+        .visible(() -> mineEnderChests.get() && effectiveEChestBreakMode() != EChestBreakMode.Normal)
         .build()
     );
 
@@ -6790,6 +6817,10 @@ public class HighwayBuilderTHM extends Module {
         return tabbed;
     }
 
+    private EChestBreakMode effectiveEChestBreakMode() {
+        return noSwapLoadout.get() ? echestBreakMode.get() : echestBreakModeNoOffhand.get().mode;
+    }
+
     /** Only turns AntiHunger off again if we were the ones who turned it on. */
     private void enableAntiHungerIfNeeded() {
         AntiHunger antiHunger = Modules.get().get(AntiHunger.class);
@@ -11566,6 +11597,7 @@ public class HighwayBuilderTHM extends Module {
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (stack.isOf(Items.ENDER_CHEST)) count += stack.getCount();
         }
+        if (mc.player.getOffHandStack().isOf(Items.ENDER_CHEST)) count += mc.player.getOffHandStack().getCount();
 
         return count;
     }
@@ -14279,7 +14311,7 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 RestockTask.RestockSession session = b.restockTask.getSession();
-                speedmineRebreakMode = b.echestBreakMode.get() == EChestBreakMode.Speedmine;
+                speedmineRebreakMode = b.effectiveEChestBreakMode() == EChestBreakMode.Speedmine;
                 session.refreshProgress();
                 b.restockTask.clampObsidianTargetToMineableEChests("mine-echests-start");
                 session.refreshProgress();
@@ -14436,7 +14468,7 @@ public class HighwayBuilderTHM extends Module {
                         boolean swappedForRebreak = false;
 
                         boolean instantRebreak = false;
-                        if (b.echestBreakMode.get() == EChestBreakMode.InstantRebreak && primed) {
+                        if (b.effectiveEChestBreakMode() == EChestBreakMode.InstantRebreak && primed) {
                             timeout++;
                             if (timeout > 60) {
                                 primed = false;
@@ -14469,8 +14501,10 @@ public class HighwayBuilderTHM extends Module {
                     }
                 }
                 else {
-                    // Place ender chest
-                    int slot = findAndMoveToHotbar(b, itemStack -> itemStack.getItem() == Items.ENDER_CHEST);
+                    // Place ender chest. With offhand-build they sit in the offhand, which the inventory
+                    // search never looks at: without this the phase sees none and ends without placing.
+                    boolean fromOffhand = b.noSwapLoadout.get() && b.offhandHoldsEnderChest();
+                    int slot = fromOffhand ? SlotUtils.OFFHAND : findAndMoveToHotbar(b, itemStack -> itemStack.getItem() == Items.ENDER_CHEST);
                     RestockTask.RestockSession session = b.restockTask.getSession();
                     int minimumRemainingEChests = session != null ? session.saveEchestsReserve : b.saveEchests.get();
                     if (slot == -1 || countItem(b, stack -> stack.getItem().equals(Items.ENDER_CHEST)) <= minimumRemainingEChests) {
@@ -14487,7 +14521,6 @@ public class HighwayBuilderTHM extends Module {
                     } else {
                         timeout = 0;
                     }
-                    boolean fromOffhand = b.noSwapLoadout.get() && b.offhandHoldsEnderChest();
                     if (fromOffhand) {
                         // Offhand holds the chests, so the pickaxe keeps the main hand: place and mine share the tick.
                         BlockUtils.place(bp, Hand.OFF_HAND, b.mc.player.getInventory().getSelectedSlot(), b.rotation.get().place, 0, true, true, false);
@@ -14495,7 +14528,7 @@ public class HighwayBuilderTHM extends Module {
                         BlockUtils.place(bp, Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, b.silentRebreakSwap.get());
                     }
 
-                    if (b.echestBreakMode.get() == EChestBreakMode.OnPlace) {
+                    if (b.effectiveEChestBreakMode() == EChestBreakMode.OnPlace) {
                         b.sendEChestRebreak(bp, fromOffhand);
                         primed = false;
                         timeout = 0;
@@ -17705,6 +17738,9 @@ public class HighwayBuilderTHM extends Module {
                 ItemStack stack = b.mc.player.getInventory().getStack(i);
                 if (predicate.test(stack)) count += stack.getCount();
             }
+            // offhand-build keeps real stock in the offhand (ender chests while mining them).
+            ItemStack offhand = b.mc.player.getOffHandStack();
+            if (predicate.test(offhand)) count += offhand.getCount();
 
             return count;
         }
