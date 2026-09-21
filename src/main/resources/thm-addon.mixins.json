@@ -77,6 +77,7 @@
   "client": [
     "InventoryScreenMixin",
     "KeyboardMixin",
+    "LevelLoadingScreenMixin",
     "PlayerListHudMixin",
     "PlayerListMapMixin"
   ]

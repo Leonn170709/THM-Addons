@@ -86,4 +86,5 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 
 ## UI
 - Custom THM categories: `THM Highway` and `THM PVP`.
+- Disconnect button on the vanilla "Loading terrain" screen, which otherwise has no way out when it hangs.
 - GUI themes: `Dark`, `Snowy`, `Lambda`, `Stardust`, `Midnight`, `Monochrome`, `Nether`.
