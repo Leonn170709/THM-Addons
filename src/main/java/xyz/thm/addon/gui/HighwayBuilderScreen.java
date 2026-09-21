@@ -37,6 +37,8 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 
+import org.lwjgl.glfw.GLFW;
+
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 
 /** Tabbed control screen for HighwayBuilder: status, start/stop, profiles, per-area settings and search. */
@@ -58,6 +60,7 @@ public class HighwayBuilderScreen extends WindowScreen {
     private WButton toggleButton;
     private WVerticalList content;
     private String search = "";
+    private int shownAdaptiveWrites;
 
     public HighwayBuilderScreen(GuiTheme theme, HighwayBuilderTHM module) {
         super(theme, module.title);
@@ -198,6 +201,7 @@ public class HighwayBuilderScreen extends WindowScreen {
 
     private void fillContent(String search) {
         this.search = search;
+        shownAdaptiveWrites = module.adaptiveRateWrites();
         content.clear();
 
         if (search.isEmpty()) {
@@ -240,7 +244,14 @@ public class HighwayBuilderScreen extends WindowScreen {
                 setting.lastWasVisible = visible;
             }
         }
-        if (visibilityChanged) fillContent(search);
+        // Widgets don't follow a setting changed from code, so redraw when adaptive moved a rate slider -
+        // but not mid-drag, and never on the player's own edits (those don't bump the counter).
+        boolean adaptiveMoved = module.adaptiveRateWrites() != shownAdaptiveWrites && !mouseHeld();
+        if (visibilityChanged || adaptiveMoved) fillContent(search);
+    }
+
+    private static boolean mouseHeld() {
+        return GLFW.glfwGetMouseButton(mc.getWindow().getHandle(), GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS;
     }
 
     private void updateStatus() {

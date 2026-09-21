@@ -958,6 +958,7 @@ public class HighwayBuilderTHM extends Module {
         .defaultValue(7)
         .range(1, 30)
         .sliderMax(20)
+        .onChanged(value -> this.onRateSettingChanged(this.adaptiveMineRate, this.sanitizeMineActionRate(value)))
         .build()
     );
 
@@ -1204,6 +1205,7 @@ public class HighwayBuilderTHM extends Module {
         .range(0.1, 100)
         .sliderRange(0.1, 10)
         .decimalPlaces(1)
+        .onChanged(value -> this.onRateSettingChanged(this.adaptivePlaceRate, this.sanitizePlaceActionRate(value)))
         .build()
     );
 
@@ -1656,6 +1658,8 @@ public class HighwayBuilderTHM extends Module {
     private boolean ghostProbeNoHandWarned;
 
     private boolean antiHungerOwned;
+    private boolean writingAdaptiveRate;
+    private int adaptiveRateWrites;
     private Boolean speedmineAutoRebreakSnapshot;
 
     // Packet build sends without client prediction, so a block stays "air" here until the server
@@ -6696,6 +6700,29 @@ public class HighwayBuilderTHM extends Module {
         return enableExperimental.get() && setting.get();
     }
 
+    /** The slider shows the adaptive rate. Marked as ours so it doesn't count as a hand-made change. */
+    private void showAdaptiveRate(Setting<Double> setting, AdaptiveRate rate) {
+        if (Math.abs(setting.get() - rate.get()) < 1e-9) return;
+        writingAdaptiveRate = true;
+        try {
+            setting.set(rate.get());
+        } finally {
+            writingAdaptiveRate = false;
+        }
+        adaptiveRateWrites++;
+    }
+
+    /** Moving the slider by hand restarts adaptive from there, dropping the remembered ceiling. */
+    private void onRateSettingChanged(AdaptiveRate rate, double value) {
+        if (writingAdaptiveRate || rate == null) return;
+        rate.reset(value);
+    }
+
+    /** Bumped on every adaptive write, so an open screen knows when to redraw the sliders. */
+    public int adaptiveRateWrites() {
+        return adaptiveRateWrites;
+    }
+
     private double baseBlocksPerTick() {
         return adaptiveMining.get() && adaptiveMineRate.get() > 0 ? adaptiveMineRate.get() : sanitizeMineActionRate(blocksPerTick.get());
     }
@@ -6734,6 +6761,7 @@ public class HighwayBuilderTHM extends Module {
         } else {
             adaptiveMineRate.onStableTick();
         }
+        showAdaptiveRate(blocksPerTick, adaptiveMineRate);
     }
 
     private double basePlacementsPerTick() {
@@ -6805,6 +6833,7 @@ public class HighwayBuilderTHM extends Module {
         } else {
             adaptivePlaceRate.onStableTick();
         }
+        showAdaptiveRate(placementsPerTick, adaptivePlaceRate);
     }
 
     @Override
