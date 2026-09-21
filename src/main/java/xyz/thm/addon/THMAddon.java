@@ -131,9 +131,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
 
             boolean hasDownload = !downloadUrls.isEmpty();
             String downloadUrl = hasDownload ? downloadUrls.getFirst() : null;
-            msg.append(hasDownload
-                ? "Click Download to open the download page, or Close to just close.\nThe game will now close."
-                : "The game will now close.");
+            msg.append("The game will now close.");
 
             String depList = missing.stream().map(RequiredMod::groupName).collect(Collectors.joining(", "));
             LOG.error("[THM Addon] Missing dependencies: {}", depList);

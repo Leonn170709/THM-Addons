@@ -6,17 +6,16 @@
 
 package xyz.thm.addon.utils;
 
-import net.fabricmc.loader.api.FabricLoader;
-import net.fabricmc.loader.api.ModContainer;
 import org.lwjgl.util.tinyfd.TinyFileDialogs;
+import xyz.thm.addon.Main;
 import xyz.thm.addon.THMAddon;
 
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -40,20 +39,24 @@ public final class StartupDialog {
         try {
             Path javaBin = Path.of(System.getProperty("java.home"), "bin",
                 System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win") ? "java.exe" : "java");
-            Path self = ownJar();
-            if (self == null || !Files.exists(javaBin)) return false;
+            String classpath = ownClasspath();
+            if (classpath == null || !Files.exists(javaBin)) return false;
 
             List<String> command = new ArrayList<>(List.of(
-                javaBin.toString(), "-cp", self.toString(), "xyz.thm.addon.Main", title, message));
+                javaBin.toString(), "-cp", classpath, "xyz.thm.addon.Main", title, message));
             if (downloadUrl != null && !downloadUrl.isEmpty()) command.add(downloadUrl);
 
-            Process process = new ProcessBuilder(command).inheritIO().start();
+            // Output is captured, not inherited: a failing child's error then ends up in the game log.
+            Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
             if (!process.waitFor(TIMEOUT_MINUTES, TimeUnit.MINUTES)) {
                 process.destroy();
                 return true; // it was on screen, the player just left it open
             }
             if (process.exitValue() == 0) return true;
-            THMAddon.LOG.warn("Dialog process exited with code {} (2 = no display available).", process.exitValue());
+
+            String output = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).trim();
+            if (output.length() > 800) output = output.substring(0, 800) + "...";
+            THMAddon.LOG.warn("Dialog process exited with code {} (2 = no display available), classpath {}: {}", process.exitValue(), classpath, output);
             return false;
         } catch (Throwable e) {
             THMAddon.LOG.warn("Could not open the dialog in a separate process: {}", e.toString());
@@ -61,18 +64,25 @@ public final class StartupDialog {
         }
     }
 
-    /** The addon's own jar (or classes dir in dev), which holds {@code Main} and needs nothing else. */
-    private static Path ownJar() {
-        Optional<ModContainer> container = FabricLoader.getInstance().getModContainer(THMAddon.MOD_ID);
-        if (container.isPresent()) {
-            for (Path path : container.get().getOrigin().getPaths()) {
-                if (Files.exists(path)) return path;
+    /**
+     * Main only needs the JDK, so its class file is copied out and run on its own. That works however
+     * the addon was loaded (installed jar, dev folders, launcher quirks) - the loader's origin paths
+     * turned out not to hold the compiled classes in a dev run.
+     */
+    private static String ownClasspath() {
+        try (InputStream in = Main.class.getResourceAsStream("Main.class")) {
+            if (in == null) return null;
+            Path dir = Files.createTempDirectory("thm-addon-dialog");
+            Path target = dir.resolve("xyz").resolve("thm").resolve("addon").resolve("Main.class");
+            Files.createDirectories(target.getParent());
+            Files.write(target, in.readAllBytes());
+            // deleteOnExit runs in reverse order and only removes empty folders: outermost first.
+            for (Path path : List.of(dir, dir.resolve("xyz"), dir.resolve("xyz/thm"), target.getParent(), target)) {
+                path.toFile().deleteOnExit();
             }
-        }
-
-        try {
-            return Path.of(StartupDialog.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+            return dir.toString();
         } catch (Throwable e) {
+            THMAddon.LOG.warn("Could not copy the dialog class out: {}", e.toString());
             return null;
         }
     }
@@ -81,8 +91,9 @@ public final class StartupDialog {
         try {
             boolean hasUrl = downloadUrl != null && !downloadUrl.isEmpty();
             // tinyfd refuses any text containing quotes and shows its own error instead of the message.
+            String text = hasUrl ? message + "\n\nOK opens the download page, Cancel just closes." : message;
             boolean download = TinyFileDialogs.tinyfd_messageBox(
-                withoutQuotes(title), withoutQuotes(message), hasUrl ? "okcancel" : "ok", "error", true);
+                withoutQuotes(title), withoutQuotes(text), hasUrl ? "okcancel" : "ok", "error", true);
             if (hasUrl && download) openBrowser(downloadUrl);
             return true;
         } catch (Throwable e) {
