@@ -3522,6 +3522,9 @@ public class THMHwyMonitor extends Module {
         SegmentProjection reconnectSegment = resolveReconnectLineFromCurrentPosition(cachedDirectionCode);
         if (reconnectSegment == null) {
             postRejoinLastCompleteProbeWinner = null;
+            // Not on a known line (a ring radius outside RING_ROADS, a crossing, a custom road): the
+            // direction the builder saved before disconnecting is still the best evidence there is.
+            if (cachedDirection != null) return resumeInCachedDirection(cachedDirection, "segment=unresolved");
             return PostRejoinDirectionResult.blocked("axis-unresolved", "segment=unresolved");
         }
 
@@ -3539,6 +3542,7 @@ public class THMHwyMonitor extends Module {
         HorizontalDirection[] axisDirections = resolvePostRejoinAxisDirections(reconnectSegment.segment());
         if (axisDirections == null) {
             postRejoinLastCompleteProbeWinner = null;
+            if (cachedDirection != null) return resumeInCachedDirection(cachedDirection, segmentSummary);
             return PostRejoinDirectionResult.blocked("axis-unresolved", segmentSummary);
         }
 
@@ -3585,6 +3589,12 @@ public class THMHwyMonitor extends Module {
 
         postRejoinLastCompleteProbeWinner = null;
         return PostRejoinDirectionResult.blocked("probe-ambiguous", summary);
+    }
+
+    private PostRejoinDirectionResult resumeInCachedDirection(HorizontalDirection cachedDirection, String summary) {
+        info("No known highway line here, resuming in the direction you were building: %s.", cachedDirection.name);
+        postRejoinLastCompleteProbeWinner = cachedDirection;
+        return PostRejoinDirectionResult.success(cachedDirection, "cached-direction=" + cachedDirection.name + " " + summary + " axis-unresolved");
     }
 
     private HorizontalDirection[] resolvePostRejoinAxisDirections(HighwaySegment segment) {
