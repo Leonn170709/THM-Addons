@@ -6,6 +6,7 @@
 
 package xyz.thm.addon.modules;
 
+import xyz.thm.addon.utils.PacketPlaceTracker;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -65,6 +66,14 @@ public class SurroundPlus extends Module {
         .name("packet")
         .description("Only place via packets (no client-side block set).")
         .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Boolean> packetOnce = sgPlace.add(new BoolSetting.Builder()
+        .name("packet-place-once")
+        .description("Experimental: one packet per block, sent again only once the server says it's still air.")
+        .defaultValue(false)
+        .visible(packet::get)
         .build()
     );
 
@@ -412,7 +421,7 @@ public class SurroundPlus extends Module {
 
     private boolean placeBlock(BlockPos pos, FindItemResult item) {
         if (packet.get()) {
-            if (!PlacementUtils.placeBlockPacket(pos, item, rotate.get(), 50, airplace.get())) return false;
+            if (!placePacket(pos, item, airplace.get())) return false;
             renderMap.put(pos, System.currentTimeMillis());
             packetPlacedAt.put(pos, System.currentTimeMillis());
             return true;
@@ -427,7 +436,7 @@ public class SurroundPlus extends Module {
 
         // Airplace fallback for normal mode: no adjacent face found, send packet directly
         if (airplace.get() && PlacementUtils.getPlaceSide(pos) == null && BlockUtils.canPlace(pos)) {
-            if (PlacementUtils.placeBlockPacket(pos, item, rotate.get(), 50, true)) {
+            if (placePacket(pos, item, true)) {
                 renderMap.put(pos, System.currentTimeMillis());
                 packetPlacedAt.put(pos, System.currentTimeMillis());
                 return true;
@@ -435,6 +444,13 @@ public class SurroundPlus extends Module {
         }
 
         return false;
+    }
+
+    private boolean placePacket(BlockPos pos, FindItemResult item, boolean airPlace) {
+        if (packetOnce.get() && !PacketPlaceTracker.canSend(pos)) return false;
+        if (!PlacementUtils.placeBlockPacket(pos, item, rotate.get(), 50, airPlace)) return false;
+        if (packetOnce.get()) PacketPlaceTracker.markSent(pos, PacketPlaceTracker.DEFAULT_RESEND_TICKS);
+        return true;
     }
 
     private void setBlock(BlockPos pos, FindItemResult item) {

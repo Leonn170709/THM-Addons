@@ -31,6 +31,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import xyz.thm.addon.utils.PacketPlaceTracker;
 import xyz.thm.addon.utils.PlacementUtils;
 import xyz.thm.addon.utils.RenderUtilsTHM;
 
@@ -47,6 +48,7 @@ public abstract class ScaffoldMixin {
     @Unique private Setting<Boolean> thm$packetPlace;
     @Unique private Setting<Boolean> thm$packetAirPlace;
     @Unique private Setting<Integer> thm$packetRotateTicks;
+    @Unique private Setting<Boolean> thm$packetPlaceOnce;
     @Unique private Setting<Boolean> thm$safeMove;
     @Unique private Setting<Boolean> thm$keepY;
 
@@ -124,6 +126,13 @@ public abstract class ScaffoldMixin {
             .defaultValue(0)
             .min(0)
             .sliderRange(0, 50)
+            .visible(thm$packetPlace::get)
+            .build()
+        );
+        thm$packetPlaceOnce = sgGeneral.add(new BoolSetting.Builder()
+            .name("packet-place-once")
+            .description("Experimental: one packet per block, sent again only once the server says it's still air.")
+            .defaultValue(false)
             .visible(thm$packetPlace::get)
             .build()
         );
@@ -296,7 +305,10 @@ public abstract class ScaffoldMixin {
         if (thm$packetPlace != null && thm$packetPlace.get()) {
             int rotateTicks = thm$packetRotateTicks != null ? thm$packetRotateTicks.get() : rotationPriority;
             boolean airPlace = thm$packetAirPlace == null || thm$packetAirPlace.get();
+            boolean once = thm$packetPlaceOnce != null && thm$packetPlaceOnce.get();
+            if (once && !PacketPlaceTracker.canSend(placePos)) return false;
             boolean placed = PlacementUtils.placeBlockPacket(placePos, item, rotate, rotateTicks, airPlace);
+            if (placed && once) PacketPlaceTracker.markSent(placePos, PacketPlaceTracker.DEFAULT_RESEND_TICKS);
             if (placed && swingHand && mc.player != null) {
                 Hand hand = item.isOffhand() ? Hand.OFF_HAND : Hand.MAIN_HAND;
                 mc.player.swingHand(hand, true);

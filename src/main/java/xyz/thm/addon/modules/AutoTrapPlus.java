@@ -10,6 +10,7 @@
  */
 package xyz.thm.addon.modules;
 
+import xyz.thm.addon.utils.PacketPlaceTracker;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
@@ -150,6 +151,14 @@ public class AutoTrapPlus extends Module {
         .name("packet")
         .description("Only place via packets (no client-side block set). WIP")
         .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Boolean> packetOnce = sgGeneral.add(new BoolSetting.Builder()
+        .name("packet-place-once")
+        .description("Experimental: one packet per block, sent again only once the server says it's still air.")
+        .defaultValue(false)
+        .visible(packet::get)
         .build()
     );
 
@@ -585,7 +594,10 @@ public class AutoTrapPlus extends Module {
 
     private boolean placeBlock(BlockPos pos, FindItemResult block) {
         if (packet.get()) {
-            return PlacementUtils.placeBlockPacket(pos, block, rotate.get(), 50);
+            if (packetOnce.get() && !PacketPlaceTracker.canSend(pos)) return false;
+            boolean placed = PlacementUtils.placeBlockPacket(pos, block, rotate.get(), 50);
+            if (placed && packetOnce.get()) PacketPlaceTracker.markSent(pos, PacketPlaceTracker.DEFAULT_RESEND_TICKS);
+            return placed;
         }
         return BlockUtils.place(pos, block, rotate.get(), 50, true);
     }

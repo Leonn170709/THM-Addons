@@ -6,6 +6,7 @@
 
 package xyz.thm.addon.modules;
 
+import xyz.thm.addon.utils.PacketPlaceTracker;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.mixininterface.IVec3d;
 import meteordevelopment.meteorclient.settings.*;
@@ -61,6 +62,13 @@ public class ScaffoldTHM extends Module {
         .build()
     );
 
+    private final Setting<Boolean> packetPlaceOnce = sgGeneral.add(new BoolSetting.Builder()
+        .name("packet-place-once")
+        .description("Experimental: one packet per block, sent again only once the server says it's still air.")
+        .defaultValue(false)
+        .build()
+    );
+
     private final Setting<Boolean> keepY = sgGeneral.add(new BoolSetting.Builder()
         .name("keep-y")
         .description("Places blocks only at a specific Y value.")
@@ -103,6 +111,7 @@ public class ScaffoldTHM extends Module {
                 continue;
             }
             worked = true;
+            if (packetPlaceOnce.get() && !PacketPlaceTracker.canSend(bPos)) continue;
 
             // Find slot with a block
             FindItemResult item;
@@ -118,6 +127,7 @@ public class ScaffoldTHM extends Module {
             }
 
             mc.player.networkHandler.sendPacket(new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, new BlockHitResult(pos, Direction.getFacing(pos).getOpposite(), bPos, true), 0));
+            if (packetPlaceOnce.get()) PacketPlaceTracker.markSent(bPos, PacketPlaceTracker.DEFAULT_RESEND_TICKS);
 
             InvUtils.swapBack();
         }

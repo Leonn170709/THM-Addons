@@ -1662,11 +1662,6 @@ public class HighwayBuilderTHM extends Module {
     private int adaptiveRateWrites;
     private Boolean speedmineAutoRebreakSnapshot;
 
-    // Packet build sends without client prediction, so a block stays "air" here until the server
-    // answers: without this the same block is re-sent every tick until then.
-    private final Long2LongOpenHashMap packetPlaceSent = new Long2LongOpenHashMap();
-    private final ConcurrentLinkedQueue<Long> packetPlaceUpdates = new ConcurrentLinkedQueue<>();
-
     private int placedTotal;
     private int placeRateSampleTotal;
     private long placeRateSampleTick = Long.MIN_VALUE;
@@ -2493,8 +2488,6 @@ public class HighwayBuilderTHM extends Module {
         resetAdaptivePlacement();
         resetGhostBlockCheck();
         resetSessionSummary();
-        packetPlaceSent.clear();
-        packetPlaceUpdates.clear();
         resetTpsThrottleRuntime();
         clearSafetyRuntime("module-activate");
         mineActionsThisTick = Math.max(1, (int) Math.floor(baseBlocksPerTick()));
@@ -4716,8 +4709,6 @@ public class HighwayBuilderTHM extends Module {
         forwardPlaceCount = 0;
         tickAdaptivePlacement();
         tickAdaptiveMining();
-        if (experimental(packetBuildOnce)) tickPacketPlaceAnswers();
-        else if (!packetPlaceSent.isEmpty()) packetPlaceSent.clear();
         mineActionsThisTick = computeMineActionsThisTick();
         placeActionsThisTick = computePlaceActionsThisTick();
         applyPacketBudget();
@@ -4837,10 +4828,6 @@ public class HighwayBuilderTHM extends Module {
             } else if (event.packet instanceof EntityPositionSyncS2CPacket packet && mc.player != null && packet.id() == mc.player.getId()) {
                 noteDesyncWiggleCorrectionPacket("EntityPositionSyncS2CPacket", packet.id());
             }
-        }
-
-        if (experimental(packetBuildOnce) && event.packet instanceof BlockUpdateS2CPacket p2) {
-            packetPlaceUpdates.add(p2.getPos().asLong());
         }
 
         if (ghostProbeListening && event.packet instanceof BlockUpdateS2CPacket g) {
@@ -7349,7 +7336,7 @@ public class HighwayBuilderTHM extends Module {
      * when the server says so, so the client's world is always the server's - no ghost blocks.
      */
     private boolean placeWithoutPrediction(BlockPos pos, int slot, ItemStack stack) {
-        if (experimental(packetBuildOnce) && packetPlaceAwaitingAnswer(pos)) return false;
+        if (experimental(packetBuildOnce) && !PacketPlaceTracker.canSend(pos)) return false;
         Direction side = BlockUtils.getPlaceSide(pos);
         // offhand-build: place straight from the offhand obsidian instead of swapping the main hand.
         FindItemResult item = (slot == SlotUtils.OFFHAND || placeFromOffhand())
@@ -7376,50 +7363,12 @@ public class HighwayBuilderTHM extends Module {
         }
 
         if (!placed) return false;
-        if (experimental(packetBuildOnce)) packetPlaceSent.put(pos.asLong(), mc.world.getTime());
+        if (experimental(packetBuildOnce)) PacketPlaceTracker.markSent(pos, packetBuildResend.get());
         placeTimer = placeDelay.get();
         count++;
         notePlacement(pos);
         if (renderPlace.get()) placeTrail.add(BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ()));
         return true;
-    }
-
-    private boolean packetPlaceAwaitingAnswer(BlockPos pos) {
-        return packetPlaceSent.containsKey(pos.asLong());
-    }
-
-    /**
-     * A place is only sent again once the server itself says the spot is still air. Re-sending on a
-     * guess makes air-place stack a block on top of the one that did go through.
-     */
-    private void tickPacketPlaceAnswers() {
-        for (Long pos; (pos = packetPlaceUpdates.poll()) != null; ) packetPlaceSent.remove(pos.longValue());
-        if (packetPlaceSent.isEmpty()) return;
-
-        long now = mc.world.getTime();
-        int resend = packetBuildResend.get();
-        List<BlockPos> ask = null;
-        var it = packetPlaceSent.long2LongEntrySet().fastIterator();
-        while (it.hasNext()) {
-            var entry = it.next();
-            BlockPos pos = BlockPos.fromLong(entry.getLongKey());
-            if (!mc.world.getBlockState(pos).isReplaceable()) {
-                it.remove();
-                continue;
-            }
-            if (now - entry.getLongValue() < resend && now >= entry.getLongValue()) continue;
-
-            // Silent nudge: the server answers any in-reach use-on-block with that block's real state.
-            if (ghostProbeHand() == null) {
-                // Nothing safe to nudge with: let it be placed again rather than stalling the row.
-                it.remove();
-                continue;
-            }
-            if (ask == null) ask = new ArrayList<>();
-            ask.add(pos);
-            entry.setValue(now);
-        }
-        if (ask != null) sendGhostProbes(ask);
     }
 
     private void debugStateTransition(State nextState, String reason) {
@@ -12716,7 +12665,7 @@ public class HighwayBuilderTHM extends Module {
                 sessionGhostBlocks++;
                 info("Ghost block behind you, re-placing before moving on.");
             }
-            case TIMEOUT -> sendGhostProbes(ghostProbe.unanswered(now));
+            case TIMEOUT -> PacketPlaceTracker.sendProbes(ghostProbe.unanswered(now));
             default -> {}
         }
         if (ghostProbe.isProbing()) return;
@@ -12740,7 +12689,7 @@ public class HighwayBuilderTHM extends Module {
             }
         }
 
-        if (ghostProbeHand() == null) {
+        if (PacketPlaceTracker.inertHand() == null) {
             if (!ghostProbeNoHandWarned) warning("Ghost block check needs an empty hand, pickaxe or totem; skipping it.");
             ghostProbeNoHandWarned = true;
             ghostProbe.start(behindRow, List.of(), now);
@@ -12748,29 +12697,7 @@ public class HighwayBuilderTHM extends Module {
         }
 
         ghostProbe.start(behindRow, targets, now);
-        sendGhostProbes(targets);
-    }
-
-    private void sendGhostProbes(List<BlockPos> targets) {
-        Hand hand = ghostProbeHand();
-        if (hand == null || mc.getNetworkHandler() == null) return;
-        for (GhostBlockProbe.Probe probe : GhostBlockProbe.plan(targets)) {
-            Direction side = probe.side();
-            Vec3d hit = Vec3d.ofCenter(probe.pos()).add(side.getOffsetX() * 0.5, side.getOffsetY() * 0.5, side.getOffsetZ() * 0.5);
-            // Sequence 0 is never a pending client prediction, so the ack changes nothing client-side.
-            mc.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(hand, new BlockHitResult(hit, side, probe.pos(), false), 0));
-        }
-    }
-
-    /** A hand whose item does nothing when used on a block, so the probe can't place or strip anything. */
-    private Hand ghostProbeHand() {
-        if (isInertProbeStack(mc.player.getOffHandStack())) return Hand.OFF_HAND;
-        if (isInertProbeStack(mc.player.getMainHandStack())) return Hand.MAIN_HAND;
-        return null;
-    }
-
-    private static boolean isInertProbeStack(ItemStack stack) {
-        return stack.isEmpty() || stack.isIn(ItemTags.PICKAXES) || stack.isOf(Items.TOTEM_OF_UNDYING);
+        PacketPlaceTracker.sendProbes(targets);
     }
 
     private double currentForwardProjection() {
