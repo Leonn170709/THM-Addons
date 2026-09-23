@@ -3352,6 +3352,10 @@ public class HighwayBuilderTHM extends Module {
         return state == State.Forward;
     }
 
+    public boolean isActivelyMining() {
+        return normalMining != null || packetMining != null;
+    }
+
     public boolean isInCenterState() {
         return state == State.Center;
     }
@@ -12953,7 +12957,9 @@ public class HighwayBuilderTHM extends Module {
         if (state != State.Forward) return;
 
         // Leftover mine actions go into the rows ahead; out-of-reach blocks are skipped there anyway.
-        if (experimental(mineLookahead) && forwardMineCount < currentMineActionsThisTick()) {
+        if (experimental(mineLookahead)
+            && (activeRow == null || activeRow.mineQueue.isEmpty())
+            && forwardMineCount < currentMineActionsThisTick()) {
             boolean skippedActive = false;
             for (ForwardRowSchedule lookaheadRow : forwardSchedulerRuntime.rows) {
                 if (!skippedActive) { skippedActive = true; continue; }

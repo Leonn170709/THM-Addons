@@ -1750,6 +1750,11 @@ public class THMHwyMonitor extends Module {
             return RecoveryCause.None;
         }
 
+        if (builder.isActivelyMining()) {
+            resetForwardProgressWatch();
+            return RecoveryCause.None;
+        }
+
         double currentProgressCoordinate = projectedForwardCoordinate(mc.player.getX(), mc.player.getZ(), direction);
         if (stallWatchMode != StallWatchMode.Forward || stallWatchDirection != direction) {
             stallWatchMode = StallWatchMode.Forward;
@@ -4125,4 +4130,3 @@ public class THMHwyMonitor extends Module {
         DiagonalNESW
     }
 }
-
