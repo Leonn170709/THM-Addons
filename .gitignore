@@ -52,7 +52,6 @@ updated(1).txt
 /clients
 src/main/java/xyz/thm/addon/modules/BoatNoclipPlus.java
 src/main/java/xyz/thm/addon/modules/MCMapSender.java
-CLAUDE.md
 src/main/java/xyz/thm/addon/modules/SpearTargetPlus.java
 src/main/java/xyz/thm/addon/modules/WebmapModule.java
 src/main/java/xyz/thm/addon/utils/GeneratedApiEndpoints.java
