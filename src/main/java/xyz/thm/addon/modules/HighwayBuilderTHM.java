@@ -177,8 +177,10 @@ public class HighwayBuilderTHM extends Module {
     private static final int STATS_SCREENSHOT_DELAY_MS = 250;
     private static final long STATS_MEMORY_RETRY_RECHECK_MS = 5_000L;
     private static final String THM_DEBUG_LOG_DIR_NAME = "thm";
+    private static final String ALL_DEBUG_FILE_NAME = "thm-debug-all.log";
     private static final String HIGHWAYBUILDER_DEBUG_FILE_NAME = "highwaybuilder-debug.log";
     private static final String RESTOCK_DEBUG_FILE_NAME = "highwaybuilder-restock-debug.log";
+    private static final String ECHEST_DEBUG_FILE_NAME = "highwaybuilder-echest-debug.log";
     private static final String FORWARD_STATS_DEBUG_FILE_NAME = "highwaybuilder-forward-stats-debug.log";
     private static final String FORWARD_SCHEDULER_DEBUG_FILE_NAME = "highwaybuilder-forward-scheduler.log";
     private static final String RECONNECT_DEBUG_FILE_NAME = "thm-reconnect-debug.log";
@@ -202,6 +204,7 @@ public class HighwayBuilderTHM extends Module {
     private static final int RESTOCK_WATCHDOG_SETUP_TIMEOUT_TICKS = 600;
     private static final int RESTOCK_WATCHDOG_TRANSFER_TIMEOUT_TICKS = 300;
     private static final int RESTOCK_WATCHDOG_MINE_ECHESTS_TIMEOUT_TICKS = 1200;
+    private static final int PREDICTIVE_ECHEST_REBREAK_PACKETS = 3;
     private static final int RESTOCK_DUPLICATE_QUEUE_LOG_INTERVAL_TICKS = 100;
     private static final double BLOCKADE_CENTER_TOLERANCE = 0.03;
     private static final int ENCLOSURE_PLACEMENT_CONFIRM_MAX_ATTEMPTS = 3;
@@ -350,7 +353,7 @@ public class HighwayBuilderTHM extends Module {
     public enum EChestBreakMode {
         Speedmine("Speedmine rebreak"),
         InstantRebreak("Instant rebreak"),
-        OnPlace("Instant rebreak on place (experimental)"),
+        OnPlace("Instant rebreak on place"),
         Normal("Normal breaking");
 
         private final String title;
@@ -1160,7 +1163,7 @@ public class HighwayBuilderTHM extends Module {
 
     private final Setting<Boolean> debugLog = sgDebugging.add(new BoolSetting.Builder()
         .name("debug")
-        .description("Logs state transitions and movement input for debugging.")
+        .description("Writes state and movement diagnostics to the debug logs.")
         .defaultValue(false)
         .build()
     );
@@ -1334,7 +1337,7 @@ public class HighwayBuilderTHM extends Module {
     public final Setting<Boolean> noSwapLoadout = sgInventory.add(new BoolSetting.Builder()
         .name("offhand-build")
         .description("Mines with the pickaxe in hand and places obsidian from the offhand, taking over AutoTotem to swap in a totem there at low health or when an enemy is nearby.")
-        .defaultValue(false)
+        .defaultValue(true)
         .onChanged(v -> syncNoSwapAutoTotem())
         .build()
     );
@@ -1386,7 +1389,7 @@ public class HighwayBuilderTHM extends Module {
     public final Setting<EChestBreakMode> echestBreakMode = sgEChests.add(new EnumSetting.Builder<EChestBreakMode>()
         .name("break-mode")
         .description("How a placed ender chest is broken again.")
-        .defaultValue(EChestBreakMode.Speedmine)
+        .defaultValue(EChestBreakMode.OnPlace)
         .visible(() -> mineEnderChests.get() && noSwapLoadout.get())
         .build()
     );
@@ -1413,6 +1416,27 @@ public class HighwayBuilderTHM extends Module {
         .description("Restores your selected slot after a rebreak or chest placement.")
         .defaultValue(true)
         .visible(() -> mineEnderChests.get() && effectiveEChestBreakMode() != EChestBreakMode.Normal)
+        .build()
+    );
+
+    private final Setting<Boolean> predictiveEChestRebreak = sgExperimental.add(new BoolSetting.Builder()
+        .name("predictive-echest-rebreak")
+        .description("Sends extra rebreak packets immediately after placing an e-chest.")
+        .defaultValue(false)
+        .visible(() -> enableExperimental.get()
+            && mineEnderChests.get()
+            && noSwapLoadout.get()
+            && echestBreakMode.get() == EChestBreakMode.OnPlace)
+        .build()
+    );
+
+    private final Setting<Boolean> predictiveEChestReplace = sgEChests.add(new BoolSetting.Builder()
+        .name("predictive-echest-replace")
+        .description("Places the next offhand e-chest immediately after the rebreak packet.")
+        .defaultValue(true)
+        .visible(() -> mineEnderChests.get()
+            && noSwapLoadout.get()
+            && echestBreakMode.get() == EChestBreakMode.OnPlace)
         .build()
     );
 
@@ -1516,9 +1540,9 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    private final Setting<Boolean> restockDebugLog = sgStatistics.add(new BoolSetting.Builder()
+    private final Setting<Boolean> restockDebugLog = sgDebugging.add(new BoolSetting.Builder()
         .name("restock-debug-log")
-        .description("Prints blockade and restock diagnostics.")
+        .description("Writes blockade, restock, and e-chest diagnostics to the debug logs.")
         .defaultValue(false)
         .build()
     );
@@ -1849,6 +1873,10 @@ public class HighwayBuilderTHM extends Module {
     private final LongOpenHashSet restockPacketPlaceTargets = new LongOpenHashSet();
 
     private int debugStateLastAge = -1;
+    private BlockPos eChestDebugTarget;
+    private long eChestDebugLastPlaceNanos;
+    private int eChestDebugCycle, eChestDebugStopAttempts;
+    private boolean eChestDebugLastObservedChest;
     private List<Pattern> signBreakPatterns = Collections.emptyList();
     private int nextAdvertisementIndex;
     private long nextAdvertisementAtTick;
@@ -2338,6 +2366,8 @@ public class HighwayBuilderTHM extends Module {
                 railings.set(true);
                 floor.set(Floor.Replace);
                 noSwapLoadout.set(true);
+                echestBreakMode.set(EChestBreakMode.OnPlace);
+                predictiveEChestReplace.set(true);
                 if (THMUtils.isBaritoneInstalled()) manageThmHwyMonitor.set(true);
                 kitbotEChestRestockKit.set(KitbotEChestRestockKit.Highway);
                 kitbotPickaxeRestockKit.set(KitbotPickaxeRestockKit.Highway);
@@ -2374,6 +2404,8 @@ public class HighwayBuilderTHM extends Module {
                 railings.set(true);
                 floor.set(Floor.Replace);
                 noSwapLoadout.set(true);
+                echestBreakMode.set(EChestBreakMode.OnPlace);
+                predictiveEChestReplace.set(true);
                 if (THMUtils.isBaritoneInstalled()) manageThmHwyMonitor.set(true);
                 kitbotPickaxeRestockKit.set(KitbotPickaxeRestockKit.Pickaxe);
             }
@@ -4845,6 +4877,21 @@ public class HighwayBuilderTHM extends Module {
             ghostProbeUpdates.add(new long[]{g.getPos().asLong(), g.getState().isReplaceable() ? 0 : 1});
         }
 
+        if (restockDebugLog.get()
+            && state == State.MineEnderChests
+            && event.packet instanceof BlockUpdateS2CPacket update
+            && update.getPos().equals(eChestDebugTarget)) {
+            eChestDebug(
+                "server-block-update cycle=%d target=%s block=%s replaceable=%s clientAge=%d sincePlaceMs=%d.",
+                eChestDebugCycle,
+                formatBlockPos(update.getPos()),
+                update.getState().getBlock(),
+                update.getState().isReplaceable(),
+                mc.player == null ? -1 : mc.player.age,
+                eChestDebugElapsedSincePlaceMs()
+            );
+        }
+
         if (sessionSummary.get() && event.packet instanceof PlayerPositionLookS2CPacket) sessionRubberbands.incrementAndGet();
 
         if (adaptivePlacements.get()) {
@@ -4864,8 +4911,48 @@ public class HighwayBuilderTHM extends Module {
     private void onPacketSend(PacketEvent.Send event) {
         if (event.packet instanceof PlayerInteractBlockC2SPacket packet) {
             recordEnclosureInteractPacket(packet);
+            if (restockDebugLog.get() && state == State.MineEnderChests) {
+                BlockHitResult hit = packet.getBlockHitResult();
+                eChestDebug(
+                    "interact-packet cycle=%d hand=%s hitBlock=%s side=%s sequence=%d selectedSlot=%d mainHand=%s x%d offHand=%s x%d clientAge=%d sincePlaceMs=%d.",
+                    eChestDebugCycle,
+                    packet.getHand(),
+                    formatBlockPos(hit.getBlockPos()),
+                    hit.getSide(),
+                    packet.getSequence(),
+                    mc.player == null ? -1 : mc.player.getInventory().getSelectedSlot(),
+                    mc.player == null ? Items.AIR : mc.player.getMainHandStack().getItem(),
+                    mc.player == null ? 0 : mc.player.getMainHandStack().getCount(),
+                    mc.player == null ? Items.AIR : mc.player.getOffHandStack().getItem(),
+                    mc.player == null ? 0 : mc.player.getOffHandStack().getCount(),
+                    mc.player == null ? -1 : mc.player.age,
+                    eChestDebugElapsedSincePlaceMs()
+                );
+            }
         }
         if (mc.world != null && event.packet instanceof PlayerActionC2SPacket a) {
+            if (restockDebugLog.get()
+                && state == State.MineEnderChests
+                && a.getPos().equals(eChestDebugTarget)) {
+                ItemStack mainHand = mc.player == null ? ItemStack.EMPTY : mc.player.getMainHandStack();
+                ItemStack offHand = mc.player == null ? ItemStack.EMPTY : mc.player.getOffHandStack();
+                eChestDebug(
+                    "action-packet cycle=%d attempt=%d action=%s target=%s direction=%s sequence=%d selectedSlot=%d mainHand=%s x%d offHand=%s x%d clientAge=%d sincePlaceMs=%d.",
+                    eChestDebugCycle,
+                    eChestDebugStopAttempts,
+                    a.getAction(),
+                    formatBlockPos(a.getPos()),
+                    a.getDirection(),
+                    a.getSequence(),
+                    mc.player == null ? -1 : mc.player.getInventory().getSelectedSlot(),
+                    mainHand.getItem(),
+                    mainHand.getCount(),
+                    offHand.getItem(),
+                    offHand.getCount(),
+                    mc.player == null ? -1 : mc.player.age,
+                    eChestDebugElapsedSincePlaceMs()
+                );
+            }
             if (adaptiveMining.get()
                 && (a.getAction() == PlayerActionC2SPacket.Action.START_DESTROY_BLOCK || a.getAction() == PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK)) {
                 breakWatch.put(a.getPos().asLong(), new long[]{mc.world.getTime(), 0});
@@ -7217,8 +7304,27 @@ public class HighwayBuilderTHM extends Module {
             swapped = true;
         }
 
+        boolean predictive = experimental(predictiveEChestRebreak)
+            && effectiveEChestBreakMode() == EChestBreakMode.OnPlace;
         boolean swapBack = swapped && silentRebreakSwap.get();
-        sendInstantRebreakPacket(pos, swapBack ? () -> InvUtils.swap(selected, false) : null);
+        int packets = predictive ? PREDICTIVE_ECHEST_REBREAK_PACKETS : 1;
+        for (int packet = 1; packet <= packets; packet++) {
+            eChestDebugStopAttempts++;
+            eChestDebug(
+                "on-place-rebreak-burst target=%s attempt=%d burst=%d/%d clientAge=%d sincePlaceMs=%d.",
+                formatBlockPos(pos),
+                eChestDebugStopAttempts,
+                packet,
+                packets,
+                mc.player.age,
+                eChestDebugElapsedSincePlaceMs()
+            );
+            Runnable afterSend = packet == packets ? () -> {
+                if (placedFromOffhand) sendPredictiveEChestPlacePacket(pos);
+                if (swapBack) InvUtils.swap(selected, false);
+            } : null;
+            sendInstantRebreakPacket(pos, afterSend);
+        }
     }
 
     /**
@@ -7236,6 +7342,31 @@ public class HighwayBuilderTHM extends Module {
         };
         if (rotation.get().mine) Rotations.rotate(Rotations.getYaw(pos), Rotations.getPitch(pos), send);
         else send.run();
+    }
+
+    private void sendPredictiveEChestPlacePacket(BlockPos pos) {
+        if (!predictiveEChestReplace.get()
+            || effectiveEChestBreakMode() != EChestBreakMode.OnPlace
+            || mc.player == null
+            || mc.world == null
+            || mc.interactionManager == null
+            || mc.getNetworkHandler() == null
+            || !offhandHoldsEnderChest()
+            || !mc.world.getWorldBorder().contains(pos)) return;
+
+        RestockTask.RestockSession session = restockTask.getSession();
+        int reserve = session == null ? saveEchests.get() : session.saveEchestsReserve;
+        if (countLooseInventoryEnderChests() <= reserve) return;
+
+        BlockPos support = pos.down();
+        if (mc.world.getBlockState(support).isReplaceable()) return;
+
+        BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(support).add(0.0, 0.5, 0.0), Direction.UP, support, false);
+        ((ClientPlayerInteractionManagerTHMAccessor) mc.interactionManager).thm$sendSequencedPacket(mc.world, sequence ->
+            new PlayerInteractBlockC2SPacket(Hand.OFF_HAND, hit, sequence));
+        mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.OFF_HAND));
+        eChestDebug("predictive-place-packet target=%s support=%s offHandCount=%d clientAge=%d sincePlaceMs=%d.",
+            formatBlockPos(pos), formatBlockPos(support), mc.player.getOffHandStack().getCount(), mc.player.age, eChestDebugElapsedSincePlaceMs());
     }
 
     /** With offhand-build the chests take the offhand while they are being mined, so the pickaxe keeps the main hand. */
@@ -7444,8 +7575,9 @@ public class HighwayBuilderTHM extends Module {
      * when the server says so, so the client's world is always the server's - no ghost blocks.
      */
     private boolean placeWithoutPrediction(BlockPos pos, int slot, ItemStack stack) {
-        if (experimental(packetBuildOnce) && !PacketPlaceTracker.canSend(pos)) return false;
-        Direction side = BlockUtils.getPlaceSide(pos);
+        Direction side = PlacementUtils.getPlaceSide(pos);
+        boolean trackPending = side == null || experimental(packetBuildOnce);
+        if (trackPending && !PacketPlaceTracker.canSend(pos)) return false;
         // offhand-build: place straight from the offhand obsidian instead of swapping the main hand.
         FindItemResult item = (slot == SlotUtils.OFFHAND || placeFromOffhand())
             ? new FindItemResult(SlotUtils.OFFHAND, mc.player.getOffHandStack().getCount())
@@ -7471,7 +7603,7 @@ public class HighwayBuilderTHM extends Module {
         }
 
         if (!placed) return false;
-        if (experimental(packetBuildOnce)) PacketPlaceTracker.markSent(pos, packetBuildResend.get());
+        if (trackPending) PacketPlaceTracker.markSent(pos, experimental(packetBuildOnce) ? packetBuildResend.get() : 3);
         if (isRestockState(state)) restockPacketPlaceTargets.add(pos.asLong());
         count++;
         notePlacement(pos);
@@ -7561,6 +7693,23 @@ public class HighwayBuilderTHM extends Module {
         writeThmDebugLog(HIGHWAYBUILDER_DEBUG_FILE_NAME, formatThmDebugLine(message, args));
     }
 
+    private void eChestDebug(String message, Object... args) {
+        if (!restockDebugLog.get()) return;
+        writeThmDebugLog(ECHEST_DEBUG_FILE_NAME, formatThmDebugLine(message, args));
+    }
+
+    private long eChestDebugElapsedSincePlaceMs() {
+        return eChestDebugLastPlaceNanos == 0L ? -1L : (System.nanoTime() - eChestDebugLastPlaceNanos) / 1_000_000L;
+    }
+
+    private void resetEChestDebug() {
+        eChestDebugTarget = null;
+        eChestDebugLastPlaceNanos = 0L;
+        eChestDebugCycle = 0;
+        eChestDebugStopAttempts = 0;
+        eChestDebugLastObservedChest = false;
+    }
+
     /**
      * ponytail: one throttled "what is the builder doing right now / why is it doing nothing" line.
      * Goes to chat and the debug file, only while debug-log is on. Repeats an unchanged reason every
@@ -7609,10 +7758,11 @@ public class HighwayBuilderTHM extends Module {
         String output = line.endsWith("\n") ? line : line + System.lineSeparator();
         synchronized (THM_DEBUG_LOG_LOCK) {
             try {
-                Path parent = path.getParent();
-                if (parent != null) Files.createDirectories(parent);
-                rotateThmDebugLogIfNeeded(path);
-                Files.writeString(path, output, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                appendThmDebugLog(path, output);
+                if (!ALL_DEBUG_FILE_NAME.equals(fileName)) {
+                    Path allPath = getThmDebugLogPath(ALL_DEBUG_FILE_NAME);
+                    if (allPath != null) appendThmDebugLog(allPath, "[" + fileName + "] " + output);
+                }
             } catch (IOException e) {
                 if (!thmDebugFileErrorLogged) {
                     THMAddon.LOG.warn("Failed to write THM debug log {}: {}", fileName, e.getMessage());
@@ -7620,6 +7770,13 @@ public class HighwayBuilderTHM extends Module {
                 }
             }
         }
+    }
+
+    private void appendThmDebugLog(Path path, String output) throws IOException {
+        Path parent = path.getParent();
+        if (parent != null) Files.createDirectories(parent);
+        rotateThmDebugLogIfNeeded(path);
+        Files.writeString(path, output, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
     }
 
     private void rotateThmDebugLogIfNeeded(Path path) throws IOException {
@@ -14408,6 +14565,18 @@ public class HighwayBuilderTHM extends Module {
                 stopTimerEnabled = false;
                 primed = false;
                 breakRequested = false;
+                b.resetEChestDebug();
+                b.eChestDebug(
+                    "phase-start mode=%s offhandMode=%s mineRotation=%s placeRotation=%s silentSwap=%s targetEchests=%d targetObsidian=%d clientAge=%d.",
+                    b.effectiveEChestBreakMode(),
+                    b.noSwapLoadout.get(),
+                    b.rotation.get().mine,
+                    b.rotation.get().place,
+                    b.silentRebreakSwap.get(),
+                    targetEchestsToBreak,
+                    targetObsidianCount,
+                    b.mc.player.age
+                );
                 if (speedmineRebreakMode && Speedmine.INSTANCE != null) {
                     if (!Speedmine.INSTANCE.isActive()) Speedmine.INSTANCE.toggle();
                     b.applySpeedmineAutoRebreak();
@@ -14475,11 +14644,30 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 BlockPos bp = pos.getBlockPos();
+                if (!bp.equals(b.eChestDebugTarget)) {
+                    b.eChestDebugTarget = bp.toImmutable();
+                    b.eChestDebugLastObservedChest = false;
+                    b.eChestDebug("target cycle=%d target=%s clientAge=%d.", b.eChestDebugCycle, b.formatBlockPos(bp), b.mc.player.age);
+                }
 
                 // Check block state
                 BlockState blockState = b.mc.world.getBlockState(bp);
+                boolean chestVisible = blockState.isOf(Blocks.ENDER_CHEST);
+                if (chestVisible != b.eChestDebugLastObservedChest) {
+                    b.eChestDebug(
+                        "client-block-transition cycle=%d target=%s block=%s chestVisible=%s clientAge=%d sincePlaceMs=%d stopAttempts=%d.",
+                        b.eChestDebugCycle,
+                        b.formatBlockPos(bp),
+                        blockState.getBlock(),
+                        chestVisible,
+                        b.mc.player.age,
+                        b.eChestDebugElapsedSincePlaceMs(),
+                        b.eChestDebugStopAttempts
+                    );
+                    b.eChestDebugLastObservedChest = chestVisible;
+                }
 
-                if (blockState.getBlock() == Blocks.ENDER_CHEST) {
+                if (chestVisible) {
                     if (b.mc.currentScreen instanceof GenericContainerScreen screen) {
                         // wait for the screen to be properly loaded
                         if (screen.getScreenHandler().syncId != b.syncId) return;
@@ -14540,6 +14728,14 @@ public class HighwayBuilderTHM extends Module {
                         if ((breakMode == EChestBreakMode.InstantRebreak || breakMode == EChestBreakMode.OnPlace) && primed) {
                             timeout++;
                             if (timeout > 60) {
+                                b.eChestDebug(
+                                    "rebreak-timeout cycle=%d target=%s attempts=%d clientAge=%d sincePlaceMs=%d; clearing prime.",
+                                    b.eChestDebugCycle,
+                                    b.formatBlockPos(bp),
+                                    b.eChestDebugStopAttempts,
+                                    b.mc.player.age,
+                                    b.eChestDebugElapsedSincePlaceMs()
+                                );
                                 primed = false;
                                 timeout = 0;
                                 return;
@@ -14560,9 +14756,44 @@ public class HighwayBuilderTHM extends Module {
 
                         if (instantRebreak) {
                             if (breakMode == EChestBreakMode.InstantRebreak) rebreakTimer = b.rebreakTimer.get();
-                            boolean swapBack = swappedForRebreak;
-                            b.sendInstantRebreakPacket(bp, swapBack ? () -> InvUtils.swap(selectedSlot, false) : null);
+                            boolean predictive = breakMode == EChestBreakMode.OnPlace && b.experimental(b.predictiveEChestRebreak);
+
+                            int packets = predictive ? PREDICTIVE_ECHEST_REBREAK_PACKETS : 1;
+                            for (int packet = 1; packet <= packets; packet++) {
+                                b.eChestDebugStopAttempts++;
+                                b.eChestDebug(
+                                    "rebreak-request cycle=%d attempt=%d burst=%d/%d mode=%s target=%s toolSlot=%d selectedBefore=%d mainHand=%s x%d clientAge=%d sincePlaceMs=%d.",
+                                    b.eChestDebugCycle,
+                                    b.eChestDebugStopAttempts,
+                                    packet,
+                                    packets,
+                                    breakMode,
+                                    b.formatBlockPos(bp),
+                                    slot,
+                                    selectedSlot,
+                                    b.mc.player.getMainHandStack().getItem(),
+                                    b.mc.player.getMainHandStack().getCount(),
+                                    b.mc.player.age,
+                                    b.eChestDebugElapsedSincePlaceMs()
+                                );
+                                boolean last = packet == packets;
+                                boolean swapBack = swappedForRebreak;
+                                Runnable afterSend = last ? () -> {
+                                    b.sendPredictiveEChestPlacePacket(bp);
+                                    if (swapBack) InvUtils.swap(selectedSlot, false);
+                                } : null;
+                                b.sendInstantRebreakPacket(bp, afterSend);
+                            }
                         } else {
+                            b.eChestDebug(
+                                "normal-break-request cycle=%d mode=%s target=%s toolSlot=%d selectedBefore=%d clientAge=%d.",
+                                b.eChestDebugCycle,
+                                breakMode,
+                                b.formatBlockPos(bp),
+                                slot,
+                                selectedSlot,
+                                b.mc.player.age
+                            );
                             if (selectedSlot != slot) InvUtils.swap(slot, false);
                             if (b.rotation.get().mine) Rotations.rotate(Rotations.getYaw(bp), Rotations.getPitch(bp), () -> BlockUtils.breakBlock(bp, true));
                             else BlockUtils.breakBlock(bp, true);
@@ -14590,6 +14821,21 @@ public class HighwayBuilderTHM extends Module {
                     } else {
                         timeout = 0;
                     }
+                    int nextCycle = b.eChestDebugCycle + 1;
+                    b.eChestDebug(
+                        "place-attempt cycle=%d target=%s fromOffhand=%s slot=%d primed=%s selectedSlot=%d mainHand=%s x%d offHand=%s x%d clientAge=%d.",
+                        nextCycle,
+                        b.formatBlockPos(bp),
+                        fromOffhand,
+                        slot,
+                        primed,
+                        b.mc.player.getInventory().getSelectedSlot(),
+                        b.mc.player.getMainHandStack().getItem(),
+                        b.mc.player.getMainHandStack().getCount(),
+                        b.mc.player.getOffHandStack().getItem(),
+                        b.mc.player.getOffHandStack().getCount(),
+                        b.mc.player.age
+                    );
                     boolean placedEChest;
                     if (fromOffhand) {
                         // Offhand holds the chests, so the pickaxe keeps the main hand: place and mine share the tick.
@@ -14598,7 +14844,34 @@ public class HighwayBuilderTHM extends Module {
                         placedEChest = BlockUtils.place(bp, Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, b.silentRebreakSwap.get());
                     }
 
+                    if (placedEChest) {
+                        b.eChestDebugCycle = nextCycle;
+                        b.eChestDebugStopAttempts = 0;
+                        b.eChestDebugLastPlaceNanos = System.nanoTime();
+                    }
+                    b.eChestDebug(
+                        "place-result cycle=%d target=%s success=%s mode=%s selectedSlot=%d mainHand=%s x%d offHand=%s x%d clientAge=%d.",
+                        nextCycle,
+                        b.formatBlockPos(bp),
+                        placedEChest,
+                        b.effectiveEChestBreakMode(),
+                        b.mc.player.getInventory().getSelectedSlot(),
+                        b.mc.player.getMainHandStack().getItem(),
+                        b.mc.player.getMainHandStack().getCount(),
+                        b.mc.player.getOffHandStack().getItem(),
+                        b.mc.player.getOffHandStack().getCount(),
+                        b.mc.player.age
+                    );
+
                     if (placedEChest && b.effectiveEChestBreakMode() == EChestBreakMode.OnPlace) {
+                        b.eChestDebug(
+                            "on-place-rebreak-request cycle=%d target=%s fromOffhand=%s clientAge=%d sincePlaceMs=%d.",
+                            b.eChestDebugCycle,
+                            b.formatBlockPos(bp),
+                            fromOffhand,
+                            b.mc.player.age,
+                            b.eChestDebugElapsedSincePlaceMs()
+                        );
                         b.sendEChestRebreak(bp, fromOffhand);
                         timeout = 0;
                     }

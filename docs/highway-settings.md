@@ -104,6 +104,7 @@ Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is tempor
 | `packets-per-tick` | `23`, range `4-200`; shown when `packet-budget` is on | Packets one tick may send. |
 | `packet-build-once` | `false`; shown when `packet-build` is on | Experimental: one packet per block instead of one per block per tick. |
 | `packet-build-resend` | `20`, range `2-200`; shown when `packet-build-once` is on | Ticks before asking the server what is at a block it never answered for. |
+| `predictive-echest-rebreak` | `false`; shown for offhand OnPlace rebreak | Sends three STOP packets per tick to try to break each EChest sooner. |
 | `ghost-block-check` | `false`; shown when `check-behind` is on | Has the server confirm the row behind before moving on. |
 
 ### Inventory And Restock
@@ -123,10 +124,11 @@ Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is tempor
 | --- | --- | --- |
 | `mine-ender-chests` | `true` | Mines ender chests to convert them into obsidian. |
 | `save-ender-chests` | `4`, range `4-64` | Loose ender chest reserve to keep in inventory. |
-| `break-mode` | `Speedmine rebreak`; shown when `mine-ender-chests` and `offhand-build` are on | How a placed chest is broken again: `Speedmine rebreak`, `Instant rebreak`, `Instant rebreak on place (experimental)` or `Normal breaking`. |
+| `break-mode` | `Instant rebreak on place`; shown when `mine-ender-chests` and `offhand-build` are on | How a placed chest is broken again: `Speedmine rebreak`, `Instant rebreak`, `Instant rebreak on place` or `Normal breaking`. |
 | `break-mode-no-offhand` | `Speedmine rebreak`; shown when `mine-ender-chests` is on and `offhand-build` is off | Same choice without the on-place mode, which needs the chest in the offhand. |
 | `rebreak-delay` | `0`, slider max `20`; shown for `Instant rebreak` | Ticks between rebreak packets. |
 | `silent-rebreak-swap` | `true`; shown unless the mode is `Normal breaking` | Restores your selected slot after a rebreak or chest placement. |
+| `predictive-echest-replace` | `true`; shown for offhand OnPlace rebreak | Places the next offhand EChest immediately after the rebreak packet. |
 | `use-break-speed-multiplier` | `true`; shown when `mine-ender-chests` is on | Temporarily boosts Timer while mining ender chests. |
 | `break-speed-multiplier` | `1.5`, range `1-3`; shown when the boost is on | How much Timer is boosted. |
 
@@ -210,9 +212,9 @@ Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is tempor
 | `place-delay` | `0`, minimum `0` | Always | Delay in ticks between place actions. |
 | `tps-safety-enclosure` | `true` | Always | Builds a small enclosure during confirmed low or unknown TPS pauses after TPS settling. |
 | `packet-build` | `false` | Always | Every ordinary highway placement — forward rows, legacy-mode rows, liquid fills, corner blocks, restock/KitBot enclosures and ReLevel — goes out as a raw place packet and the client never sets the block itself; it appears only when the server's block update arrives. It removes the per-tick placement cap and automatically enables Packet Limiter on activation. Block-entity containers such as ender chests and shulkers still use normal placement. |
-| `air-place-mode` | `Never`; options `Never`, `Smart`, `Always` | `packet-build` is on | `Never` skips no-face placements, `Smart` packet-air-places only when needed, and `Always` always uses packet air placement. |
+| `air-place-mode` | `Smart`; options `Never`, `Smart`, `Always` | `packet-build` is on | `Never` skips no-face placements, `Smart` packet-air-places only when needed, and `Always` allows air placement. |
 | `packet-build-lookahead` | `true` | `packet-build` is on | Lets Packet Build place blocks from upcoming rows in the same tick. |
-| `packet-build-once` | `false` | `enable-experimental` and `packet-build` are on | Experimental: sends one packet per block. Without it the same block is re-sent every tick until the server answers (about one packet per block per ping tick), which wastes the packet budget. Combine with `air-place-mode` `Never` or `Always` for the two variants. |
+| `packet-build-once` | `false` | `enable-experimental` and `packet-build` are on | Experimental: sends one packet per block. Without it ordinary face placements may be retried every tick; air placements wait for a server reply to avoid stacking blocks. |
 | `packet-build-resend` | `20`, range `2-200` | `packet-build-once` is on | How long to wait before asking the server for that block's real state (a silent use-on-block with an empty hand, pickaxe or totem). The place itself is only repeated once the server says the spot is still air, so air-place can never stack a second block on top. |
 | `silent-forward-place-swap` | `true` | `legacy-mode` is off | Silently swaps to placement blocks for scheduler work, then restores your selected slot. |
 | `silent-forward-tool-swap` | `true` | `legacy-mode` is off | Silently swaps to scheduler mining tools, then restores your selected slot. |
@@ -235,7 +237,7 @@ Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is tempor
 | `search-shulkers` | `true` | Always | Searches shulker contents for usable items. |
 | `Manage-hotbar` | `true` | Always | Automatically sorts the hotbar. |
 | `Anti-drop` | `false` | Always | Prevents dropping items the module considers needed. |
-| `offhand-build` | `false` | Always | Mines with the pickaxe in hand and places your block from the offhand, taking over AutoTotem to swap a totem in there at low health or with an enemy near. While ender chests are being mined the offhand holds the chests instead, so a chest can be placed and mined in the same tick without swapping; the offhand returns to your placement block afterwards. |
+| `offhand-build` | `true` | Always | Mines with the pickaxe in hand and places your block from the offhand, taking over AutoTotem to swap a totem in there at low health or with an enemy near. While ender chests are being mined the offhand holds the chests instead, so a chest can be placed and mined in the same tick without swapping; the offhand returns to your placement block afterwards. |
 | `Anti-hunger` | `true` | Always | Turns Meteor's AntiHunger on while building and off again when it stops. If you already had it on, it is left alone. |
 | `minimum-empty-slots` | `1`, minimum `0`, slider `0-9` | Always | Empty inventory slots to preserve after obsidian mining. |
 
@@ -245,10 +247,11 @@ Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is tempor
 | --- | --- | --- | --- |
 | `mine-ender-chests` | `true` | Always | Mines ender chests to create obsidian. |
 | `save-ender-chests` | `4`, range `4-64` | Always | Loose ender chests to reserve; falling one below this queues restock, and failure to replenish can hard-fail the module. |
-| `break-mode` | `Speedmine rebreak`; options below | `mine-ender-chests` and `offhand-build` are on | Picks one breaking method for the mining cycle. **Speedmine rebreak**: breaks with THM Speedmine, turning its `auto-rebreak` on for the cycle and putting your own setting back afterwards. **Instant rebreak**: after placing a chest, sends a sequenced `STOP_DESTROY_BLOCK` plus a swing (the same shape Meteor's InstantRebreak uses); the server breaks it at once when its stored mining progress for that spot is far enough along, otherwise it records the attempt and finishes the block itself a few ticks later. **Instant rebreak on place (experimental)**: sends the same packet immediately after a successful normal placement, then retries it while the chest remains visible instead of falling back to a normal break on the next tick. With `offhand-build`, the pickaxe stays in the main hand. **Normal breaking**: plain mining, no packet tricks. |
+| `break-mode` | `Instant rebreak on place`; options below | `mine-ender-chests` and `offhand-build` are on | Picks one breaking method for the mining cycle. **Speedmine rebreak**: breaks with THM Speedmine, turning its `auto-rebreak` on for the cycle and putting your own setting back afterwards. **Instant rebreak**: after placing a chest, sends a sequenced `STOP_DESTROY_BLOCK` plus a swing (the same shape Meteor's InstantRebreak uses); the server breaks it at once when its stored mining progress for that spot is far enough along, otherwise it records the attempt and finishes the block itself a few ticks later. **Instant rebreak on place**: sends the same packet immediately after a successful normal placement, then retries it while the chest remains visible instead of falling back to a normal break on the next tick. With `offhand-build`, the pickaxe stays in the main hand. **Normal breaking**: plain mining, no packet tricks. |
 | `break-mode-no-offhand` | `Speedmine rebreak` | `mine-ender-chests` is on, `offhand-build` is off | Same modes as `break-mode` minus **Instant rebreak on place**, which needs the chest in the offhand. It's a separate setting because a select can't hide a single option. |
 | `rebreak-delay` | `0`, slider max `20` | Mode is `Instant rebreak` | Delay in ticks between rebreak packets. |
 | `silent-rebreak-swap` | `true` | Mode is not `Normal breaking` | Restores your previously selected slot after a rebreak packet or a chest placement. |
+| `predictive-echest-replace` | `true` | Offhand OnPlace mode | Places the next offhand EChest immediately after the rebreak packet. |
 | `use-break-speed-multiplier` | `true` | `mine-ender-chests` is on | Temporarily boosts Timer while mining ender chests, then restores the previous Timer state. |
 | `break-speed-multiplier` | `1.5`, range `1-3` | `mine-ender-chests` and `use-break-speed-multiplier` are on | Timer multiplier used during ender chest mining. |
 
@@ -265,6 +268,7 @@ Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is tempor
 | --- | --- | --- | --- |
 | `enable-experimental` | `false` | Always | Master switch for this group: every setting below is ignored (and hidden) while it is off. |
 | `mine-lookahead` | `false` | `enable-experimental` is on | Spends mine actions the active row didn't need on the rows ahead. Blocks out of reach are skipped, so it only runs when the active row is already served. |
+| `predictive-echest-rebreak` | `false` | Experimental enabled, offhand OnPlace mode | Sends three rebreak STOP packets per tick. |
 | `packet-budget` | `false` | `enable-experimental` is on | Caps mine and place actions each tick so their packet cost stays under `packets-per-tick`. Mining is served first; Packet Build gives unused mining capacity to lookahead placement. One mine action always goes through so the builder cannot stall. Counts start+stop per mined block, one use-on-block per placed block, movement, slot swaps, and swing packets unless PaketLimiter filters them. |
 | `packets-per-tick` | `23`, range `4-200` | `packet-budget` is on | The tick's packet allowance. Set it below the server's own limit. |
 
@@ -272,9 +276,10 @@ Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is tempor
 
 | Setting | Default / Range / Options | Visible when | Behavior |
 | --- | --- | --- | --- |
-| `debug` | `false` | Always | Logs state transitions and movement input. |
+| `debug` | `false` | Always | Writes state transitions and movement input to `logs/thm/highwaybuilder-debug.log`. |
 | `forward-scheduler-debug` | `false` | `legacy-mode` is off | Logs active row, queue, boundary, and actionability details for the forward scheduler. |
 | `statistics-debug` | `false` | Always | Logs detailed stats validation decisions for mine/place work. |
+| `restock-debug-log` | `false` | Always | Writes blockade/restock diagnostics to `logs/thm/highwaybuilder-restock-debug.log` and EChest place/rebreak timing to `logs/thm/highwaybuilder-echest-debug.log`. |
 | `session-summary` | `false` | Always | When the builder turns off, prints duration, distance, blocks placed (with average/s), broken, restocks, e-chest refills, rubberbands, adaptive drops and ghost blocks. |
 
 ### THM-HighwayBuilder: Render
@@ -297,11 +302,12 @@ Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is tempor
 | --- | --- | --- | --- |
 | `print-statistics` | `true` | Always | Prints HighwayBuilder statistics in chat when the module disables. |
 | `auto-screenshot-statistics` | `false` | `print-statistics` is on | Captures a proof screenshot shortly after statistics print. |
-| `restock-debug-log` | `false` | Always | Prints detailed blockade and restock diagnostics, including probes and state transitions. |
 | `Send-Status` | `true` | Always | Sends a status update every 5 minutes with digging/paving, axis, name, and API token. |
 | `sends-statistics(Webhook)` | `false` | `print-statistics` is on | Sends HighwayBuilder statistics to a webhook when the module disables. |
 | `webhook` | `MyWebhookInHere` | `print-statistics` and `sends-statistics(Webhook)` are on | Webhook URL used for statistics delivery. |
 | `sends-statistics(API)` | `false` | `print-statistics` is on | Sends statistics to the API when the module disables. |
+
+Every THM debug category also writes to `logs/thm/thm-debug-all.log`, with its source filename on each line. Logs rotate at 100 MB.
 
 ### THM-HighwayBuilder: Notifies
 
