@@ -70,6 +70,14 @@ public final class PacketPlaceTracker {
         INSTANCE.listening = true;
     }
 
+    public static void forget(BlockPos pos) {
+        if (pos == null) return;
+        long key = pos.asLong();
+        INSTANCE.forget(key);
+        INSTANCE.answered.removeIf(answer -> answer == key);
+        INSTANCE.listening = !INSTANCE.sentAt.isEmpty();
+    }
+
     @EventHandler
     private void onReceive(PacketEvent.Receive event) {
         if (!listening) return;

@@ -30,6 +30,10 @@ The first time `HighwayBuilding` or `HighwayDigging` is applied, it starts from 
 
 After that first seed, each profile loads its own saved values rather than reapplying defaults. The `toggle-modules` setting defaults to `true`; when enabled, **Apply Profile** also activates HighwayBuilder if it is currently off.
 
+The tabbed HighwayBuilder screen can also save the current settings as a named custom preset. Each preset is stored as `<Name>.json` under `meteor-client/thm/highway-builder-presets`, loaded when HighwayBuilder is registered during Minecraft startup, and applied from the **Custom preset** selector with its **Apply** button. Imported files are size- and depth-limited and may contain only known HighwayBuilder groups and settings.
+
+Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is temporarily moved into the offhand and the previous item is restored afterwards; otherwise it is moved to the hotbar and placed with the normal main-hand swap. Packet Build sends all currently reachable enclosure blocks in the same tick and clears their tracking/render entries when restocking ends.
+
 ## Quick Cheat Sheet
 
 ### Basic Highway Shape
@@ -95,7 +99,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | Setting | Default / Range | What to change it for |
 | --- | --- | --- |
 | `enable-experimental` | `false` | Master switch: nothing else in this group does anything while it is off. |
-| `packet-budget` | `false` | Caps mining and placing per tick so the tick stays under the server's packet limit. |
+| `packet-budget` | `false` | Caps mining and placing per tick so the tick stays under the server's packet limit; Packet Build gives unused mining capacity to lookahead placement. |
 | `mine-lookahead` | `false` | Mines into upcoming rows with the tick's leftover mine actions. |
 | `packets-per-tick` | `23`, range `4-200`; shown when `packet-budget` is on | Packets one tick may send. |
 | `packet-build-once` | `false`; shown when `packet-build` is on | Experimental: one packet per block instead of one per block per tick. |
@@ -205,7 +209,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | `place-range` | `4.5`, slider max `5.5` | Always | Maximum distance for block placement. |
 | `place-delay` | `0`, minimum `0` | Always | Delay in ticks between place actions. |
 | `tps-safety-enclosure` | `true` | Always | Builds a small enclosure during confirmed low or unknown TPS pauses after TPS settling. |
-| `packet-build` | `false` | Always | Every highway placement — forward rows, legacy-mode rows, liquid fills, corner blocks, blockades and ReLevel — goes out as a raw place packet and the client never sets the block itself; it appears only when the server's block update arrives, so the client's world always matches the server and ghost blocks can't happen. Also removes the per-tick placement cap and automatically enables Packet Limiter on activation. Restock containers (ender chests, shulkers) are still placed the normal way. |
+| `packet-build` | `false` | Always | Every ordinary highway placement — forward rows, legacy-mode rows, liquid fills, corner blocks, restock/KitBot enclosures and ReLevel — goes out as a raw place packet and the client never sets the block itself; it appears only when the server's block update arrives. It removes the per-tick placement cap and automatically enables Packet Limiter on activation. Block-entity containers such as ender chests and shulkers still use normal placement. |
 | `air-place-mode` | `Never`; options `Never`, `Smart`, `Always` | `packet-build` is on | `Never` skips no-face placements, `Smart` packet-air-places only when needed, and `Always` always uses packet air placement. |
 | `packet-build-lookahead` | `true` | `packet-build` is on | Lets Packet Build place blocks from upcoming rows in the same tick. |
 | `packet-build-once` | `false` | `enable-experimental` and `packet-build` are on | Experimental: sends one packet per block. Without it the same block is re-sent every tick until the server answers (about one packet per block per ping tick), which wastes the packet budget. Combine with `air-place-mode` `Never` or `Always` for the two variants. |
@@ -241,7 +245,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | --- | --- | --- | --- |
 | `mine-ender-chests` | `true` | Always | Mines ender chests to create obsidian. |
 | `save-ender-chests` | `4`, range `4-64` | Always | Loose ender chests to reserve; falling one below this queues restock, and failure to replenish can hard-fail the module. |
-| `break-mode` | `Speedmine rebreak`; options below | `mine-ender-chests` and `offhand-build` are on | Picks one breaking method for the mining cycle. **Speedmine rebreak**: breaks with THM Speedmine, turning its `auto-rebreak` on for the cycle and putting your own setting back afterwards. **Instant rebreak**: after placing a chest, sends a sequenced `STOP_DESTROY_BLOCK` plus a swing (the same shape Meteor's InstantRebreak uses); the server breaks it at once when its stored mining progress for that spot is far enough along, otherwise it records the attempt and finishes the block itself a few ticks later. **Instant rebreak on place (experimental)**: same packet, but sent in the same tick as the placement instead of the next one; with `offhand-build` the chest comes from the offhand and the pickaxe never leaves the main hand, so no slot swap happens at all. **Normal breaking**: plain mining, no packet tricks. |
+| `break-mode` | `Speedmine rebreak`; options below | `mine-ender-chests` and `offhand-build` are on | Picks one breaking method for the mining cycle. **Speedmine rebreak**: breaks with THM Speedmine, turning its `auto-rebreak` on for the cycle and putting your own setting back afterwards. **Instant rebreak**: after placing a chest, sends a sequenced `STOP_DESTROY_BLOCK` plus a swing (the same shape Meteor's InstantRebreak uses); the server breaks it at once when its stored mining progress for that spot is far enough along, otherwise it records the attempt and finishes the block itself a few ticks later. **Instant rebreak on place (experimental)**: sends the same packet immediately after a successful normal placement, then retries it while the chest remains visible instead of falling back to a normal break on the next tick. With `offhand-build`, the pickaxe stays in the main hand. **Normal breaking**: plain mining, no packet tricks. |
 | `break-mode-no-offhand` | `Speedmine rebreak` | `mine-ender-chests` is on, `offhand-build` is off | Same modes as `break-mode` minus **Instant rebreak on place**, which needs the chest in the offhand. It's a separate setting because a select can't hide a single option. |
 | `rebreak-delay` | `0`, slider max `20` | Mode is `Instant rebreak` | Delay in ticks between rebreak packets. |
 | `silent-rebreak-swap` | `true` | Mode is not `Normal breaking` | Restores your previously selected slot after a rebreak packet or a chest placement. |
@@ -261,7 +265,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 | --- | --- | --- | --- |
 | `enable-experimental` | `false` | Always | Master switch for this group: every setting below is ignored (and hidden) while it is off. |
 | `mine-lookahead` | `false` | `enable-experimental` is on | Spends mine actions the active row didn't need on the rows ahead. Blocks out of reach are skipped, so it only runs when the active row is already served. |
-| `packet-budget` | `false` | `enable-experimental` is on | Caps mine and place actions each tick so their packet cost stays under `packets-per-tick`. Mining is served first (you cannot place into rock), and one mine action always goes through so the builder can't stall. Counts start+stop per mined block, one use-on-block per placed block, movement, slot swaps, and the swing packets unless PaketLimiter filters them. |
+| `packet-budget` | `false` | `enable-experimental` is on | Caps mine and place actions each tick so their packet cost stays under `packets-per-tick`. Mining is served first; Packet Build gives unused mining capacity to lookahead placement. One mine action always goes through so the builder cannot stall. Counts start+stop per mined block, one use-on-block per placed block, movement, slot swaps, and swing packets unless PaketLimiter filters them. |
 | `packets-per-tick` | `23`, range `4-200` | `packet-budget` is on | The tick's packet allowance. Set it below the server's own limit. |
 
 ### THM-HighwayBuilder: Debugging

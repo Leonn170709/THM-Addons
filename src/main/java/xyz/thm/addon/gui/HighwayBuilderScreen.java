@@ -22,6 +22,7 @@ import meteordevelopment.meteorclient.gui.widgets.WLabel;
 import meteordevelopment.meteorclient.gui.widgets.containers.WHorizontalList;
 import meteordevelopment.meteorclient.gui.widgets.containers.WTable;
 import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
+import meteordevelopment.meteorclient.gui.widgets.input.WDropdown;
 import meteordevelopment.meteorclient.gui.widgets.input.WTextBox;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import meteordevelopment.meteorclient.settings.Setting;
@@ -31,8 +32,10 @@ import meteordevelopment.meteorclient.systems.modules.Modules;
 import xyz.thm.addon.hud.HighwayHud;
 import xyz.thm.addon.modules.HighwayBuilderTHM;
 import xyz.thm.addon.system.THMSystem;
+import xyz.thm.addon.utils.HighwayPresetManager;
 import xyz.thm.addon.utils.TimeFormat;
 
+import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -53,6 +56,8 @@ public class HighwayBuilderScreen extends WindowScreen {
 
     // Kept between openings so you come back to the tab you were using.
     private static String activeTab = BASICS;
+    private static String selectedCustomPreset = "";
+    private static String presetStatus = "";
 
     private final HighwayBuilderTHM module;
     private final Map<String, Settings> tabs = new LinkedHashMap<>();
@@ -158,6 +163,30 @@ public class HighwayBuilderScreen extends WindowScreen {
                 reload();
             };
         }
+
+        List<String> customPresets = HighwayPresetManager.names();
+        if (!customPresets.isEmpty()) {
+            if (!customPresets.contains(selectedCustomPreset)) selectedCustomPreset = customPresets.getFirst();
+            WHorizontalList customProfiles = add(theme.horizontalList()).expandX().widget();
+            customProfiles.add(theme.label("Custom preset:"));
+            WDropdown<String> presetSelect = customProfiles
+                .add(theme.dropdown(customPresets.toArray(String[]::new), selectedCustomPreset))
+                .expandX()
+                .widget();
+            presetSelect.action = () -> selectedCustomPreset = presetSelect.get();
+            WButton applyPreset = customProfiles.add(theme.button("Apply")).widget();
+            applyPreset.action = () -> {
+                selectedCustomPreset = presetSelect.get();
+                presetStatus = HighwayPresetManager.apply(selectedCustomPreset)
+                    ? "Applied " + selectedCustomPreset + "."
+                    : "Preset not found.";
+                reload();
+            };
+        }
+
+        WButton savePresetButton = add(theme.button("Save current preset")).expandX().widget();
+        savePresetButton.action = () -> mc.setScreen(new PresetNameScreen());
+        if (!presetStatus.isEmpty()) add(theme.label(presetStatus)).expandX();
 
         add(theme.horizontalSeparator()).expandX();
 
@@ -265,5 +294,38 @@ public class HighwayBuilderScreen extends WindowScreen {
         rateLabel.set(String.format(Locale.ROOT, "mine %.1f/tick   place %.1f/tick   restock %s",
             module.currentMineRate(), module.currentPlaceRate(),
             TimeFormat.eta(HighwayHud.getRestockBlocks(), module.getMeasuredPlacesPerSecond())));
+    }
+
+    private final class PresetNameScreen extends WindowScreen {
+        private WTextBox name;
+        private WLabel error;
+
+        private PresetNameScreen() {
+            super(HighwayBuilderScreen.this.theme, "Save HighwayBuilder preset");
+        }
+
+        @Override
+        public void initWidgets() {
+            name = add(theme.textBox("", "preset name")).minWidth(260).expandX().widget();
+            name.setFocused(true);
+            error = add(theme.label("")).expandX().widget();
+
+            WHorizontalList actions = add(theme.horizontalList()).expandX().widget();
+            WButton save = actions.add(theme.button("Save")).expandX().widget();
+            actions.add(theme.button("Cancel")).expandX().widget().action = this::close;
+            save.action = this::save;
+            enterAction = this::save;
+        }
+
+        private void save() {
+            try {
+                selectedCustomPreset = HighwayPresetManager.save(name.get());
+                presetStatus = "Saved " + selectedCustomPreset + ".json.";
+                HighwayBuilderScreen.this.reload();
+                close();
+            } catch (IOException e) {
+                error.set(e.getMessage() == null ? "Could not save preset." : e.getMessage());
+            }
+        }
     }
 }

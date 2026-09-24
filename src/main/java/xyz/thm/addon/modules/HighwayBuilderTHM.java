@@ -1632,6 +1632,8 @@ public class HighwayBuilderTHM extends Module {
     private int forwardMineCount, forwardPlaceCount;
     private int forwardLatchedPlaceSlot = -1;
     private int forwardLatchedMineSlot = -1;
+    private boolean restockEnclosureOffhandActive;
+    private int restockEnclosureOffhandSwapSlot = -1;
     private int mineActionsThisTick;
     private final double[] mineFractionCarry = new double[1];
     private int borerPackets;
@@ -1844,6 +1846,7 @@ public class HighwayBuilderTHM extends Module {
     public DoubleMineBlock normalMining, packetMining;
     private final LongOpenHashSet renderPosSet = new LongOpenHashSet();
     final LongOpenHashSet placeTrail = new LongOpenHashSet();
+    private final LongOpenHashSet restockPacketPlaceTargets = new LongOpenHashSet();
 
     private int debugStateLastAge = -1;
     private List<Pattern> signBreakPatterns = Collections.emptyList();
@@ -2549,6 +2552,8 @@ public class HighwayBuilderTHM extends Module {
     @Override
     public void onDeactivate() {
         if (sessionSummary.get()) printSessionSummary();
+        restoreRestockEnclosureOffhand();
+        clearRestockPacketPlaceTargets();
         restoreSpeedmineAutoRebreak();
         KitbotFrontend.removeLifecycleListener(kitbotRestockLifecycleListener);
         if (input != null) input.stop();
@@ -3273,6 +3278,7 @@ public class HighwayBuilderTHM extends Module {
         int attempted = 0;
 
         for (BlockPos target : enclosureTargets) {
+            if (count >= currentPlaceActionsThisTick()) break;
             if (target.equals(base) || target.equals(base.up())) continue;
 
             BlockState state = mc.world.getBlockState(target);
@@ -4759,6 +4765,7 @@ public class HighwayBuilderTHM extends Module {
         } else {
             if (debugLog.get()) tickDebug("idle: restock watchdog owns the tick (restock=%s)", restockTask.activeSummary());
         }
+        pruneStalePlaceTrailBehindPlayer();
         maybeLogMovement();
 
         if (breakTimer > 0) breakTimer--;
@@ -5593,6 +5600,10 @@ public class HighwayBuilderTHM extends Module {
             clearKitbotCenteringRuntime("kitbot-order-exit:" + stateName(state));
             resetKitbotOrderCenterVerificationRuntime("kitbot-order-exit:" + stateName(state));
         }
+        if (isRestockEnclosureOffhandState(previousState) && !isRestockEnclosureOffhandState(state)) {
+            restoreRestockEnclosureOffhand();
+        }
+        if (isRestockState(previousState) && !isRestockState(state)) clearRestockPacketPlaceTargets();
         if (previousState == State.Forward && state != State.Forward) {
             clearForwardLatchedPlaceSlot();
             clearForwardLatchedMineSlot();
@@ -6670,14 +6681,25 @@ public class HighwayBuilderTHM extends Module {
     private void applyPacketBudget() {
         if (!experimental(packetBudget)) return;
 
-        int swing = swingPacketCost();
-        int overhead = 1 + ((silentForwardPlaceSwap.get() || silentForwardToolSwap.get()) ? 2 : 0);
-        PacketBudget.Plan plan = PacketBudget.split(
-            packetBudgetLimit.get(), overhead, 2 + swing, 1 + swing, mineActionsThisTick, placeActionsThisTick);
+        PacketBudget.Plan plan = packetBudgetPlan(mineActionsThisTick, placeActionsThisTick);
 
         if (plan.mine() < mineActionsThisTick || plan.place() < placeActionsThisTick) sessionBudgetClipped++;
         mineActionsThisTick = plan.mine();
         placeActionsThisTick = plan.place();
+    }
+
+    private PacketBudget.Plan packetBudgetPlan(int mineActions, int placeActions) {
+        int swing = swingPacketCost();
+        int overhead = 1 + ((silentForwardPlaceSwap.get() || silentForwardToolSwap.get()) ? 2 : 0);
+        return PacketBudget.split(packetBudgetLimit.get(), overhead, 2 + swing, 1 + swing, mineActions, placeActions);
+    }
+
+    private void reclaimUnusedMinePacketBudgetForPlacing() {
+        if (!packetBuild.get() || !experimental(packetBudget)) return;
+        if (packetBorer.get() || normalMining != null || packetMining != null) return;
+
+        int reclaimedPlaceActions = packetBudgetPlan(forwardMineCount, Integer.MAX_VALUE).place();
+        placeActionsThisTick = Math.max(placeActionsThisTick, reclaimedPlaceActions);
     }
 
     private int swingPacketCost() {
@@ -6968,9 +6990,9 @@ public class HighwayBuilderTHM extends Module {
     private boolean tryPlaceBlock(BlockPos pos, int slot, boolean rotate) {
         if (!isWithinConfiguredForwardRange(pos)) return false;
         boolean offhand = slot == SlotUtils.OFFHAND;
+        ItemStack stack = offhand ? mc.player.getOffHandStack() : mc.player.getInventory().getStack(slot);
 
-        if (packetBuild.get()) {
-            ItemStack stack = offhand ? mc.player.getOffHandStack() : mc.player.getInventory().getStack(slot);
+        if (shouldPacketPlace(stack)) {
             return stack.getItem() instanceof BlockItem && placeWithoutPrediction(pos, slot, stack);
         }
 
@@ -6991,6 +7013,12 @@ public class HighwayBuilderTHM extends Module {
         if (renderPlace.get()) placeTrail.add(BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ()));
 
         return true;
+    }
+
+    private boolean shouldPacketPlace(ItemStack stack) {
+        return packetBuild.get()
+            && stack.getItem() instanceof BlockItem blockItem
+            && !blockItem.getBlock().getDefaultState().hasBlockEntity();
     }
 
     private void clearForwardLatchedPlaceSlot() {
@@ -7088,7 +7116,7 @@ public class HighwayBuilderTHM extends Module {
         if (!(stack.getItem() instanceof BlockItem blockItem)) return false;
         if (!BlockUtils.canPlaceBlock(pos, true, blockItem.getBlock())) return false;
 
-        if (packetBuild.get()) {
+        if (shouldPacketPlace(stack)) {
             return tryForwardPlaceBlockPacket(pos, slot, stack);
         }
 
@@ -7189,8 +7217,8 @@ public class HighwayBuilderTHM extends Module {
             swapped = true;
         }
 
-        sendInstantRebreakPacket(pos);
-        if (swapped && silentRebreakSwap.get()) InvUtils.swap(selected, false);
+        boolean swapBack = swapped && silentRebreakSwap.get();
+        sendInstantRebreakPacket(pos, swapBack ? () -> InvUtils.swap(selected, false) : null);
     }
 
     /**
@@ -7198,12 +7226,13 @@ public class HighwayBuilderTHM extends Module {
      * server's progress isn't there yet - it then records the attempt and finishes the block itself a
      * few ticks later ({@code ServerPlayerInteractionManager.update}), which is still far quicker.
      */
-    private void sendInstantRebreakPacket(BlockPos pos) {
+    private void sendInstantRebreakPacket(BlockPos pos, Runnable afterSend) {
         Direction direction = BlockUtils.getDirection(pos);
         Runnable send = () -> {
             ((ClientPlayerInteractionManagerTHMAccessor) mc.interactionManager).thm$sendSequencedPacket(mc.world, sequence ->
                 new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, direction, sequence));
             mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
+            if (afterSend != null) afterSend.run();
         };
         if (rotation.get().mine) Rotations.rotate(Rotations.getYaw(pos), Rotations.getPitch(pos), send);
         else send.run();
@@ -7282,6 +7311,8 @@ public class HighwayBuilderTHM extends Module {
                 FindItemResult totem = InvUtils.find(Items.TOTEM_OF_UNDYING);
                 if (totem.found()) InvUtils.move().from(totem.slot()).toOffhand();
             }
+        } else if (isRestockEnclosureOffhandState(state)) {
+            findRestockEnclosureNetherrackSlot();
         } else if (wantsEnderChestOffhand()) {
             if (!offhandHoldsEnderChest()) {
                 FindItemResult chest = InvUtils.find(stack -> stack.getItem() == Items.ENDER_CHEST, 0, 35);
@@ -7306,6 +7337,79 @@ public class HighwayBuilderTHM extends Module {
         }
 
         ensurePickaxeInMainHand();
+    }
+
+    private boolean isRestockEnclosureOffhandState(State candidate) {
+        return candidate == State.PlaceShulkerBlockade
+            || candidate == State.PlaceEChestBlockade
+            || candidate == State.KitbotOrder;
+    }
+
+    private int findRestockEnclosureNetherrackSlot() {
+        if (mc.player == null) return -1;
+        if (!noSwapLoadout.get()) {
+            restoreRestockEnclosureOffhand();
+            return State.Forward.findAndMoveToHotbar(this, stack -> stack.isOf(Items.NETHERRACK), false);
+        }
+        if (noSwapShouldHoldTotem()) return -1;
+        if (mc.player.getOffHandStack().isOf(Items.NETHERRACK)) {
+            restockEnclosureOffhandActive = true;
+            return SlotUtils.OFFHAND;
+        }
+        if (restockEnclosureOffhandActive) return -1;
+
+        FindItemResult netherrack = InvUtils.find(stack -> stack.isOf(Items.NETHERRACK), 0, 35);
+        if (!netherrack.found()) return -1;
+
+        restockEnclosureOffhandActive = true;
+        restockEnclosureOffhandSwapSlot = netherrack.slot();
+        InvUtils.move().from(netherrack.slot()).toOffhand();
+        return mc.player.getOffHandStack().isOf(Items.NETHERRACK) ? SlotUtils.OFFHAND : -1;
+    }
+
+    private void restoreRestockEnclosureOffhand() {
+        if (!restockEnclosureOffhandActive || mc.player == null) {
+            restockEnclosureOffhandActive = false;
+            restockEnclosureOffhandSwapSlot = -1;
+            return;
+        }
+
+        if (restockEnclosureOffhandSwapSlot >= 0) {
+            if (mc.player.getInventory().getStack(restockEnclosureOffhandSwapSlot).isEmpty()) {
+                if (!mc.player.getOffHandStack().isEmpty()) {
+                    InvUtils.move().fromOffhand().to(restockEnclosureOffhandSwapSlot);
+                }
+            } else {
+                InvUtils.move().from(restockEnclosureOffhandSwapSlot).toOffhand();
+            }
+        }
+
+        restockEnclosureOffhandActive = false;
+        restockEnclosureOffhandSwapSlot = -1;
+    }
+
+    private void clearRestockPacketPlaceTargets() {
+        for (long key : restockPacketPlaceTargets) {
+            PacketPlaceTracker.forget(BlockPos.fromLong(key));
+            placeTrail.remove(key);
+        }
+        restockPacketPlaceTargets.clear();
+    }
+
+    private void pruneStalePlaceTrailBehindPlayer() {
+        if (placeTrail.isEmpty()) return;
+
+        double playerProjection = currentForwardProjection();
+        var iterator = placeTrail.longIterator();
+        while (iterator.hasNext()) {
+            long key = iterator.nextLong();
+            BlockPos pos = BlockPos.fromLong(key);
+            if (projectedForwardCoordinate(pos) >= playerProjection || isWithinConfiguredForwardRange(pos)) continue;
+
+            iterator.remove();
+            restockPacketPlaceTargets.remove(key);
+            PacketPlaceTracker.forget(pos);
+        }
     }
 
     /** Feature: while packet-build paving, rest with obsidian actually held in the main hand. */
@@ -7368,7 +7472,7 @@ public class HighwayBuilderTHM extends Module {
 
         if (!placed) return false;
         if (experimental(packetBuildOnce)) PacketPlaceTracker.markSent(pos, packetBuildResend.get());
-        placeTimer = placeDelay.get();
+        if (isRestockState(state)) restockPacketPlaceTargets.add(pos.asLong());
         count++;
         notePlacement(pos);
         if (renderPlace.get()) placeTrail.add(BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ()));
@@ -12969,6 +13073,8 @@ public class HighwayBuilderTHM extends Module {
             if (state != State.Forward) return;
         }
 
+        reclaimUnusedMinePacketBudgetForPlacing();
+
         // In paket mode, skip place work while mine tasks are pending so the UpdateSelectedSlot
         // packet (pickaxe switch) and the mine packets are not dropped by the packet rate limiter.
         // offhand-build has no slot switch to protect (pickaxe stays in the main hand, obsidian in the
@@ -13606,7 +13712,7 @@ public class HighwayBuilderTHM extends Module {
                     : BlockUtils.place(pos.toImmutable(), Hand.MAIN_HAND, slot, b.rotation.get().place, 100, true, true, true);
                 if (placed) {
                     if (b.renderPlace.get()) b.placeTrail.add(BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ()));
-                    b.placeTimer = b.placeDelay.get();
+                    if (!b.packetBuild.get()) b.placeTimer = b.placeDelay.get();
                 }
             }
 
@@ -14202,7 +14308,7 @@ public class HighwayBuilderTHM extends Module {
             protected void tick(HighwayBuilderTHM b) {
                 if (!b.ensureCenteredBeforeBlockadePlacement(this)) return;
 
-                int slot = findBlocksToPlacePrioritizeTrash(b);
+                int slot = findRestockEnclosureBlockSlot(b);
                 if (slot == -1) {
                     continueWithPartialBlockade(b, MineEnderChests);
                     return;
@@ -14429,8 +14535,9 @@ public class HighwayBuilderTHM extends Module {
                         int selectedSlot = b.mc.player.getInventory().getSelectedSlot();
                         boolean swappedForRebreak = false;
 
+                        EChestBreakMode breakMode = b.effectiveEChestBreakMode();
                         boolean instantRebreak = false;
-                        if (b.effectiveEChestBreakMode() == EChestBreakMode.InstantRebreak && primed) {
+                        if ((breakMode == EChestBreakMode.InstantRebreak || breakMode == EChestBreakMode.OnPlace) && primed) {
                             timeout++;
                             if (timeout > 60) {
                                 primed = false;
@@ -14438,7 +14545,7 @@ public class HighwayBuilderTHM extends Module {
                                 return;
                             }
 
-                            if (rebreakTimer > 0) {
+                            if (breakMode == EChestBreakMode.InstantRebreak && rebreakTimer > 0) {
                                 rebreakTimer--;
                                 return;
                             }
@@ -14452,9 +14559,9 @@ public class HighwayBuilderTHM extends Module {
                         }
 
                         if (instantRebreak) {
-                            rebreakTimer = b.rebreakTimer.get();
-                            b.sendInstantRebreakPacket(bp);
-                            if (swappedForRebreak) InvUtils.swap(selectedSlot, false);
+                            if (breakMode == EChestBreakMode.InstantRebreak) rebreakTimer = b.rebreakTimer.get();
+                            boolean swapBack = swappedForRebreak;
+                            b.sendInstantRebreakPacket(bp, swapBack ? () -> InvUtils.swap(selectedSlot, false) : null);
                         } else {
                             if (selectedSlot != slot) InvUtils.swap(slot, false);
                             if (b.rotation.get().mine) Rotations.rotate(Rotations.getYaw(bp), Rotations.getPitch(bp), () -> BlockUtils.breakBlock(bp, true));
@@ -14483,16 +14590,16 @@ public class HighwayBuilderTHM extends Module {
                     } else {
                         timeout = 0;
                     }
+                    boolean placedEChest;
                     if (fromOffhand) {
                         // Offhand holds the chests, so the pickaxe keeps the main hand: place and mine share the tick.
-                        BlockUtils.place(bp, Hand.OFF_HAND, b.mc.player.getInventory().getSelectedSlot(), b.rotation.get().place, 0, true, true, false);
+                        placedEChest = BlockUtils.place(bp, Hand.OFF_HAND, b.mc.player.getInventory().getSelectedSlot(), b.rotation.get().place, 0, true, true, false);
                     } else {
-                        BlockUtils.place(bp, Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, b.silentRebreakSwap.get());
+                        placedEChest = BlockUtils.place(bp, Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, b.silentRebreakSwap.get());
                     }
 
-                    if (b.effectiveEChestBreakMode() == EChestBreakMode.OnPlace) {
+                    if (placedEChest && b.effectiveEChestBreakMode() == EChestBreakMode.OnPlace) {
                         b.sendEChestRebreak(bp, fromOffhand);
-                        primed = false;
                         timeout = 0;
                     }
                 }
@@ -15178,7 +15285,9 @@ public class HighwayBuilderTHM extends Module {
             }
 
             private boolean ensureRequiredBlocks(HighwayBuilderTHM b, KitbotFootprint target, String label, FailureMode failureMode) {
-                if (b.handlePendingEnclosurePlacementConfirmation(KitbotOrder, () ->
+                boolean packetPlacement = b.packetBuild.get();
+                boolean waitingForPackets = false;
+                if (!packetPlacement && b.handlePendingEnclosurePlacementConfirmation(KitbotOrder, () ->
                     failKitbotOrder(
                         b,
                         "Unable to complete the " + label + ": placement at " + b.formatBlockPos(b.pendingEnclosurePlacementConfirmPos) + " did not confirm after centering.",
@@ -15194,6 +15303,7 @@ public class HighwayBuilderTHM extends Module {
                     if (b.isSatisfiedKitbotStructureBlock(state, type)) {
                         continue;
                     }
+                    waitingForPackets = true;
 
                     if (state.getBlock() == Blocks.OBSIDIAN) {
                         failKitbotOrder(b, "Obsidian is blocking a required " + type.name().toLowerCase(Locale.ROOT) + " block for the " + label + ".", failureMode);
@@ -15216,7 +15326,7 @@ public class HighwayBuilderTHM extends Module {
                         return true;
                     }
 
-                    if (b.placeTimer > 0) return true;
+                    if (b.placeTimer > 0 || b.count >= b.currentPlaceActionsThisTick()) return true;
 
                     BlockPos centerTarget = b.enclosureCenterTargetForState(KitbotOrder);
                     if (b.isPlayerHitboxBlockingBlock(pos)) {
@@ -15235,7 +15345,7 @@ public class HighwayBuilderTHM extends Module {
                         return true;
                     }
 
-                    if (!b.consumeEnclosurePlaceCredit()) {
+                    if (!packetPlacement && !b.consumeEnclosurePlaceCredit()) {
                         if (b.restockDebugLog.get()) {
                             b.restockDebug("KitbotOrder paused: enclosure placement throttle credit=%d/%d before placing %s block at %s while reconciling the %s.",
                                 b.enclosurePlaceCreditTenths,
@@ -15248,7 +15358,13 @@ public class HighwayBuilderTHM extends Module {
                         return true;
                     }
 
-                    if (BlockUtils.place(pos, Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, true)) {
+                    boolean placed = packetPlacement
+                        ? b.tryPlaceBlock(pos, slot, b.rotation.get().place)
+                        : BlockUtils.place(pos, slot == SlotUtils.OFFHAND ? Hand.OFF_HAND : Hand.MAIN_HAND,
+                            slot == SlotUtils.OFFHAND ? b.mc.player.getInventory().getSelectedSlot() : slot,
+                            b.rotation.get().place, 0, true, true, true);
+                    if (placed) {
+                        if (packetPlacement) continue;
                         b.placeTimer = b.placeDelay.get();
                         b.startEnclosurePlacementConfirmation(KitbotOrder, pos, centerTarget, type, label);
                         if (b.restockDebugLog.get()) {
@@ -15269,7 +15385,7 @@ public class HighwayBuilderTHM extends Module {
                     return true;
                 }
 
-                return false;
+                return waitingForPackets;
             }
 
             private boolean breakBlockingBlock(HighwayBuilderTHM b, BlockPos pos, BlockState state, String label, FailureMode failureMode) {
@@ -15314,11 +15430,7 @@ public class HighwayBuilderTHM extends Module {
             }
 
             private int findKitbotBlockSlot(HighwayBuilderTHM b) {
-                int slot = findPreferredTrashBlockToHotbar(b, false);
-
-                if (slot != -1) return slot;
-
-                return findAndMoveToHotbar(b, itemStack -> itemStack.getItem() instanceof BlockItem blockItem && b.blocksToPlace.get().contains(blockItem.getBlock()), false);
+                return b.findRestockEnclosureNetherrackSlot();
             }
 
             private void finishSuccessfulKitbotHandoff(HighwayBuilderTHM b) {
@@ -17121,7 +17233,7 @@ public class HighwayBuilderTHM extends Module {
             protected void tick(HighwayBuilderTHM b) {
                 if (!b.ensureCenteredBeforeBlockadePlacement(this)) return;
 
-                int slot = findBlocksToPlacePrioritizeTrash(b);
+                int slot = findRestockEnclosureBlockSlot(b);
                 if (slot == -1) {
                     b.restockDebug("PlaceShulkerBlockade.tick could not find a block slot for blockade placement.");
                     continueWithPartialBlockade(b, Restock);
@@ -17456,6 +17568,7 @@ public class HighwayBuilderTHM extends Module {
             boolean finishedPlacing = false;
             int scannedTargets = 0;
             boolean throttleEnclosurePlacement = this == PlaceShulkerBlockade || this == PlaceEChestBlockade;
+            boolean packetEnclosurePlacement = throttleEnclosurePlacement && b.packetBuild.get();
             boolean retryEnclosurePlacement = false;
             // Double-chest: this one blockade column is built as an ender chest instead of obsidian.
             BlockPos doubleChestPos = throttleEnclosurePlacement ? b.doubleChestBlockadePos(this) : null;
@@ -17469,7 +17582,7 @@ public class HighwayBuilderTHM extends Module {
                 b.logRestockBlockadeProbe(b.stateName(this), it);
             }
 
-            if (throttleEnclosurePlacement && b.handlePendingEnclosurePlacementConfirmation(this, () ->
+            if (throttleEnclosurePlacement && !packetEnclosurePlacement && b.handlePendingEnclosurePlacementConfirmation(this, () ->
                 b.error("Unable to complete restock blockade: placement at " + b.formatBlockPos(b.pendingEnclosurePlacementConfirmPos) + " did not confirm after centering.")
             )) return;
 
@@ -17529,7 +17642,7 @@ public class HighwayBuilderTHM extends Module {
                     continue;
                 }
 
-                if (throttleEnclosurePlacement && !b.consumeEnclosurePlaceCredit()) {
+                if (throttleEnclosurePlacement && !packetEnclosurePlacement && !b.consumeEnclosurePlaceCredit()) {
                     if (b.restockDebugLog.get()) {
                         b.restockDebug("%s paused: enclosure placement throttle credit=%d/%d before attempting %s.",
                             b.stateName(this),
@@ -17566,6 +17679,11 @@ public class HighwayBuilderTHM extends Module {
 
                 if (placedThisTick) {
                     if (throttleEnclosurePlacement) {
+                        if (packetEnclosurePlacement) {
+                            placed = true;
+                            if (lastTarget) finishedPlacing = true;
+                            continue;
+                        }
                         b.startEnclosurePlacementConfirmation(this, targetPos, b.enclosureCenterTargetForState(this), null, b.stateName(this));
                         placed = true;
                         return;
@@ -17613,6 +17731,7 @@ public class HighwayBuilderTHM extends Module {
             }
 
             if (throttleEnclosurePlacement) {
+                if (packetEnclosurePlacement && placed) return;
                 if (retryEnclosurePlacement) return;
                 if (finishedPlacing || scannedTargets == 0 || !placed) b.setState(nextState);
                 return;
@@ -17960,6 +18079,11 @@ public class HighwayBuilderTHM extends Module {
 
             return slot != -1 ? slot : findBlocksToPlace(b);
         }
+
+        protected int findRestockEnclosureBlockSlot(HighwayBuilderTHM b) {
+            return b.findRestockEnclosureNetherrackSlot();
+        }
+
     }
 
     private interface MBPIterator extends Iterator<MBlockPos>, Iterable<MBlockPos> {
@@ -18710,7 +18834,7 @@ public class HighwayBuilderTHM extends Module {
 
                 @Override
                 public int placementsPerTick(HighwayBuilderTHM b) {
-                    return 1;
+                    return b.packetBuild.get() ? b.currentPlaceActionsThisTick() : 1;
                 }
             };
         }
@@ -19205,7 +19329,7 @@ public class HighwayBuilderTHM extends Module {
 
                 @Override
                 public int placementsPerTick(HighwayBuilderTHM b) {
-                    return 1;
+                    return b.packetBuild.get() ? b.currentPlaceActionsThisTick() : 1;
                 }
             };
         }

@@ -67,6 +67,15 @@ class PacketBudgetTest {
     }
 
     @Test
+    void unusedMiningCapacityCanBeReclaimedForPlacing() {
+        Plan reserved = PacketBudget.split(23, 3, 3, 2, 7, Integer.MAX_VALUE);
+        Plan actual = PacketBudget.split(23, 3, 3, 2, 2, Integer.MAX_VALUE);
+
+        assertEquals(1, reserved.place());
+        assertEquals(7, actual.place());
+    }
+
+    @Test
     void swingPacketsHalveThePlaceCount() {
         // Same budget, but each action also sends a swing: mine 3, place 2.
         Plan plan = PacketBudget.split(23, 3, 3, 2, 7, 99);
