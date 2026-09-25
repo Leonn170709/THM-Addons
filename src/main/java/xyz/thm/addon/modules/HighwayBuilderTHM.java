@@ -254,6 +254,7 @@ public class HighwayBuilderTHM extends Module {
     private static final double DUG_EXCAVATED_RATIO = 1.0;
     private static final double DUG_OBSIDIAN_FLOOR_MAX_RATIO = 0.05;
     private static final DateTimeFormatter STATS_SCREENSHOT_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss").withZone(ZoneId.systemDefault());
+    private static final String THM_DEBUG_SESSION_DIR_NAME = STATS_SCREENSHOT_TIME_FORMAT.format(Instant.now());
     private static final SecureRandom STATS_RANDOM = new SecureRandom();
 
     private boolean suppressThmHwyMonitorSync;
@@ -7743,6 +7744,7 @@ public class HighwayBuilderTHM extends Module {
         return mc.runDirectory.toPath()
             .resolve("logs")
             .resolve(THM_DEBUG_LOG_DIR_NAME)
+            .resolve(THM_DEBUG_SESSION_DIR_NAME)
             .resolve(fileName);
     }
 

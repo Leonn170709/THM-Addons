@@ -275,10 +275,10 @@ Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is tempor
 
 | Setting | Default / Range / Options | Visible when | Behavior |
 | --- | --- | --- | --- |
-| `debug` | `false` | Always | Writes state transitions and movement input to `logs/thm/highwaybuilder-debug.log`. |
+| `debug` | `false` | Always | Writes state transitions and movement input to `logs/thm/<start-time>/highwaybuilder-debug.log`. |
 | `forward-scheduler-debug` | `false` | `legacy-mode` is off | Logs active row, queue, boundary, and actionability details for the forward scheduler. |
 | `statistics-debug` | `false` | Always | Logs detailed stats validation decisions for mine/place work. |
-| `restock-debug-log` | `false` | Always | Writes blockade/restock diagnostics to `logs/thm/highwaybuilder-restock-debug.log` and EChest place/rebreak timing to `logs/thm/highwaybuilder-echest-debug.log`. |
+| `restock-debug-log` | `false` | Always | Writes blockade/restock diagnostics to `logs/thm/<start-time>/highwaybuilder-restock-debug.log` and EChest place/rebreak timing to `logs/thm/<start-time>/highwaybuilder-echest-debug.log`. |
 | `session-summary` | `false` | Always | When the builder turns off, prints duration, distance, blocks placed (with average/s), broken, restocks, e-chest refills, rubberbands, adaptive drops and ghost blocks. |
 
 ### THM-HighwayBuilder: Render
@@ -306,7 +306,7 @@ Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is tempor
 | `webhook` | `MyWebhookInHere` | `print-statistics` and `sends-statistics(Webhook)` are on | Webhook URL used for statistics delivery. |
 | `sends-statistics(API)` | `false` | `print-statistics` is on | Sends statistics to the API when the module disables. |
 
-Every THM debug category also writes to `logs/thm/thm-debug-all.log`, with its source filename on each line. Logs rotate at 100 MB.
+Every THM debug category also writes to `logs/thm/<start-time>/thm-debug-all.log`, with its source filename on each line. The start-time folder uses local `yyyy-MM-dd_HH.mm.ss` and is created when the first log line is written. Existing logs stay in `logs/thm/`. Logs rotate at 100 MB.
 
 ### THM-HighwayBuilder: Notifies
 
