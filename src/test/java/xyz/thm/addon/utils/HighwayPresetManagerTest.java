@@ -6,10 +6,15 @@
 
 package xyz.thm.addon.utils;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonParser;
 import net.minecraft.nbt.NbtCompound;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -31,6 +36,36 @@ class HighwayPresetManagerTest {
     void presetNameCannotEscapeItsDirectory() {
         assertEquals("MyPreset", HighwayPresetManager.safeName(" My/Preset "));
         assertEquals("", HighwayPresetManager.safeName(".."));
+    }
+
+    @Test
+    void movedSettingsFromOlderPresetsKeepTheirValues(@TempDir Path temp) throws IOException {
+        String old = """
+            {"version":1,"settings":{"groups":[
+              {"name":"Experimental","settings":[
+                {"name":"mine-lookahead","value":0},
+                {"name":"predictive-echest-replace","value":1}
+              ]},
+              {"name":"Digging","settings":[]},
+              {"name":"Ender Chests","settings":[]}
+            ]}}
+            """;
+
+        Path preset = temp.resolve("old.json");
+        Files.writeString(preset, old);
+        HighwayPresetManager.persistMigratedPreset(preset, HighwayPresetManager.decode(old));
+        assertEquals(old, Files.readString(temp.resolve("old.json.pre-migration.bak")));
+
+        JsonArray groups = JsonParser.parseString(Files.readString(preset))
+            .getAsJsonObject().getAsJsonObject("settings").getAsJsonArray("groups");
+
+        assertEquals(0, groups.get(0).getAsJsonObject().getAsJsonArray("settings").size());
+        assertEquals("mine-lookahead", groups.get(1).getAsJsonObject().getAsJsonArray("settings")
+            .get(0).getAsJsonObject().get("name").getAsString());
+        assertEquals(0, groups.get(1).getAsJsonObject().getAsJsonArray("settings")
+            .get(0).getAsJsonObject().get("value").getAsInt());
+        assertEquals("predictive-echest-replace", groups.get(2).getAsJsonObject().getAsJsonArray("settings")
+            .get(0).getAsJsonObject().get("name").getAsString());
     }
 
     @Test

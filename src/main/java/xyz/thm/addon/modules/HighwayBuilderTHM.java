@@ -50,6 +50,7 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
+import net.minecraft.sound.SoundCategory;
 import xyz.thm.addon.mixin.accessor.ClientPlayerInteractionManagerTHMAccessor;
 import xyz.thm.addon.utils.RenderUtilsTHM;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
@@ -94,6 +95,7 @@ import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
+
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
@@ -1006,6 +1008,13 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
+    private final Setting<Boolean> mineLookahead = sgDigging.add(new BoolSetting.Builder()
+        .name("mine-lookahead")
+        .description("Mines into upcoming rows with the tick's leftover mine actions.")
+        .defaultValue(true)
+        .build()
+    );
+
     // Paving
 
     public final Setting<List<Block>> blocksToPlace = sgPaving.add(new BlockListSetting.Builder()
@@ -1084,14 +1093,6 @@ public class HighwayBuilderTHM extends Module {
         .range(4, 200)
         .sliderRange(8, 40)
         .visible(packetBudget::get)
-        .build()
-    );
-
-    private final Setting<Boolean> mineLookahead = sgExperimental.add(new BoolSetting.Builder()
-        .name("mine-lookahead")
-        .description("Mines into upcoming rows with the tick's leftover mine actions.")
-        .defaultValue(false)
-        .visible(enableExperimental::get)
         .build()
     );
 
@@ -1336,7 +1337,7 @@ public class HighwayBuilderTHM extends Module {
 
     public final Setting<Boolean> noSwapLoadout = sgInventory.add(new BoolSetting.Builder()
         .name("offhand-build")
-        .description("Mines with the pickaxe in hand and places obsidian from the offhand, taking over AutoTotem to swap in a totem there at low health or when an enemy is nearby.")
+        .description("Mines with the pickaxe in hand and places obsidian from the offhand, taking over AutoTotem and Offhand while active.")
         .defaultValue(true)
         .onChanged(v -> syncNoSwapAutoTotem())
         .build()
@@ -1876,6 +1877,7 @@ public class HighwayBuilderTHM extends Module {
     private BlockPos eChestDebugTarget;
     private long eChestDebugLastPlaceNanos;
     private int eChestDebugCycle, eChestDebugStopAttempts;
+    private int eChestObservedBreaks, eChestObsidianBaseline = -1, eChestObsidianPeak;
     private boolean eChestDebugLastObservedChest;
     private List<Pattern> signBreakPatterns = Collections.emptyList();
     private int nextAdvertisementIndex;
@@ -7708,6 +7710,9 @@ public class HighwayBuilderTHM extends Module {
         eChestDebugCycle = 0;
         eChestDebugStopAttempts = 0;
         eChestDebugLastObservedChest = false;
+        eChestObservedBreaks = 0;
+        eChestObsidianBaseline = -1;
+        eChestObsidianPeak = 0;
     }
 
     /**
@@ -13218,7 +13223,7 @@ public class HighwayBuilderTHM extends Module {
         if (state != State.Forward) return;
 
         // Leftover mine actions go into the rows ahead; out-of-reach blocks are skipped there anyway.
-        if (experimental(mineLookahead)
+        if (mineLookahead.get()
             && (activeRow == null || activeRow.mineQueue.isEmpty())
             && forwardMineCount < currentMineActionsThisTick()) {
             boolean skippedActive = false;
@@ -14587,8 +14592,8 @@ public class HighwayBuilderTHM extends Module {
             @Override
             protected void tick(HighwayBuilderTHM b) {
                 if (stopTimerEnabled) {
-                    if (stopTimer > 0) stopTimer--;
-                    else completeAndReturnToAnchor(b);
+                    b.restockTask.refreshSessionProgress();
+                    if (b.restockTask.isTargetSatisfied() || stopTimer-- <= 0) completeAndReturnToAnchor(b);
 
                     return;
                 }
@@ -14618,7 +14623,7 @@ public class HighwayBuilderTHM extends Module {
                 // Check for obsidian count
                 int obsidianCount = 0;
 
-                for (Entity entity : b.mc.world.getOtherEntities(b.mc.player, new Box(pos.x, pos.y, pos.z, pos.x + 1, pos.y + 2, pos.z + 1))) {
+                for (Entity entity : b.mc.world.getOtherEntities(b.mc.player, new Box(pos.x, pos.y, pos.z, pos.x + 1, pos.y + 2, pos.z + 1).expand(2))) {
                     if (entity instanceof ItemEntity itemEntity && itemEntity.getStack().getItem() == Items.OBSIDIAN) {
                         obsidianCount += itemEntity.getStack().getCount();
                     }
@@ -14633,13 +14638,26 @@ public class HighwayBuilderTHM extends Module {
                     b.restockWatchdog.markProgress("mine-echests-obsidian-progress");
                 }
                 lastObservedObsidianCount = obsidianCount;
+                if (b.eChestObsidianBaseline < 0) b.eChestObsidianBaseline = obsidianCount;
+                b.eChestObsidianPeak = Math.max(b.eChestObsidianPeak, obsidianCount);
+                int observedBreaks = (b.eChestObsidianPeak - b.eChestObsidianBaseline) / 8;
+                if (observedBreaks > b.eChestObservedBreaks) {
+                    BlockPos chestPos = pos.getBlockPos();
+                    for (int i = b.eChestObservedBreaks; i < observedBreaks; i++) {
+                        b.mc.world.playSound(b.mc.player, chestPos.getX() + 0.5, chestPos.getY() + 0.5, chestPos.getZ() + 0.5,
+                            Blocks.ENDER_CHEST.getDefaultState().getSoundGroup().getBreakSound(), SoundCategory.BLOCKS, 1, 1);
+                    }
+                    b.eChestObservedBreaks = observedBreaks;
+                    b.eChestDebug("obsidian-break-progress breaks=%d obsidian=%d target=%d.",
+                        observedBreaks, obsidianCount, targetObsidianCount);
+                }
 
                 if (obsidianCount >= targetObsidianCount) {
                     if (b.restockTask.getSession() != null && b.restockTask.getSession().getRemainingObsidianItems() > targetEchestsToBreak * 8) {
                         b.restockTask.getSession().markGreatestAvailable();
                     }
                     stopTimerEnabled = true;
-                    stopTimer = 12;
+                    stopTimer = 40;
                     return;
                 }
 
@@ -14810,7 +14828,7 @@ public class HighwayBuilderTHM extends Module {
                     if (slot == -1 || countItem(b, stack -> stack.getItem().equals(Items.ENDER_CHEST)) <= minimumRemainingEChests) {
                         b.restockTask.markCurrentSourceExhausted(RestockTask.SourcePhase.MineEnderChests);
                         stopTimerEnabled = true;
-                        stopTimer = 12;
+                        stopTimer = 40;
                         return;
                     }
 
@@ -14889,7 +14907,12 @@ public class HighwayBuilderTHM extends Module {
                     returnAnchorSaved = false;
                 }
 
-                b.completeRestockTaskAndContinue();
+                if (b.restockTask.isCurrentTaskSuccessful()) {
+                    b.completeRestockTaskAndContinue();
+                } else {
+                    b.restockTask.markCurrentSourceExhausted(RestockTask.SourcePhase.MineEnderChests);
+                    b.setState(Restock, Restock);
+                }
             }
         },
 
@@ -16027,7 +16050,9 @@ public class HighwayBuilderTHM extends Module {
                     } else {
                         sourceItemPredicate = itemStack -> itemStack.getItem() == Items.ENDER_CHEST;
                         sourceLabel = "ender_chest";
-                        slot = findAndMoveToHotbar(b, sourceItemPredicate, false);
+                        slot = b.noSwapLoadout.get() && b.offhandHoldsEnderChest()
+                            ? SlotUtils.OFFHAND
+                            : findAndMoveToHotbar(b, sourceItemPredicate, false);
                         if (slot == -1) {
                             if (b.restockDebugLog.get()) {
                                 b.restockDebug("Restock.start could not move an ender chest item to hotbar for restock source selection.");
@@ -16086,11 +16111,13 @@ public class HighwayBuilderTHM extends Module {
                     );
                 }
                 else if (slot >= 0) {
-                    ItemStack hotbarStack = b.mc.player.getInventory().getStack(slot);
-                    b.restockDebug("Restock.start selected source=%s, hotbar slot %d now holds %s, ready=%s.",
+                    ItemStack sourceStack = slot == SlotUtils.OFFHAND
+                        ? b.mc.player.getOffHandStack()
+                        : b.mc.player.getInventory().getStack(slot);
+                    b.restockDebug("Restock.start selected source=%s, slot %d now holds %s, ready=%s.",
                         sourceLabel,
                         slot,
-                        hotbarStack.getItem(),
+                        sourceStack.getItem(),
                         isSelectedRestockSourceReady(b)
                     );
                 }
@@ -16363,7 +16390,8 @@ public class HighwayBuilderTHM extends Module {
                             b.restockDebug("Restock.tick waiting for source item before container placement. source=%s hotbarSlot=%d currentItem=%s retry=%d/%d",
                                 sourceLabel,
                                 slot,
-                                slot >= 0 && slot < 9 ? b.mc.player.getInventory().getStack(slot).getItem() : Items.AIR,
+                                slot == SlotUtils.OFFHAND ? b.mc.player.getOffHandStack().getItem()
+                                    : slot >= 0 && slot < 9 ? b.mc.player.getInventory().getStack(slot).getItem() : Items.AIR,
                                 sourceReadyRetries,
                                 SOURCE_READY_MAX_RETRIES
                             );
@@ -16378,7 +16406,9 @@ public class HighwayBuilderTHM extends Module {
                         }
 
                         sourceReadyRetries = 0;
-                        if (!BlockUtils.place(blockPos, Hand.MAIN_HAND, slot, b.rotation.get().place, 0, true, true, true)
+                        if (!BlockUtils.place(blockPos, slot == SlotUtils.OFFHAND ? Hand.OFF_HAND : Hand.MAIN_HAND,
+                            slot == SlotUtils.OFFHAND ? b.mc.player.getInventory().getSelectedSlot() : slot,
+                            b.rotation.get().place, 0, true, true, true)
                             && b.restockDebugLog.get()) {
                             b.restockDebug("Restock.tick did not place source=%s at %s this tick; waiting for the next world probe.",
                                 sourceLabel,
@@ -17473,8 +17503,9 @@ public class HighwayBuilderTHM extends Module {
             }
 
             private boolean isSelectedRestockSourceReady(HighwayBuilderTHM b) {
-                if (slot < 0 || slot >= 9) return false;
                 if (sourceItemPredicate == null) return false;
+                if (slot == SlotUtils.OFFHAND) return sourceItemPredicate.test(b.mc.player.getOffHandStack());
+                if (slot < 0 || slot >= 9) return false;
                 return sourceItemPredicate.test(b.mc.player.getInventory().getStack(slot));
             }
 
@@ -21123,6 +21154,8 @@ public class HighwayBuilderTHM extends Module {
                 ItemStack stack = b.mc.player.getInventory().getStack(i);
                 if (predicate.test(stack)) count += stack.getCount();
             }
+            ItemStack offhand = b.mc.player.getOffHandStack();
+            if (predicate.test(offhand)) count += offhand.getCount();
             return count;
         }
 

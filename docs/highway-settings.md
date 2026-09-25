@@ -100,7 +100,6 @@ Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is tempor
 | --- | --- | --- |
 | `enable-experimental` | `false` | Master switch: nothing else in this group does anything while it is off. |
 | `packet-budget` | `false` | Caps mining and placing per tick so the tick stays under the server's packet limit; Packet Build gives unused mining capacity to lookahead placement. |
-| `mine-lookahead` | `false` | Mines into upcoming rows with the tick's leftover mine actions. |
 | `packets-per-tick` | `23`, range `4-200`; shown when `packet-budget` is on | Packets one tick may send. |
 | `packet-build-once` | `false`; shown when `packet-build` is on | Experimental: one packet per block instead of one per block per tick. |
 | `packet-build-resend` | `20`, range `2-200`; shown when `packet-build-once` is on | Ticks before asking the server what is at a block it never answered for. |
@@ -202,6 +201,7 @@ Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is tempor
 | `ignore-signs` | `false` | Always | Preserves signs by not mining them. |
 | `break-advertisement-signs` | `true` | `ignore-signs` is off | Only breaks signs that look like advertisements or invites. |
 | `packet-borer` | `false` | Always | Sends instant-break packets around the full highway shape every tick, similar to Packet Build for placing. |
+| `mine-lookahead` | `true` | Always | Spends unused mine actions on reachable blocks in upcoming rows. |
 
 ### THM-HighwayBuilder: Paving
 
@@ -237,7 +237,7 @@ Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is tempor
 | `search-shulkers` | `true` | Always | Searches shulker contents for usable items. |
 | `Manage-hotbar` | `true` | Always | Automatically sorts the hotbar. |
 | `Anti-drop` | `false` | Always | Prevents dropping items the module considers needed. |
-| `offhand-build` | `true` | Always | Mines with the pickaxe in hand and places your block from the offhand, taking over AutoTotem to swap a totem in there at low health or with an enemy near. While ender chests are being mined the offhand holds the chests instead, so a chest can be placed and mined in the same tick without swapping; the offhand returns to your placement block afterwards. |
+| `offhand-build` | `true` | Always | Mines with the pickaxe in hand and places your block from the offhand. AutoTotem is paused and Meteor Offhand cannot swap the slot while building; the builder puts a totem there at low health or with an enemy near. While ender chests are being mined the offhand holds the chests instead, so a chest can be placed and mined in the same tick without swapping; the offhand returns to your placement block afterwards. |
 | `Anti-hunger` | `true` | Always | Turns Meteor's AntiHunger on while building and off again when it stops. If you already had it on, it is left alone. |
 | `minimum-empty-slots` | `1`, minimum `0`, slider `0-9` | Always | Empty inventory slots to preserve after obsidian mining. |
 
@@ -267,7 +267,6 @@ Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is tempor
 | Setting | Default / Range | Shown when | What it does |
 | --- | --- | --- | --- |
 | `enable-experimental` | `false` | Always | Master switch for this group: every setting below is ignored (and hidden) while it is off. |
-| `mine-lookahead` | `false` | `enable-experimental` is on | Spends mine actions the active row didn't need on the rows ahead. Blocks out of reach are skipped, so it only runs when the active row is already served. |
 | `predictive-echest-rebreak` | `false` | Experimental enabled, offhand OnPlace mode | Sends three rebreak STOP packets per tick. |
 | `packet-budget` | `false` | `enable-experimental` is on | Caps mine and place actions each tick so their packet cost stays under `packets-per-tick`. Mining is served first; Packet Build gives unused mining capacity to lookahead placement. One mine action always goes through so the builder cannot stall. Counts start+stop per mined block, one use-on-block per placed block, movement, slot swaps, and swing packets unless PaketLimiter filters them. |
 | `packets-per-tick` | `23`, range `4-200` | `packet-budget` is on | The tick's packet allowance. Set it below the server's own limit. |

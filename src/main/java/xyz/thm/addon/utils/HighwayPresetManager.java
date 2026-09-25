@@ -8,6 +8,7 @@ package xyz.thm.addon.utils;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -49,6 +50,8 @@ public final class HighwayPresetManager {
     private static final Map<String, NbtCompound> PRESETS = new LinkedHashMap<>();
     private static HighwayBuilderTHM module;
 
+    private record DecodedPreset(NbtCompound settings, boolean migrated) {}
+
     private HighwayPresetManager() {}
 
     public static void initialize(HighwayBuilderTHM highwayBuilder) {
@@ -85,19 +88,8 @@ public final class HighwayPresetManager {
 
         Files.createDirectories(directory());
         Path target = directory().resolve(name + ".json");
-        Path temporary = Files.createTempFile(directory(), "." + name + "-", ".tmp");
         NbtCompound settings = module.settings.toTag().copy();
-
-        try {
-            Files.writeString(temporary, encode(settings), StandardCharsets.UTF_8);
-            try {
-                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } finally {
-            Files.deleteIfExists(temporary);
-        }
+        writePreset(target, settings);
 
         PRESETS.put(name, settings);
         sortPresets();
@@ -126,22 +118,77 @@ public final class HighwayPresetManager {
     }
 
     static NbtCompound decode(String json) throws IOException {
-        return decode(json, false);
+        return decodePreset(json, false).settings();
     }
 
-    private static NbtCompound decode(String json, boolean validateModuleSettings) throws IOException {
+    private static DecodedPreset decodePreset(String json, boolean validateModuleSettings) throws IOException {
         try {
             JsonObject root = parseRoot(json);
-            JsonElement settingsJson = root.get("settings");
-            if (validateModuleSettings) validateModuleSettings(settingsJson.getAsJsonObject());
+            JsonObject settingsJson = root.getAsJsonObject("settings");
+            boolean migrated = moveLegacySetting(settingsJson, "mine-lookahead", "Digging");
+            migrated |= moveLegacySetting(settingsJson, "predictive-echest-replace", "Ender Chests");
+            if (validateModuleSettings) validateModuleSettings(settingsJson);
             NbtElement settings = JsonOps.INSTANCE.convertTo(NbtOps.INSTANCE, settingsJson);
             if (!(settings instanceof NbtCompound compound)) throw new IOException("Settings must be an object.");
-            return compound;
+            return new DecodedPreset(compound, migrated);
         } catch (IOException e) {
             throw e;
         } catch (RuntimeException e) {
             throw new IOException("Invalid preset JSON.", e);
         }
+    }
+
+    private static boolean moveLegacySetting(JsonObject settings, String settingName, String targetName) {
+        if (!(settings.get("groups") instanceof JsonArray groups)) return false;
+
+        JsonObject source = null;
+        JsonObject target = null;
+        for (JsonElement element : groups) {
+            if (!(element instanceof JsonObject group)) continue;
+            JsonElement name = group.get("name");
+            if (name == null || !name.isJsonPrimitive() || !name.getAsJsonPrimitive().isString()) continue;
+            if (name.getAsString().equals("Experimental")) source = group;
+            if (name.getAsString().equals(targetName)) target = group;
+        }
+        if (source == null || !(source.get("settings") instanceof JsonArray sourceSettings)) return false;
+
+        for (int i = 0; i < sourceSettings.size(); i++) {
+            JsonElement element = sourceSettings.get(i);
+            if (!(element instanceof JsonObject setting)
+                || !setting.has("name")
+                || !settingName.equals(setting.get("name").getAsString())) continue;
+            if (target == null) {
+                target = new JsonObject();
+                target.addProperty("name", targetName);
+                groups.add(target);
+            }
+            if (!target.has("settings")) target.add("settings", new JsonArray());
+            else if (!(target.get("settings") instanceof JsonArray)) return false;
+            sourceSettings.remove(i);
+            target.getAsJsonArray("settings").add(setting);
+            return true;
+        }
+        return false;
+    }
+
+    private static void writePreset(Path target, NbtCompound settings) throws IOException {
+        Path temporary = Files.createTempFile(target.getParent(), "." + target.getFileName() + "-", ".tmp");
+        try {
+            Files.writeString(temporary, encode(settings), StandardCharsets.UTF_8);
+            try {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException ignored) {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+    }
+
+    static void persistMigratedPreset(Path path, NbtCompound settings) throws IOException {
+        Path backup = path.resolveSibling(path.getFileName() + ".pre-migration.bak");
+        if (!Files.exists(backup, LinkOption.NOFOLLOW_LINKS)) Files.copy(path, backup);
+        writePreset(path, settings);
     }
 
     private static JsonObject parseRoot(String json) throws IOException {
@@ -286,7 +333,16 @@ public final class HighwayPresetManager {
 
         try {
             if (Files.size(path) > MAX_JSON_BYTES) throw new IOException("Preset JSON is too large.");
-            PRESETS.put(name, decode(Files.readString(path, StandardCharsets.UTF_8), true));
+            DecodedPreset decoded = decodePreset(Files.readString(path, StandardCharsets.UTF_8), true);
+            PRESETS.put(name, decoded.settings());
+            if (decoded.migrated()) {
+                try {
+                    persistMigratedPreset(path, decoded.settings());
+                    THMAddon.LOG.info("Migrated HighwayBuilder preset {}.", fileName);
+                } catch (IOException e) {
+                    THMAddon.LOG.warn("Could not write migrated HighwayBuilder preset {}: {}", fileName, e.getMessage());
+                }
+            }
         } catch (IOException e) {
             THMAddon.LOG.warn("Failed to load HighwayBuilder preset {}: {}", fileName, e.getMessage());
         }
