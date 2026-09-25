@@ -32,7 +32,7 @@ After that first seed, each profile loads its own saved values rather than reapp
 
 The tabbed HighwayBuilder screen can also save the current settings as a named custom preset. Each preset is stored as `<Name>.json` under `meteor-client/thm/highway-builder-presets`, loaded when HighwayBuilder is registered during Minecraft startup, and applied from the **Custom preset** selector with its **Apply** button. Imported files are size- and depth-limited and may contain only known HighwayBuilder groups and settings.
 
-Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is temporarily moved into the offhand and the previous item is restored afterwards; otherwise it is moved to the hotbar and placed with the normal main-hand swap. Packet Build sends all currently reachable enclosure blocks in the same tick and clears their tracking/render entries when restocking ends.
+Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is temporarily moved into the offhand and the previous item is restored afterwards; otherwise it is moved to the hotbar and placed with the normal main-hand swap. Enclosure blocks are placed normally, one at a time, even when Packet Build is enabled.
 
 ## Quick Cheat Sheet
 
@@ -211,7 +211,7 @@ Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is tempor
 | `place-range` | `4.5`, slider max `5.5` | Always | Maximum distance for block placement. |
 | `place-delay` | `0`, minimum `0` | Always | Delay in ticks between place actions. |
 | `tps-safety-enclosure` | `true` | Always | Builds a small enclosure during confirmed low or unknown TPS pauses after TPS settling. |
-| `packet-build` | `false` | Always | Every ordinary highway placement — forward rows, legacy-mode rows, liquid fills, corner blocks, restock/KitBot enclosures and ReLevel — goes out as a raw place packet and the client never sets the block itself; it appears only when the server's block update arrives. It removes the per-tick placement cap and automatically enables Packet Limiter on activation. Block-entity containers such as ender chests and shulkers still use normal placement. |
+| `packet-build` | `false` | Always | Ordinary highway placements use raw place packets and appear only after the server's block update. Restock/KitBot enclosures and block-entity containers use normal placement. It removes the per-tick placement cap for highway paving and automatically enables Packet Limiter on activation. |
 | `air-place-mode` | `Smart`; options `Never`, `Smart`, `Always` | `packet-build` is on | `Never` skips no-face placements, `Smart` packet-air-places only when needed, and `Always` allows air placement. |
 | `packet-build-lookahead` | `true` | `packet-build` is on | Lets Packet Build place blocks from upcoming rows in the same tick. |
 | `packet-build-once` | `false` | `enable-experimental` and `packet-build` are on | Experimental: sends one packet per block. Without it ordinary face placements may be retried every tick; air placements wait for a server reply to avoid stacking blocks. |
