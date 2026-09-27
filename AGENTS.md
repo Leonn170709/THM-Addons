@@ -127,9 +127,9 @@ Shadertoy.
 
 ## Repository workflows
 
-- For a THM release, follow `.claude/commands/thm-release.md`. It writes the next GitHub release
-  body from commit history and uses diffs rather than commit messages, which are frequently useless
-  here.
+- For THM release notes or a jar/tag/GitHub release, use `.agents/skills/thm-release/SKILL.md`
+  (`$thm-release` in Codex). It uses `.claude/commands/thm-release.md` for the note format and
+  reads diffs rather than relying on commit messages.
 - For a Shadertoy port, follow `.claude/commands/shadertoy-port.md`. It ports a Shadertoy shader
   into a `.fsh` file for the main-menu shader pool; it requires the user to paste GLSL because
   Shadertoy blocks scripted fetches, and it only supports single-pass shaders without buffers or
