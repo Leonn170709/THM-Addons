@@ -36,6 +36,9 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtElement;
 import net.minecraft.nbt.NbtOps;
 import net.minecraft.network.packet.Packet;
+import net.minecraft.network.packet.BundlePacket;
+import net.minecraft.network.packet.BundleSplitterPacket;
+import net.minecraft.registry.DynamicRegistryManager;
 import net.minecraft.network.packet.c2s.play.*;
 import net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerActionResponseS2CPacket;
@@ -53,6 +56,7 @@ import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.utils.PacketFieldSerializer;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -312,6 +316,7 @@ public class PacketLoggerTHM extends Module {
         record.addProperty("ordinal", ordinal);
         record.addProperty("packet_class", packetClass.getName());
         record.addProperty("packet_name", PacketUtils.getName(packetClass));
+        record.addProperty("packet_type_id", packet.getPacketType().id().toString());
 
         JsonObject fields;
         try {
@@ -323,6 +328,40 @@ public class PacketLoggerTHM extends Module {
         }
 
         record.add("fields", fields);
+        try {
+            record.add("all_fields", PacketFieldSerializer.serialize(packet));
+        } catch (Exception e) {
+            serializationErrorCount++;
+            record.addProperty("all_fields_error", e.toString());
+        }
+
+        DynamicRegistryManager registries = mc.getNetworkHandler() != null
+            ? mc.getNetworkHandler().getRegistryManager()
+            : DynamicRegistryManager.EMPTY;
+        if (packet instanceof BundlePacket<?> bundle) {
+            JsonArray payloads = new JsonArray();
+            for (Packet<?> child : bundle.getPackets()) {
+                JsonObject payload = new JsonObject();
+                payload.addProperty("packet_type_id", child.getPacketType().id().toString());
+                try {
+                    payload.addProperty("encoded_payload_hex", PacketFieldSerializer.encodePayload(child, registries));
+                } catch (Exception e) {
+                    serializationErrorCount++;
+                    payload.addProperty("encoded_payload_error", e.toString());
+                }
+                payloads.add(payload);
+            }
+            record.add("bundled_payloads", payloads);
+        } else if (packet instanceof BundleSplitterPacket<?>) {
+            record.addProperty("encoded_payload_hex", "");
+        } else {
+            try {
+                record.addProperty("encoded_payload_hex", PacketFieldSerializer.encodePayload(packet, registries));
+            } catch (Exception e) {
+                serializationErrorCount++;
+                record.addProperty("encoded_payload_error", e.toString());
+            }
+        }
 
         if (captureRawToString.get()) {
             try {
