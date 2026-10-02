@@ -85,12 +85,12 @@ Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is tempor
 | --- | --- | --- |
 | `blocks-to-place` | `Obsidian`; full-cube blocks only | Blocks the builder may place. |
 | `placements-per-tick` | `1.5`, range `0.1-100`, slider `0.1-10`, one decimal place | Maximum averaged place throughput; `1.5` bursts 1-2-1-2 blocks per tick for 30 blocks/s, `0.1` performs about one placement every 10 ticks. |
-| `adaptive-placements` | `false` | Drops the place rate by 0.5 on a rubberband or a server-reverted placement (min `0.5`), raises it 0.1 per 10 stable seconds up to `3`, staying one step below the last rate that failed (retried after 5 calm minutes). Starts from `placements-per-tick`; ignored with `packet-build`. The rate slider shows the current value live, and moving it by hand restarts adaptive from there. |
+| `adaptive-placements` | `false` | Drops the place rate by 0.5 on a rubberband or a server-reverted placement (min `0.5`), raises it 0.1 per 10 stable seconds up to `3`, staying one step below the last rate that failed (retried after 5 calm minutes). Starts from `placements-per-tick`; ignored with unlimited `packet-build`. The rate slider shows the current value live, and moving it by hand restarts adaptive from there. |
 | `place-range` | `4.5`, slider max `5.5` | Maximum block placement reach. |
 | `place-delay` | `0`, minimum `0` | Delay between place actions. |
 | `packet-build` | `false` | Places with raw packets only: the client never sets a block itself, so what you see is always the server's state (no ghost blocks). |
 | `air-place-mode` | `Never`; options `Never`, `Smart`, `Always`; shown when `packet-build` is on | Controls packet-build air placement. |
-| `packet-build-lookahead` | `true`; shown when `packet-build` is on | Also places upcoming rows in the same tick. |
+| `packet-build-lookahead` | `true`; shown with unlimited `packet-build` | Also places upcoming rows in the same tick. |
 | `silent-forward-place-swap` | `true`; hidden in legacy mode | Restores your selected slot after scheduler placement. |
 | `silent-forward-tool-swap` | `true`; hidden in legacy mode | Restores your selected slot after scheduler mining. |
 
@@ -101,8 +101,12 @@ Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is tempor
 | `enable-experimental` | `false` | Master switch: nothing else in this group does anything while it is off. |
 | `packet-budget` | `false` | Caps mining and placing per tick so the tick stays under the server's packet limit; Packet Build gives unused mining capacity to lookahead placement. |
 | `packets-per-tick` | `23`, range `4-200`; shown when `packet-budget` is on | Packets one tick may send. |
-| `packet-build-once` | `false`; shown when `packet-build` is on | Experimental: one packet per block instead of one per block per tick. |
-| `packet-build-resend` | `20`, range `2-200`; shown when `packet-build-once` is on | Ticks before asking the server what is at a block it never answered for. |
+| `packet-build-normal-rate` | `false`; shown when `packet-build` is on | Uses normal placement rate and delay while placing with packets and waiting for server updates. |
+| `packet-build-resend` | `20`, range `2-200`; shown when `packet-build-normal-rate` is on | Ticks before asking the server about an unanswered block. |
+| `choke-build` | `false`; shown when `enable-experimental` is on | Holds all outgoing C2S packets, then releases them in order. |
+| `choke-hold-ticks` | `5`, range `1-200` | Ticks to hold C2S packets. |
+| `choke-release-ticks` | `5`, range `1-200` | Ticks to send normally after releasing queued packets. |
+| `choke-max-hold-ticks` | `20`, range `1-200` | Forces a release when the hold reaches this many ticks. |
 | `predictive-echest-rebreak` | `false`; shown for offhand OnPlace rebreak | Sends three STOP packets per tick to try to break each EChest sooner. |
 | `ghost-block-check` | `false`; shown when `check-behind` is on | Has the server confirm the row behind before moving on. |
 
@@ -211,15 +215,19 @@ Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is tempor
 | `place-range` | `4.5`, slider max `5.5` | Always | Maximum distance for block placement. |
 | `place-delay` | `0`, minimum `0` | Always | Delay in ticks between place actions. |
 | `tps-safety-enclosure` | `true` | Always | Builds a small enclosure during confirmed low or unknown TPS pauses after TPS settling. |
-| `packet-build` | `false` | Always | Ordinary highway placements use raw place packets and appear only after the server's block update. Restock/KitBot enclosures and block-entity containers use normal placement. It removes the per-tick placement cap for highway paving and automatically enables Packet Limiter on activation. |
+| `packet-build` | `false` | Always | Ordinary highway placements use raw place packets and appear only after the server's block update. Restock/KitBot enclosures and block-entity containers use normal placement. Unless `packet-build-normal-rate` is on, it removes the per-tick placement cap and automatically enables Packet Limiter on activation. |
 | `air-place-mode` | `Smart`; options `Never`, `Smart`, `Always` | `packet-build` is on | `Never` skips no-face placements, `Smart` packet-air-places only when needed, and `Always` allows air placement. |
-| `packet-build-lookahead` | `true` | `packet-build` is on | Lets Packet Build place blocks from upcoming rows in the same tick. |
-| `packet-build-once` | `false` | `enable-experimental` and `packet-build` are on | Experimental: sends one packet per block. Without it ordinary face placements may be retried every tick; air placements wait for a server reply to avoid stacking blocks. |
-| `packet-build-resend` | `20`, range `2-200` | `packet-build-once` is on | How long to wait before asking the server for that block's real state (a silent use-on-block with an empty hand, pickaxe or totem). The place itself is only repeated once the server says the spot is still air, so air-place can never stack a second block on top. |
+| `packet-build-lookahead` | `true` | Unlimited `packet-build` is on | Lets Packet Build place blocks from upcoming rows in the same tick. |
+| `packet-build-normal-rate` | `false` | `enable-experimental` and `packet-build` are on | Replaces Packet Build Once. Uses normal placement rate and delay without client-side block prediction; each target waits for a server answer before another place packet. |
+| `packet-build-resend` | `20`, range `2-200` | `packet-build-normal-rate` is on | Ticks before probing an unanswered placement. |
+| `choke-build` | `false` | `enable-experimental` is on | Holds all outgoing C2S packets. The queued packets are sent together, in order, when the hold period ends. |
+| `choke-hold-ticks` | `5`, range `1-200` | `choke-build` is on | Desired hold duration. |
+| `choke-release-ticks` | `5`, range `1-200` | `choke-build` is on | Duration of normal sending after a release. |
+| `choke-max-hold-ticks` | `20`, range `1-200` | `choke-build` is on | Maximum hold duration; releases early when below `choke-hold-ticks`. |
 | `silent-forward-place-swap` | `true` | `legacy-mode` is off | Silently swaps to placement blocks for scheduler work, then restores your selected slot. |
 | `silent-forward-tool-swap` | `true` | `legacy-mode` is off | Silently swaps to scheduler mining tools, then restores your selected slot. |
 | `placements-per-tick` | `1.5`, range `0.1-100`, slider `0.1-10`, one decimal place | Always | Maximum averaged placement rate; `1.5` bursts 1-2-1-2 blocks per tick for 30 blocks/s, `0.1` performs about one placement every 10 ticks. |
-| `adaptive-placements` | `false` | Always | Auto-tunes the place rate between `0.5` and `3` from rubberbands and reverted placements. |
+| `adaptive-placements` | `false` | Always | Auto-tunes the place rate between `0.5` and `3` from rubberbands and reverted placements, including `packet-build-normal-rate`. |
 
 ### THM-HighwayBuilder: Inventory
 

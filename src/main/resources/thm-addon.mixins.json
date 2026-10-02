@@ -75,6 +75,7 @@
     "meteor.TimerMixin"
   ],
   "client": [
+    "ClientConnectionChokeMixin",
     "InventoryScreenMixin",
     "KeyboardMixin",
     "LevelLoadingScreenMixin",

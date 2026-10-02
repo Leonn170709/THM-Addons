@@ -14,6 +14,7 @@ import meteordevelopment.meteorclient.settings.PacketListSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.network.PacketUtils;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
@@ -118,6 +119,8 @@ public class PaketLimiter extends Module {
 
     @EventHandler(priority = EventPriority.HIGHEST + 2)
     private void onSendPacket(PacketEvent.Send event) {
+        HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
+        if (builder != null && builder.isChokeHoldingOrFlushing(event.connection)) return;
         int max = limit.get();
         if (max == 0) return;
         if (alwaysBlock.get().contains(event.packet.getClass())) {

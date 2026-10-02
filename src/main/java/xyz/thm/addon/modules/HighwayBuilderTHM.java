@@ -11,6 +11,7 @@
 
 package xyz.thm.addon.modules;
 
+import io.netty.channel.ChannelFutureListener;
 import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
@@ -82,6 +83,8 @@ import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.*;
+import net.minecraft.network.ClientConnection;
+import net.minecraft.network.packet.Packet;
 import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
@@ -1051,7 +1054,7 @@ public class HighwayBuilderTHM extends Module {
 
     private final Setting<Boolean> packetBuild = sgPaving.add(new BoolSetting.Builder()
         .name("packet-build")
-        .description("Sends placement packets directly. Enables Packet Limiter on activation.")
+        .description("Sends placement packets directly.")
         .defaultValue(false)
         .build()
     );
@@ -1068,7 +1071,7 @@ public class HighwayBuilderTHM extends Module {
         .name("packet-build-lookahead")
         .description("Also place blocks from upcoming rows in the same tick.")
         .defaultValue(true)
-        .visible(packetBuild::get)
+        .visible(() -> packetBuild.get() && !normalRatePacketBuild())
         .build()
     );
 
@@ -1097,9 +1100,9 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-    public final Setting<Boolean> packetBuildOnce = sgExperimental.add(new BoolSetting.Builder()
-        .name("packet-build-once")
-        .description("Experimental: one packet per block instead of one per block per tick.")
+    public final Setting<Boolean> packetBuildNormalRate = sgExperimental.add(new BoolSetting.Builder()
+        .name("packet-build-normal-rate")
+        .description("Use normal place rate and delay with packet placement.")
         .defaultValue(false)
         .visible(() -> enableExperimental.get() && packetBuild.get())
         .build()
@@ -1111,7 +1114,45 @@ public class HighwayBuilderTHM extends Module {
         .defaultValue(20)
         .range(2, 200)
         .sliderRange(5, 60)
-        .visible(() -> enableExperimental.get() && packetBuild.get() && packetBuildOnce.get())
+        .visible(() -> enableExperimental.get() && packetBuild.get() && packetBuildNormalRate.get())
+        .build()
+    );
+
+    private final Setting<Boolean> chokeBuild = sgExperimental.add(new BoolSetting.Builder()
+        .name("choke-build")
+        .description("Hold all outgoing C2S packets, then release them together.")
+        .defaultValue(false)
+        .visible(enableExperimental::get)
+        .build()
+    );
+
+    private final Setting<Integer> chokeHoldTicks = sgExperimental.add(new IntSetting.Builder()
+        .name("choke-hold-ticks")
+        .description("Ticks to hold outgoing packets.")
+        .defaultValue(5)
+        .range(1, 200)
+        .sliderRange(1, 40)
+        .visible(() -> enableExperimental.get() && chokeBuild.get())
+        .build()
+    );
+
+    private final Setting<Integer> chokeReleaseTicks = sgExperimental.add(new IntSetting.Builder()
+        .name("choke-release-ticks")
+        .description("Ticks to send packets normally after a release.")
+        .defaultValue(5)
+        .range(1, 200)
+        .sliderRange(1, 40)
+        .visible(() -> enableExperimental.get() && chokeBuild.get())
+        .build()
+    );
+
+    private final Setting<Integer> chokeMaxHoldTicks = sgExperimental.add(new IntSetting.Builder()
+        .name("choke-max-hold-ticks")
+        .description("Automatically release packets at this hold limit.")
+        .defaultValue(20)
+        .range(1, 200)
+        .sliderRange(1, 40)
+        .visible(() -> enableExperimental.get() && chokeBuild.get())
         .build()
     );
 
@@ -1665,6 +1706,9 @@ public class HighwayBuilderTHM extends Module {
     private int borerPackets;
     private int placeActionsThisTick;
     private final double[] placeFractionCarry = new double[1];
+    private final PacketChoke<ChokedPacket> packetChoke = new PacketChoke<>();
+    private boolean chokeEnabledLastTick;
+    private boolean chokeFlushErrorLogged;
 
     // Max 3: higher is unstable. -0.5 on trouble, +0.1 per 10 stable seconds, retry a failed rate after 5 min.
     private final AdaptiveRate adaptivePlaceRate = new AdaptiveRate(0.5, 3.0, 0.5, 0.1, 200, 6000);
@@ -2420,6 +2464,10 @@ public class HighwayBuilderTHM extends Module {
         if (mc.player == null || mc.world == null) return;
         if (!Utils.canUpdate()) return;
 
+        packetChoke.clear();
+        chokeEnabledLastTick = experimental(chokeBuild);
+        chokeFlushErrorLogged = false;
+
         // Creative may build freely — it just never reports anything (enforceCreativeStatisticsGuard plus
         // the silent creative skips in sendStatusLog / commitAndSendFinalExternalStats).
         if ((sendStatisticsapi.get() || statuslog.get()) && THMUtils.isNot6B6T()) {
@@ -2438,7 +2486,7 @@ public class HighwayBuilderTHM extends Module {
         enforceKitbotFoodRestockFoodType();
         syncFoodManagementOnActivate();
 
-        if (packetBuild.get()) {
+        if (packetBuild.get() && !normalRatePacketBuild()) {
             PaketLimiter limiter = Modules.get().get(PaketLimiter.class);
             if (limiter != null && !limiter.isActive()) limiter.toggle();
         }
@@ -2586,6 +2634,9 @@ public class HighwayBuilderTHM extends Module {
     }
     @Override
     public void onDeactivate() {
+        flushChokedPackets();
+        packetChoke.clear();
+        chokeEnabledLastTick = false;
         if (sessionSummary.get()) printSessionSummary();
         restoreRestockEnclosureOffhand();
         clearRestockPacketPlaceTargets();
@@ -4624,6 +4675,7 @@ public class HighwayBuilderTHM extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
+        tickPacketChoke();
         if (mc.player == null || mc.world == null) return;
         safetyPlacedThisTick = false;
 
@@ -4807,6 +4859,60 @@ public class HighwayBuilderTHM extends Module {
         if (placeTimer > 0) placeTimer--;
     }
 
+    private void tickPacketChoke() {
+        boolean enabled = experimental(chokeBuild) && mc.getNetworkHandler() != null;
+        if (!enabled) {
+            if (chokeEnabledLastTick && !flushChokedPackets()) return;
+            packetChoke.clear();
+            chokeEnabledLastTick = false;
+            return;
+        }
+
+        chokeEnabledLastTick = true;
+        try {
+            packetChoke.tick(chokeHoldTicks.get(), chokeReleaseTicks.get(), chokeMaxHoldTicks.get(), this::sendChokedPacket);
+            chokeFlushErrorLogged = false;
+        } catch (RuntimeException e) {
+            if (!chokeFlushErrorLogged) error("Choke Build could not release packets: %s", e.getMessage());
+            chokeFlushErrorLogged = true;
+        }
+    }
+
+    private boolean flushChokedPackets() {
+        try {
+            packetChoke.flush(this::sendChokedPacket);
+            return true;
+        } catch (RuntimeException e) {
+            error("Choke Build could not release packets: %s", e.getMessage());
+            return false;
+        }
+    }
+
+    private void sendChokedPacket(ChokedPacket queued) {
+        if (mc.getNetworkHandler() == null || queued.connection() != mc.getNetworkHandler().getConnection()) return;
+        if (queued.connection().isOpen()) queued.connection().send(queued.packet(), queued.listener(), queued.flush());
+    }
+
+    public boolean isChokeHoldingOrFlushing(ClientConnection connection) {
+        if (mc.getNetworkHandler() == null || connection != mc.getNetworkHandler().getConnection()) return false;
+        if (packetChoke.isFlushing()) return true;
+        return isActive() && experimental(chokeBuild) && packetChoke.isHolding() && connection.isOpen();
+    }
+
+    public boolean holdOutgoingPacket(ClientConnection connection, Packet<?> packet, ChannelFutureListener listener, boolean flush) {
+        return isChokeHoldingOrFlushing(connection)
+            && packetChoke.hold(new ChokedPacket(connection, packet, listener, flush));
+    }
+
+    @EventHandler
+    private void onChokeGameLeft(GameLeftEvent event) {
+        packetChoke.clear();
+        chokeEnabledLastTick = false;
+    }
+
+    private record ChokedPacket(ClientConnection connection, Packet<?> packet, ChannelFutureListener listener, boolean flush) {
+    }
+
     @EventHandler(priority = EventPriority.LOWEST)
     private void onPlayerMove(PlayerMoveEvent event) {
         if (event.type != MovementType.SELF || !isThmSpeedControllerActive()) return;
@@ -4912,6 +5018,7 @@ public class HighwayBuilderTHM extends Module {
 
     @EventHandler
     private void onPacketSend(PacketEvent.Send event) {
+        if (event.isCancelled()) return;
         if (event.packet instanceof PlayerInteractBlockC2SPacket packet) {
             recordEnclosureInteractPacket(packet);
             if (restockDebugLog.get() && state == State.MineEnderChests) {
@@ -6787,7 +6894,7 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private void reclaimUnusedMinePacketBudgetForPlacing() {
-        if (!packetBuild.get() || !experimental(packetBudget)) return;
+        if (!packetBuild.get() || normalRatePacketBuild() || !experimental(packetBudget)) return;
         if (packetBorer.get() || normalMining != null || packetMining != null) return;
 
         int reclaimedPlaceActions = packetBudgetPlan(forwardMineCount, Integer.MAX_VALUE).place();
@@ -6803,6 +6910,10 @@ public class HighwayBuilderTHM extends Module {
     /** Experimental settings only count while the group's master switch is on. */
     private boolean experimental(Setting<Boolean> setting) {
         return enableExperimental.get() && setting.get();
+    }
+
+    private boolean normalRatePacketBuild() {
+        return packetBuild.get() && packetBuildNormalRate != null && experimental(packetBuildNormalRate);
     }
 
     /** The slider shows the adaptive rate. Marked as ours so it doesn't count as a hand-made change. */
@@ -6929,7 +7040,7 @@ public class HighwayBuilderTHM extends Module {
         }
         recentPlacements.values().removeIf(t -> now - t > ADAPTIVE_PLACE_REVERT_WINDOW);
 
-        if (state != State.Forward || packetBuild.get()) return;
+        if (state != State.Forward || (packetBuild.get() && !normalRatePacketBuild())) return;
 
         if (rubberbands > 0 || reverts > 0) {
             double before = adaptivePlaceRate.get();
@@ -6993,11 +7104,11 @@ public class HighwayBuilderTHM extends Module {
 
     /** Current place-rate cap in blocks/s, or -1 when unlimited (packet build). */
     public double getTargetPlacesPerSecond() {
-        return packetBuild.get() ? -1 : effectivePlacementsPerTickActionRate() * 20.0;
+        return packetBuild.get() && !normalRatePacketBuild() ? -1 : effectivePlacementsPerTickActionRate() * 20.0;
     }
 
     private int computePlaceActionsThisTick() {
-        if (packetBuild.get()) return Integer.MAX_VALUE;
+        if (packetBuild.get() && !normalRatePacketBuild()) return Integer.MAX_VALUE;
 
         return AdaptiveRate.actionsThisTick(effectivePlacementsPerTickActionRate(), placeFractionCarry);
     }
@@ -7114,7 +7225,8 @@ public class HighwayBuilderTHM extends Module {
     private boolean shouldPacketPlace(ItemStack stack) {
         return packetBuild.get()
             && stack.getItem() instanceof BlockItem blockItem
-            && !blockItem.getBlock().getDefaultState().hasBlockEntity();
+            && (state == State.Forward && normalRatePacketBuild()
+                || !blockItem.getBlock().getDefaultState().hasBlockEntity());
     }
 
     private void clearForwardLatchedPlaceSlot() {
@@ -7585,7 +7697,7 @@ public class HighwayBuilderTHM extends Module {
      */
     private boolean placeWithoutPrediction(BlockPos pos, int slot, ItemStack stack) {
         Direction side = PlacementUtils.getPlaceSide(pos);
-        boolean trackPending = side == null || experimental(packetBuildOnce);
+        boolean trackPending = side == null || normalRatePacketBuild() || experimental(chokeBuild);
         if (trackPending && !PacketPlaceTracker.canSend(pos)) return false;
         // offhand-build: place straight from the offhand obsidian instead of swapping the main hand.
         FindItemResult item = (slot == SlotUtils.OFFHAND || placeFromOffhand())
@@ -7612,8 +7724,9 @@ public class HighwayBuilderTHM extends Module {
         }
 
         if (!placed) return false;
-        if (trackPending) PacketPlaceTracker.markSent(pos, experimental(packetBuildOnce) ? packetBuildResend.get() : 3);
+        if (trackPending) PacketPlaceTracker.markSent(pos, normalRatePacketBuild() ? packetBuildResend.get() : 3);
         if (isRestockState(state)) restockPacketPlaceTargets.add(pos.asLong());
+        if (normalRatePacketBuild()) placeTimer = placeDelay.get();
         count++;
         notePlacement(pos);
         if (renderPlace.get()) placeTrail.add(BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ()));
@@ -13252,7 +13365,7 @@ public class HighwayBuilderTHM extends Module {
         // packet (pickaxe switch) and the mine packets are not dropped by the packet rate limiter.
         // offhand-build has no slot switch to protect (pickaxe stays in the main hand, obsidian in the
         // offhand), so mining and placing can share the tick.
-        boolean skipPlaceForPaketMine = packetBuild.get()
+        boolean skipPlaceForPaketMine = packetBuild.get() && !normalRatePacketBuild()
             && !placeFromOffhand()
             && activeRow != null
             && !activeRow.mineQueue.isEmpty();
@@ -13263,7 +13376,7 @@ public class HighwayBuilderTHM extends Module {
             placedChangedWorld = runForwardPlaceWork(activeRow);
             if (placedChangedWorld) logForwardSchedulerStatus("place", activeRow, "place changed world", true);
             if (state != State.Forward) return;
-            if (packetBuild.get() && packetBuildLookahead.get()) {
+            if (packetBuild.get() && !normalRatePacketBuild() && packetBuildLookahead.get()) {
                 boolean skippedActive = false;
                 for (ForwardRowSchedule lookaheadRow : forwardSchedulerRuntime.rows) {
                     if (!skippedActive) { skippedActive = true; continue; }
@@ -19135,7 +19248,7 @@ public class HighwayBuilderTHM extends Module {
 
                 @Override
                 public int placementsPerTick(HighwayBuilderTHM b) {
-                    return b.packetBuild.get() ? b.currentPlaceActionsThisTick() : 1;
+                    return b.packetBuild.get() && !b.normalRatePacketBuild() ? b.currentPlaceActionsThisTick() : 1;
                 }
             };
         }
@@ -19630,7 +19743,7 @@ public class HighwayBuilderTHM extends Module {
 
                 @Override
                 public int placementsPerTick(HighwayBuilderTHM b) {
-                    return b.packetBuild.get() ? b.currentPlaceActionsThisTick() : 1;
+                    return b.packetBuild.get() && !b.normalRatePacketBuild() ? b.currentPlaceActionsThisTick() : 1;
                 }
             };
         }
