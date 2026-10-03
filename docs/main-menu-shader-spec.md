@@ -94,7 +94,8 @@ Vulkan uses automatic bindings/locations and Minecraft's vertex/instance ID defi
 The [glslang reference compiler](https://github.com/KhronosGroup/glslang) checks GLSL and stage linking.
 
 Negative cases verify that invalid GLSL and incompatible vertex/fragment types fail on both
-backends. Missing compiler or shader sources fail the tests instead of skipping them.
+backends. Background SPIR-V is checked for unbound texture resources, including unused samplers
+that OpenGL may remove. Missing compiler or shader sources fail the tests instead of skipping them.
 Results: `build/reports/tests/checkShaders/index.html`, or `build/reports/tests/test/index.html`
 after `test`/`build`.
 

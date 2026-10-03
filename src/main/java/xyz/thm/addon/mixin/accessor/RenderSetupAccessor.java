@@ -37,8 +37,4 @@ public interface RenderSetupAccessor {
         throw new AssertionError();
     }
 
-    default RenderSetup thm$withPipeline(RenderPipeline pipeline) {
-        return thm$create(pipeline, thm$getTextures(), thm$usesLightmap(), thm$usesOverlay(), thm$getLayering(),
-            thm$getOutput(), thm$getTextureTransform(), thm$getOutline(), thm$affectsCrumbling(), thm$sortsOnUpload());
-    }
 }

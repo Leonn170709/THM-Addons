@@ -49,6 +49,7 @@ dependencies {
 
     // Baritone
     compileOnly(libs.baritone)
+    runtimeOnly(libs.baritone)
 
     // Inspect optional mixin targets without loading these mods into the dev client.
     testRuntimeOnly("maven.modrinth:sodium:mc26.2-0.9.2-fabric")

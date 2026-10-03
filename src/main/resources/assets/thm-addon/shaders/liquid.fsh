@@ -58,7 +58,6 @@ float pNoise(vec2 p, int res){
     float nf = n/normK;
     return nf*nf*nf*nf;
 }
-uniform sampler2D s;
 
 const float color_intensity = 1.45;
 const float Pi = 3.14159;

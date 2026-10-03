@@ -96,14 +96,14 @@ public class RotationUtils {
     public void onTickPost(TickEvent.Post event) {
         if (rotation != null && mc.player != null && movementFix) {
             InputAccessor inputAccessor = (InputAccessor) mc.player.input;
-            float forward = inputAccessor.getMovementForward();
-            float sideways = inputAccessor.getMovementSideways();
+            float forward = inputAccessor.thm$getMoveVector().y;
+            float sideways = inputAccessor.thm$getMoveVector().x;
             if (forward == 0.0f && sideways == 0.0f) return;
             float delta = (mc.player.getYRot() - rotation.getYaw()) * Mth.DEG_TO_RAD;
             float cos = Mth.cos(delta);
             float sin = Mth.sin(delta);
-            inputAccessor.setMovementSideways(Math.round(sideways * cos - forward * sin));
-            inputAccessor.setMovementForward(Math.round(forward * cos + sideways * sin));
+            inputAccessor.thm$setMoveVector(new net.minecraft.world.phys.Vec2(
+                Math.round(sideways * cos - forward * sin), Math.round(forward * cos + sideways * sin)));
         }
     }
     public void setRotation(Rotation rotation) {

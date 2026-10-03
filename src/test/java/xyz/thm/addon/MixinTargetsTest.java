@@ -54,11 +54,20 @@ class MixinTargetsTest {
                             }
                             for (var field : mixin.fields) {
                                 for (var a : annotations(field.visibleAnnotations, field.invisibleAnnotations)) {
-                                    if (a.desc.endsWith("/Shadow;") && !hasField(target, field.name, field.desc))
-                                        failures.add(name + ": shadow " + field.name + field.desc);
+                                    if (a.desc.endsWith("/Shadow;")) {
+                                        boolean found = hasField(target, field.name, field.desc);
+                                        for (Object alias : list(value(a, "aliases"))) found |= hasField(target, alias.toString(), field.desc);
+                                        if (!found) failures.add(name + ": shadow " + field.name + field.desc);
+                                    }
                                 }
                             }
                             for (MethodNode method : mixin.methods) {
+                                if ((mixin.access & org.objectweb.asm.Opcodes.ACC_INTERFACE) != 0
+                                    && (target.access & org.objectweb.asm.Opcodes.ACC_INTERFACE) == 0
+                                    && !method.name.equals("<clinit>")
+                                    && annotations(method.visibleAnnotations, method.invisibleAnnotations).stream()
+                                        .noneMatch(a -> a.desc.endsWith("/Accessor;") || a.desc.endsWith("/Invoker;")))
+                                    failures.add(name + ": accessor interface contains non-accessor method " + method.name);
                                 for (var a : annotations(method.visibleAnnotations, method.invisibleAnnotations)) {
                                     if (a.desc.endsWith("/Shadow;") && !hasMethod(target, method.name + method.desc))
                                         failures.add(name + ": shadow method " + method.name + method.desc);
@@ -81,6 +90,8 @@ class MixinTargetsTest {
                                         for (Object selector : list(selectors)) {
                                             var matching = target.methods.stream().filter(m -> matches(m, selector.toString())).toList();
                                             selected.addAll(matching);
+                                            if (matching.stream().anyMatch(m -> (m.access & (org.objectweb.asm.Opcodes.ACC_ABSTRACT | org.objectweb.asm.Opcodes.ACC_NATIVE)) != 0))
+                                                failures.add(name + ": injection targets method without bytecode " + selector);
                                             if (matching.isEmpty())
                                                 failures.add(name + ": injection " + selector);
                                             if (a.desc.endsWith("/Inject;")) checkCallback(name, method, matching, failures);

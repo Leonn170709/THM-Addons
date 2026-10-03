@@ -475,8 +475,8 @@ public class InventoryManager {
     public static boolean isMovingInput() {
         if (mc.player == null) return false;
         InputAccessor inputAccessor = (InputAccessor) mc.player.input;
-        return inputAccessor.getMovementForward() != 0.0f ||
-               inputAccessor.getMovementSideways() != 0.0f ||
+        return inputAccessor.thm$getMoveVector().y != 0.0f ||
+               inputAccessor.thm$getMoveVector().x != 0.0f ||
                mc.options.keyJump.isDown() ||
                mc.options.keyShift.isDown();
     }

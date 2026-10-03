@@ -8,6 +8,7 @@ package xyz.thm.addon.shaders;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DynamicTest;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
 import org.junit.jupiter.api.io.TempDir;
 import org.objectweb.asm.ClassReader;
@@ -16,6 +17,8 @@ import org.objectweb.asm.tree.ClassNode;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -33,7 +36,7 @@ class ShaderCompatibilityTest {
     Path temporary;
 
     private record Program(String name, String vertex, String fragment) {}
-    private record Result(int exitCode, String log) {}
+    private record Result(int exitCode, String log, byte[] spirv) {}
 
     @BeforeAll
     static void requireCompiler() throws Exception {
@@ -58,7 +61,41 @@ class ShaderCompatibilityTest {
             DynamicTest.dynamicTest(program.name + " / " + backend(vulkan), () -> {
                 Result result = compile(program, vulkan);
                 assertEquals(0, result.exitCode, result.log);
+                if (vulkan && program.name.endsWith(".fsh")) assertNoTextureResources(result.spirv);
             })));
+    }
+
+    @Test
+    void rejectsUnboundSamplerEvenWhenUnused() throws Exception {
+        Result result = compile(new Program("unused-sampler",
+            resource("/assets/minecraft/shaders/core/screenquad.vsh"), """
+                #version 330 core
+                uniform sampler2D Unbound;
+                out vec4 fragColor;
+                void main() { fragColor = vec4(1.0); }
+                """), true);
+        assertEquals(0, result.exitCode, result.log);
+        assertThrows(AssertionError.class, () -> assertNoTextureResources(result.spirv));
+    }
+
+    private static void assertNoTextureResources(byte[] spirv) {
+        ByteBuffer words = ByteBuffer.wrap(spirv).order(ByteOrder.LITTLE_ENDIAN);
+        assertEquals(0x07230203, words.getInt(), "Invalid SPIR-V magic");
+        words.position(20);
+        while (words.hasRemaining()) {
+            int instruction = words.getInt();
+            int size = instruction >>> 16;
+            assertTrue(size > 0 && (size - 1) * 4 <= words.remaining(), "Invalid SPIR-V instruction");
+            int next = words.position() + (size - 1) * 4;
+            // OpVariable's UniformConstant storage includes samplers and images, even unused ones.
+            if ((instruction & 0xffff) == 59) {
+                assertTrue(size >= 4, "Invalid OpVariable");
+                words.getInt();
+                words.getInt();
+                assertNotEquals(0, words.getInt(), "Background pipeline does not bind samplers or images");
+            }
+            words.position(next);
+        }
     }
 
     @TestFactory
@@ -137,7 +174,8 @@ class ShaderCompatibilityTest {
         Process process = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(log.toFile()).start();
         try {
             assertTrue(process.waitFor(30, TimeUnit.SECONDS), "Shader compiler timed out: " + program.name);
-            return new Result(process.exitValue(), Files.readString(log));
+            byte[] spirv = vulkan && process.exitValue() == 0 ? Files.readAllBytes(directory.resolve("program.spv")) : null;
+            return new Result(process.exitValue(), Files.readString(log), spirv);
         } finally {
             process.destroyForcibly();
         }

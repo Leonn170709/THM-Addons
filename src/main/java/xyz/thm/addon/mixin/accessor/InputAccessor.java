@@ -15,8 +15,4 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 public interface InputAccessor {
     @Accessor("moveVector") Vec2 thm$getMoveVector();
     @Accessor("moveVector") void thm$setMoveVector(Vec2 value);
-    default float getMovementForward() { return thm$getMoveVector().y; }
-    default void setMovementForward(float value) { thm$setMoveVector(new Vec2(thm$getMoveVector().x, value)); }
-    default float getMovementSideways() { return thm$getMoveVector().x; }
-    default void setMovementSideways(float value) { thm$setMoveVector(new Vec2(value, thm$getMoveVector().y)); }
 }

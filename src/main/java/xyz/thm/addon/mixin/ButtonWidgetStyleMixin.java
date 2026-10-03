@@ -28,13 +28,14 @@ public abstract class ButtonWidgetStyleMixin extends AbstractWidget {
         super(x, y, width, height, message);
     }
 
-    @Inject(method = "extractContents", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "extractWidgetRenderState", at = @At("HEAD"), cancellable = true)
     private void thm$renderThmStyle(GuiGraphicsExtractor context, int mouseX, int mouseY, float deltaTicks, CallbackInfo ci) {
         if (!ThmStyledButtons.isStyled(this)) return;
 
         MainMenuFx.renderButton(context, Minecraft.getInstance().font,
             this.getX(), this.getY(), this.getX() + this.getWidth(), this.getY() + this.getHeight(),
             this.getMessage().getString(), this.isHovered(), this.active);
+        this.handleCursor(context);
         ci.cancel();
     }
 }

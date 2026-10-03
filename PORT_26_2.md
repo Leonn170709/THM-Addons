@@ -8,7 +8,7 @@
 
 Goal: preserve the released 1.21.11 modules, commands, HUDs, settings, and behavior on Minecraft 26.2. Use Blaze3D for OpenGL and Vulkan. Branch `1.21.11` and tag `release0.2.9` remain the behavior reference.
 
-**Status:** Code port complete; automated checks pass. In-game verification remains open. Do not publish this snapshot as a verified release yet.
+**Status:** Code port and automated checks pass. Real OpenGL and Vulkan client smoke tests pass for startup, 30 menu shaders, local world join, and clean shutdown. Full gameplay and rendering verification remains open.
 
 ## To do
 
@@ -22,31 +22,57 @@ Goal: preserve the released 1.21.11 modules, commands, HUDs, settings, and behav
 - [x] Port world, entity, cape, HUD, GUI, and shader paths through Blaze3D; replace raw GL ghost and Chams depth state.
 - [x] Compile and link complete background and inline shader programs for OpenGL and Vulkan; run them as build tests.
 - [x] Update snapshot metadata and Gradle CI. GitHub Actions execution is still pending a push.
-- [ ] Verify rendering in-game with **actual OpenGL** and **actual Vulkan**, checking F3 before recording each result.
+- [x] Run autonomous OpenGL and Vulkan smoke tests: startup, all 30 menu shaders, local world join, and clean shutdown. Confirm the active backend through runtime device information.
+- [ ] Complete the rendering checklist on actual OpenGL and Vulkan, including Vulkan with Sodium.
 - [ ] Verify highway automation, restock, travel, PvP, packet utilities, reconnect, and UI in-game on 26.2.
 - [ ] Complete release review after the in-game checks pass.
 
 ## Current work
 
-Implementation is finished. Next: use the snapshot jar for the checks below and record logs, active backend, and results here. Fix any confirmed runtime regression before releasing.
+Client smoke tests are finished. Next: Vulkan with Sodium (user testing), then the remaining gameplay and rendering checks below. Fix confirmed regressions before releasing.
 
 | Check | Result on 2026-10-03 | Evidence |
 | --- | --- | --- |
 | `compileJava`, `compileTestJava` | Passed | Java 25, Minecraft 26.2, Meteor 26.2-SNAPSHOT. |
-| `test` | Passed, 271 tests | Existing behavior tests, migration/pipeline/mixin checks, and 74 shader tests. |
+| `test` | Passed, 272 tests | Existing behavior tests, migration/pipeline/mixin checks, and 75 shader tests. |
 | `build` | Passed | `build/libs/THM-Addons-0.3.0-SNAPSHOT.jar`. |
-| `checkShaders` | Passed, 74 tests | 35 complete programs (30 backgrounds, 5 blur/trip passes) across both backends; 4 negative syntax/linker checks. Uses actual Minecraft vertex source and compiled inline constants. |
+| Shader tests | Passed, 75 tests | 35 complete programs across both backends; 4 negative syntax/linker cases and an unused-sampler regression. Background SPIR-V must contain no unbound texture resources. |
 | Registration and setting names | Unchanged | 41 registered modules, 6 commands, 15 HUDs, 8 themes; 824 setting-name occurrences compared with `1.21.11`. |
 | Optional mixin targets | Passed | Sodium 0.9.2, Xaero Minimap 26.5.1, Xaero World Map 1.46.1, all for 26.2. These are test dependencies only. |
-| OpenGL in-game | Pending | Check the active backend in F3. |
-| Vulkan in-game | Pending | Check the active backend in F3. |
+| OpenGL client smoke test | Passed | Radeon RX 9060 XT, Mesa 26.2.4; 30 shader screenshots, joined a fresh local world, 200 world ticks, clean exit. |
+| Vulkan client smoke test | Passed | Radeon RX 9060 XT, RADV/Mesa 26.2.4; 30 shader screenshots, joined a fresh local world, 200 world ticks, clean exit. |
+| Vulkan with Sodium | Pending | User is installing Sodium and testing this combination. No Sodium was loaded in the autonomous runs. |
 | Gameplay and settings import | Pending | Static comparisons and unit tests do not establish runtime parity. |
 
 The mixin check validates classes, shadow/accessor/invoker members, injection selectors, callback arguments, and referenced bytecode instructions. It does not apply the combined Minecraft/Meteor mixin transformations or start a client.
 
+## Client smoke test evidence
+
+The local harness in `run/client-smoke/` creates isolated creative test worlds through vanilla
+world creation APIs, cycles all menu shaders, saves screenshots, and closes the client. It is
+local test tooling, not included in the addon jar. Final logs are saved alongside its screenshots.
+
+- `run/client-smoke/opengl/final-run.log`: `THM-SMOKE PASS world-ticks=200 backend=OpenGL`.
+- `run/client-smoke/vulkan/final-run.log`: `THM-SMOKE PASS world-ticks=200 backend=Vulkan`.
+- Both `screenshots/` directories contain 30 shader images and `world.png`. Contact sheets:
+  `run/client-smoke/opengl/shader-overview.jpg`, `run/client-smoke/vulkan/shader-overview.jpg`.
+- Device information confirms both backends on the RX 9060 XT. The contact sheets show the
+  intended backgrounds on both; sampled world screenshots show successful world rendering.
+- These runs cover the title screen and a quiet creative world. Module behavior, complex world
+  overlays, capes, resize/scaling, blur bounds, and the trip effect still need targeted checks.
+- Non-blocking environment messages: missing narrator `flite` and unauthenticated dev-account
+  profile/Realms requests. Initial driver GLSL warnings did not prevent any background drawing.
+
+Local commands (harness files are git-ignored):
+
+```bash
+./gradlew --init-script run/client-smoke/smoke.init.gradle -PsmokeBackend=OPENGL runClient
+./gradlew --init-script run/client-smoke/smoke.init.gradle -PsmokeBackend=VULKAN runClient
+```
+
 ## In-game checklist
 
-Record each rendering result separately for OpenGL and Vulkan. Use Java 25, Fabric Loader 0.19.5, Fabric API 0.161.0+26.2, Meteor 26.2-SNAPSHOT, and Baritone for 26.2.
+Record each rendering result separately for OpenGL and Vulkan; confirm the active backend in F3 or runtime device information. Use Java 25, Fabric Loader 0.19.5, Fabric API 0.161.0+26.2, Meteor 26.2-SNAPSHOT, and Baritone for 26.2.
 
 - [ ] Startup without a mixin error; dynamic build branch/commit metadata and addon registration.
 - [ ] Load a copy of 1.21.11 settings: modules, HUD positions, profiles, themes, packet logger filters, limiter bypass/block selections.
@@ -71,3 +97,4 @@ Record each rendering result separately for OpenGL and Vulkan. Use Java 25, Fabr
 - 2026-10-03: Preserved all registrations and setting names. Added migration for 227 legacy packet names, including split entity interaction/attack selections. Replaced ghost and Meteor Chams depth handling with Blaze3D pipelines; fixed the Gas shader for Vulkan.
 - 2026-10-03: Build and 197 tests pass. All 37 shader sources compile for both backends. Updated Gradle CI and snapshot metadata. In-game rendering and gameplay checks remain pending; no client was launched or release published.
 - 2026-10-03: Added `ShaderCompatibilityTest` and `checkShaders`: 70 complete-program OpenGL/Vulkan compilation/linking checks plus 4 negative cases. Integrated into `test`/`build`, replaced the old stage-only script with a Gradle wrapper, and moved compiler installation before the CI build. Full build and 271 tests pass. Actual GPU and in-game checks remain pending.
+- 2026-10-03: Authorized autonomous client/world tests in `AGENTS.md` and the port workflow. Added Baritone to the dev runtime. Fixed accessor-interface helper methods and a button injection into an abstract method; extended the bytecode regression check. Real Vulkan caught an unused sampler in `liquid`; removed it and added a SPIR-V resource regression test. Made Baritone cache workers daemon threads to avoid the 26.2 shutdown watchdog. Final OpenGL/Vulkan runs both drew all 30 backgrounds, joined local worlds, and exited cleanly. Build and 272 tests pass. Vulkan with Sodium and full feature checks remain open.

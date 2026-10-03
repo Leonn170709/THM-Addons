@@ -101,7 +101,10 @@ public final class GhostRenderer {
         if (CHAMS_TYPES.size() >= 1024) CHAMS_TYPES.clear();
         return CHAMS_TYPES.computeIfAbsent(original, type -> {
             var setup = (RenderSetupAccessor) (Object) ((RenderTypeAccessor) type).thm$getSetup();
-            return RenderType.create("thm_chams", setup.thm$withPipeline(withoutDepth(type.pipeline())));
+            return RenderType.create("thm_chams", RenderSetupAccessor.thm$create(withoutDepth(type.pipeline()),
+                setup.thm$getTextures(), setup.thm$usesLightmap(), setup.thm$usesOverlay(), setup.thm$getLayering(),
+                setup.thm$getOutput(), setup.thm$getTextureTransform(), setup.thm$getOutline(),
+                setup.thm$affectsCrumbling(), setup.thm$sortsOnUpload()));
         });
     }
 
