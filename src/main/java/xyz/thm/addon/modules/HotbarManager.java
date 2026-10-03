@@ -114,6 +114,7 @@ public class HotbarManager extends Module {
     @EventHandler
     private void onTick(TickEvent.Post event) {
         if (mc.player == null) return;
+        if (!mc.player.containerMenu.getCarried().isEmpty()) return;
         if ((ticksLeft -= TickRate.INSTANCE.getTickRate() / 20.0) > 0.0) return;
 
         int highestSlot = -1;

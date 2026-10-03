@@ -6,6 +6,7 @@
 
 # 26.2 port gotchas
 
+- Offhand supplies belong to the whole restock sequence, including recovery states. Refilling obsidian outside `MineEnderChests` can displace its chest stack. `PICKUP` moves require an empty cursor, and chest menus expose no offhand slot; use `ContainerInput.SWAP` with button `SlotUtils.OFFHAND` for different items, and merge matching stacks only in the player inventory with an empty cursor.
 - `migrateMappings` changed known Yarn names to Mojang names. It did not port changed Minecraft, Fabric, or Meteor APIs. Wildcard imports and mixin targets need manual review. Run it only in an isolated checkout: a failed run previously removed its input directory.
 - Minecraft 26.2 uses Java 25 and the non-remapping Fabric Loom plugin. There is no Yarn dependency or `mappings(...)` entry in this branch. The Gradle daemon JVM criteria requests Java 25.
 - The compiler reports only its first 100 errors by default. Treat that output as the next work queue, not a count of all remaining failures.

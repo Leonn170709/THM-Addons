@@ -13,6 +13,7 @@ Goal: preserve the released 1.21.11 modules, commands, HUDs, settings, and behav
 ## To do
 
 - [x] Preserve the 1.21.11 release and work on branch `26.2`.
+- [x] Port the 0.2.9 offhand EChest restock hotfix and its ownership regression tests.
 - [x] Update Minecraft, Fabric, Meteor, Loom, and Java; use Mojang names.
 - [x] Port inventory clicks to `ContainerInput` and `handleContainerInput`.
 - [x] Port shared Minecraft, Fabric, and Meteor APIs; make main and test sources compile.
@@ -29,13 +30,15 @@ Goal: preserve the released 1.21.11 modules, commands, HUDs, settings, and behav
 
 ## Current work
 
-Client smoke tests are finished. Next: Vulkan with Sodium (user testing), then the remaining gameplay and rendering checks below. Fix confirmed regressions before releasing.
+The 0.2.9 offhand EChest restock hotfix is ported. Next: verify repeated restocks with
+`minimum-empty-slots=0`, a full inventory, and the default on-place break mode; then continue the
+remaining gameplay and rendering checks below.
 
 | Check | Result on 2026-10-03 | Evidence |
 | --- | --- | --- |
 | `compileJava`, `compileTestJava` | Passed | Java 25, Minecraft 26.2, Meteor 26.2-SNAPSHOT. |
-| `test` | Passed, 272 tests | Existing behavior tests, migration/pipeline/mixin checks, and 75 shader tests. |
-| `build` | Passed | `build/libs/THM-Addons-0.3.0-SNAPSHOT.jar`. |
+| `test` | Passed, 275 tests | Existing behavior tests, migration/pipeline/mixin checks, 75 shader tests, and 3 offhand ownership regressions. |
+| `build` | Passed | `build/libs/THM-Addons-0.3.0.jar`. |
 | Shader tests | Passed, 75 tests | 35 complete programs across both backends; 4 negative syntax/linker cases and an unused-sampler regression. Background SPIR-V must contain no unbound texture resources. |
 | Registration and setting names | Unchanged | 41 registered modules, 6 commands, 15 HUDs, 8 themes; 824 setting-name occurrences compared with `1.21.11`. |
 | Optional mixin targets | Passed | Sodium 0.9.2, Xaero Minimap 26.5.1, Xaero World Map 1.46.1, all for 26.2. These are test dependencies only. |
@@ -77,6 +80,7 @@ Record each rendering result separately for OpenGL and Vulkan; confirm the activ
 - [ ] Startup without a mixin error; dynamic build branch/commit metadata and addon registration.
 - [ ] Load a copy of 1.21.11 settings: modules, HUD positions, profiles, themes, packet logger filters, limiter bypass/block selections.
 - [ ] HighwayBuilder: normal/packet mining and placing, shulker restock, autosetup, bow draw, freelook, monitor recovery/reconnect, profiles.
+- [ ] Offhand EChest restock: full inventory, `minimum-empty-slots=0`, default on-place mode, recovery, and totem safety; echests stay in the offhand until restock finishes.
 - [ ] HighwayTraveler, ElytraRoute, HighwayTools, TunnelMiner, StashMover, loadouts, and all six commands.
 - [ ] CrystalAura: regular/predicted attacks, pause/rotation behavior, damage text, and CrystalMetrics attack counting. Check Surround, AntiMine, and other PvP utilities.
 - [ ] PacketLogger: both directions, complete wire payloads, filters and file output. Check limiter/choke traffic and Packet HUD counting.
@@ -91,6 +95,7 @@ Record each rendering result separately for OpenGL and Vulkan; confirm the activ
 
 ## Progress log
 
+- 2026-10-03: Ported the 0.2.9 offhand EChest hotfix. Restock recovery preserves offhand supplies; chest/totem/tool moves use cursor-free swaps, HotbarManager preserves occupied cursors, and echest mining rejects unsuitable tools. Build and 275 tests pass. The 1.21.11 release build passes 196 tests. The reported gameplay scenario still needs an in-game check; graphics paths are unchanged.
 - 2026-10-03: Established the 26.2 dependency and Mojang-name baseline. Compilation failed; raw OpenGL ghost rendering required replacement.
 - 2026-10-03: Ported seven inventory click call sites. Compilation still reported 389 other errors.
 - 2026-10-03: Ported remaining Minecraft/Fabric/Meteor APIs, GUI extraction, entity submission, GPU pipelines, packet codecs, text rendering, and cape submission. Corrected stale mixin targets using a bytecode regression check, including optional Sodium/Xaero integrations.
