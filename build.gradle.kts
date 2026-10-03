@@ -186,6 +186,15 @@ tasks.test {
     useJUnitPlatform()
 }
 
+tasks.register<Test>("checkShaders") {
+    group = "verification"
+    description = "Compile and link all THM shader programs for OpenGL and Vulkan."
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform()
+    filter { includeTestsMatching("xyz.thm.addon.shaders.ShaderCompatibilityTest") }
+}
+
 tasks {
     processResources {
         val propertyMap = mapOf(

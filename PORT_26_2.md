@@ -20,7 +20,7 @@ Goal: preserve the released 1.21.11 modules, commands, HUDs, settings, and behav
 - [x] Make `test` and `build` pass with Java 25.
 - [x] Compare registration and saved setting names against `1.21.11`; migrate legacy packet selections.
 - [x] Port world, entity, cape, HUD, GUI, and shader paths through Blaze3D; replace raw GL ghost and Chams depth state.
-- [x] Compile background and inline shaders for OpenGL and Vulkan.
+- [x] Compile and link complete background and inline shader programs for OpenGL and Vulkan; run them as build tests.
 - [x] Update snapshot metadata and Gradle CI. GitHub Actions execution is still pending a push.
 - [ ] Verify rendering in-game with **actual OpenGL** and **actual Vulkan**, checking F3 before recording each result.
 - [ ] Verify highway automation, restock, travel, PvP, packet utilities, reconnect, and UI in-game on 26.2.
@@ -33,9 +33,9 @@ Implementation is finished. Next: use the snapshot jar for the checks below and 
 | Check | Result on 2026-10-03 | Evidence |
 | --- | --- | --- |
 | `compileJava`, `compileTestJava` | Passed | Java 25, Minecraft 26.2, Meteor 26.2-SNAPSHOT. |
-| `test` | Passed, 197 tests | Existing behavior tests plus packet migration, ghost pipeline metadata, and mixin bytecode checks. |
+| `test` | Passed, 271 tests | Existing behavior tests, migration/pipeline/mixin checks, and 74 shader tests. |
 | `build` | Passed | `build/libs/THM-Addons-0.3.0-SNAPSHOT.jar`. |
-| Shader compilation | Passed | `tools/scripts/check-shaders.sh`: 37 sources, 74 OpenGL/Vulkan checks. |
+| `checkShaders` | Passed, 74 tests | 35 complete programs (30 backgrounds, 5 blur/trip passes) across both backends; 4 negative syntax/linker checks. Uses actual Minecraft vertex source and compiled inline constants. |
 | Registration and setting names | Unchanged | 41 registered modules, 6 commands, 15 HUDs, 8 themes; 824 setting-name occurrences compared with `1.21.11`. |
 | Optional mixin targets | Passed | Sodium 0.9.2, Xaero Minimap 26.5.1, Xaero World Map 1.46.1, all for 26.2. These are test dependencies only. |
 | OpenGL in-game | Pending | Check the active backend in F3. |
@@ -70,3 +70,4 @@ Record each rendering result separately for OpenGL and Vulkan. Use Java 25, Fabr
 - 2026-10-03: Ported remaining Minecraft/Fabric/Meteor APIs, GUI extraction, entity submission, GPU pipelines, packet codecs, text rendering, and cape submission. Corrected stale mixin targets using a bytecode regression check, including optional Sodium/Xaero integrations.
 - 2026-10-03: Preserved all registrations and setting names. Added migration for 227 legacy packet names, including split entity interaction/attack selections. Replaced ghost and Meteor Chams depth handling with Blaze3D pipelines; fixed the Gas shader for Vulkan.
 - 2026-10-03: Build and 197 tests pass. All 37 shader sources compile for both backends. Updated Gradle CI and snapshot metadata. In-game rendering and gameplay checks remain pending; no client was launched or release published.
+- 2026-10-03: Added `ShaderCompatibilityTest` and `checkShaders`: 70 complete-program OpenGL/Vulkan compilation/linking checks plus 4 negative cases. Integrated into `test`/`build`, replaced the old stage-only script with a Gradle wrapper, and moved compiler installation before the CI build. Full build and 271 tests pass. Actual GPU and in-game checks remain pending.

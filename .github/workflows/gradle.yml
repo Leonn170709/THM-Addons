@@ -26,13 +26,12 @@ jobs:
           java-version: '25'
           distribution: 'temurin'
           cache: gradle
-      - name: Build and test
-        run: ./gradlew build
-      - name: Check OpenGL and Vulkan shaders
+      - name: Install shader compiler
         run: |
           sudo apt-get update
           sudo apt-get install -y glslang-tools
-          tools/scripts/check-shaders.sh
+      - name: Build and test
+        run: ./gradlew build
       - name: Upload jar
         uses: actions/upload-artifact@v4
         with:

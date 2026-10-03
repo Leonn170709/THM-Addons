@@ -74,6 +74,30 @@ forces alpha to `1.0`.
 - A shader that fails to compile is caught and disabled automatically (falls back to the
   vanilla panorama for that pick) — check the client log for `[THM] Main-menu shader '<name>'
   failed to compile` for the driver's actual error if something doesn't work.
-- Run `tools/scripts/check-shaders.sh` before shipping. It compiles all background and inline
-  shaders for OpenGL and Vulkan using `glslangValidator`. In-game logs and visual checks are
-  still required for both active backends.
+
+## Automated checks
+
+Install `glslangValidator` on PATH (`glslang` on Arch, `glslang-tools` on Ubuntu), then run:
+
+```bash
+./gradlew checkShaders
+```
+
+`tools/scripts/check-shaders.sh` runs the same task. These JUnit tests also run with `test` and
+`build`; CI installs the compiler before building.
+
+`ShaderCompatibilityTest` discovers every background `.fsh` and pairs it with the actual
+`minecraft:core/screenquad` vertex resource from the Minecraft dependency. It reads the compiled
+`*_SRC` constants for inline blur and trip programs without initializing Minecraft classes.
+Each complete program compiles and links under OpenGL GLSL and Vulkan 1.2 SPIR-V rules.
+Vulkan uses automatic bindings/locations and Minecraft's vertex/instance ID defines.
+The [glslang reference compiler](https://github.com/KhronosGroup/glslang) checks GLSL and stage linking.
+
+Negative cases verify that invalid GLSL and incompatible vertex/fragment types fail on both
+backends. Missing compiler or shader sources fail the tests instead of skipping them.
+Results: `build/reports/tests/checkShaders/index.html`, or `build/reports/tests/test/index.html`
+after `test`/`build`.
+
+These are compiler/linker tests. They do not create a GPU context or validate driver behavior,
+texture bindings, effect appearance, blur coordinates, or resize handling. In-game logs and
+visual checks remain required for both active backends; confirm each backend in F3.

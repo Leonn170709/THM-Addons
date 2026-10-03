@@ -27,12 +27,14 @@ THM Addons is a Meteor Client addon focused on highway automation, travel utilit
 3. Launch the game with Fabric.
 
 ## Building
+
 1. Clone the repository.
-2. In the repository root, run:
+2. Install Java 25 and `glslangValidator` (`glslang` on Arch, `glslang-tools` on Ubuntu).
+3. In the repository root, run:
    ```bash
    ./gradlew build
    ```
-3. The jar is created in `build/libs`.
+4. The jar is created in `build/libs`.
 
 The 26.2 code port builds and passes automated tests. This snapshot still needs in-game checks for gameplay, OpenGL, and Vulkan before release. Progress and test steps: [PORT_26_2.md](PORT_26_2.md).
 

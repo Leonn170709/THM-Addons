@@ -28,15 +28,26 @@ why, or which other settings it interacts with. If it needs more than one senten
 ## Build & run
 
 - `./gradlew build` — full build, jar lands in `build/libs`.
-- `./gradlew runClient` — launch a dev client with the addon loaded (via Fabric Loom).
+- `./gradlew checkShaders` — OpenGL/Vulkan compiler and linker tests for backgrounds, blur, and
+  trip shaders. Included in `test`/`build`; requires `glslangValidator` on PATH (`glslang` on Arch,
+  `glslang-tools` on Ubuntu). No GPU or client is started.
+- `./gradlew runClient` — launch a dev client with the addon loaded (via Fabric Loom). Autonomous
+  client tests, including creating and joining local test worlds, are allowed for this repository.
 - `./gradlew test` — JUnit 5 unit tests in `src/test/java` (also run by `build`). They run without
   a game instance: only test code that doesn't need Minecraft's bootstrap/registries (vanilla value
   classes like `BlockPos` are fine). Pull testable logic out of modules into `utils/` classes
-  (e.g. `AdaptiveRate`, `GhostBlockProbe`) instead of testing a `Module`. In-game behavior still
-  needs a manual client run. IntelliJ setup: `docs/running-tests-intellij.md`.
+  (e.g. `AdaptiveRate`, `GhostBlockProbe`) instead of testing a `Module`. Check runtime behavior
+  with client tests. IntelliJ setup: `docs/running-tests-intellij.md`.
 - `secrets.properties` (git-ignored, copy from `secrets.properties.example`) holds real API URLs.
   Building without it falls back to placeholder `example.com` URLs — the build still succeeds,
   API-backed features just won't resolve to anything real.
+
+### Client validation
+
+Use a separate run directory and local test worlds. Preserve existing worlds and player configs.
+Test OpenGL and Vulkan separately; confirm the active backend in F3 or runtime device information.
+Record startup, world join, errors, and observed results in `PORT_26_2.md`. Distinguish compiler
+checks, runtime checks, and visual checks. Shut down test clients cleanly when testing ends.
 
 ### API secrets — encrypted vault, generated file, hardened client
 
