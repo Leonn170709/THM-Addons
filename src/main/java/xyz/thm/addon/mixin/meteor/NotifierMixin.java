@@ -50,9 +50,9 @@ public abstract class NotifierMixin {
         thm$notifyDesktop(message);
     }
 
-    @Redirect(method = "onTick", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;displayClientMessage(Lnet/minecraft/network/chat/Component;Z)V"))
-    private void thm$redirectSendMessage(LocalPlayer player, Component message, boolean actionBar) {
-        player.displayClientMessage(message, actionBar);
+    @Redirect(method = "onTick", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;sendSystemMessage(Lnet/minecraft/network/chat/Component;)V"))
+    private void thm$redirectSendMessage(LocalPlayer player, Component message) {
+        player.sendSystemMessage(message);
         thm$notifyDesktop(message);
     }
 

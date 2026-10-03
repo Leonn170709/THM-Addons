@@ -16,7 +16,7 @@ import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.client.multiplayer.ClientSuggestionProvider;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.world.item.Items;
@@ -29,7 +29,7 @@ public class EclipCommand extends Command {
         super("eclip", "Elyta clip need elytra bypass most anticheats");
     }
 
-    public void build(LiteralArgumentBuilder<SharedSuggestionProvider> builder) {
+    public void build(LiteralArgumentBuilder<ClientSuggestionProvider> builder) {
         builder.then(argument("blocks", DoubleArgumentType.doubleArg()).executes(context -> {
             LocalPlayer player = mc.player;
             assert player != null;

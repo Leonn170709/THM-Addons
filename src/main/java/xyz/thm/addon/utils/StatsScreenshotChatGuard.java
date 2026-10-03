@@ -13,8 +13,8 @@ import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
-import net.minecraft.client.GuiMessage;
-import net.minecraft.client.GuiMessageTag;
+import net.minecraft.client.multiplayer.chat.GuiMessage;
+import net.minecraft.client.multiplayer.chat.GuiMessageTag;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.ChatComponent;
 import net.minecraft.network.chat.Component;
@@ -105,16 +105,17 @@ public final class StatsScreenshotChatGuard {
 
     private void replayBufferedMessages() {
         Minecraft mc = Minecraft.getInstance();
-        ChatComponent chatHud = mc.gui == null ? null : mc.gui.getChat();
+        ChatComponent chatHud = mc.gui == null ? null : mc.gui.hud.getChat();
 
         if (chatHud != null) {
-            int creationTick = mc.gui.getGuiTicks();
+            int creationTick = mc.gui.hud.getGuiTicks();
             while (!bufferedMessages.isEmpty()) {
                 BufferedMessage buffered = bufferedMessages.removeFirst();
                 ((ChatHudAccessor) chatHud).thm$addMessage(new GuiMessage(
                     creationTick,
                     buffered.message(),
                     null,
+                    net.minecraft.client.multiplayer.chat.GuiMessageSource.SYSTEM_SERVER,
                     buffered.indicator()
                 ));
             }

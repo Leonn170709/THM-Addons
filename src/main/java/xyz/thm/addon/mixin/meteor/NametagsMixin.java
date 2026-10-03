@@ -16,7 +16,7 @@ import meteordevelopment.meteorclient.systems.modules.player.NameProtect;
 import meteordevelopment.meteorclient.systems.modules.render.Nametags;
 import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.Resource;
@@ -72,7 +72,7 @@ public abstract class NametagsMixin extends Module {
     @Unique private static int thm$iconHeight = 64;
     @Unique private static boolean thm$iconSizeResolved;
 
-    @Unique private GuiGraphics thm$drawContext;
+    @Unique private GuiGraphicsExtractor thm$drawContext;
     @Unique private Player thm$player;
 
     @Inject(method = "<init>", at = @At("TAIL"))
@@ -94,7 +94,7 @@ public abstract class NametagsMixin extends Module {
 
     @Inject(method = "renderNametagPlayer", at = @At("HEAD"))
     private void thmAddon$captureContext(Render2DEvent event, Player player, boolean shadow, CallbackInfo ci) {
-        thm$drawContext = event.drawContext;
+        thm$drawContext = event.graphics;
         thm$player = player;
         thm$name = thm$getDisplayName(player);
         thm$prefixedName = player.getDisplayName() == null ? null : player.getDisplayName().getString();
@@ -182,7 +182,7 @@ public abstract class NametagsMixin extends Module {
         return endX;
     }
 
-    @Inject(method = "renderNametagPlayer", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/utils/render/NametagUtils;end(Lnet/minecraft/client/gui/GuiGraphics;)V"))
+    @Inject(method = "renderNametagPlayer", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/utils/render/NametagUtils;end(Lnet/minecraft/client/gui/GuiGraphicsExtractor;)V"))
     private void thmAddon$renderTotemPops(Render2DEvent event, Player player, boolean shadow, CallbackInfo ci) {
         String totem = thm$getTotemText();
         if (totem == null || Double.isNaN(thm$rowY)) return;
@@ -209,7 +209,7 @@ public abstract class NametagsMixin extends Module {
             x += size + THM_ICON_PAD;
         }
 
-        text.beginBig();
+        text.beginBig(event.graphics);
         text.render(totem, x, thm$rowY, THM_TOTEM_COLOR, shadow);
         text.end();
     }

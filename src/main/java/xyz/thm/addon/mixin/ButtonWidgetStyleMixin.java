@@ -7,7 +7,7 @@
 package xyz.thm.addon.mixin;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractButton;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.network.chat.Component;
@@ -28,8 +28,8 @@ public abstract class ButtonWidgetStyleMixin extends AbstractWidget {
         super(x, y, width, height, message);
     }
 
-    @Inject(method = "renderWidget", at = @At("HEAD"), cancellable = true)
-    private void thm$renderThmStyle(GuiGraphics context, int mouseX, int mouseY, float deltaTicks, CallbackInfo ci) {
+    @Inject(method = "extractContents", at = @At("HEAD"), cancellable = true)
+    private void thm$renderThmStyle(GuiGraphicsExtractor context, int mouseX, int mouseY, float deltaTicks, CallbackInfo ci) {
         if (!ThmStyledButtons.isStyled(this)) return;
 
         MainMenuFx.renderButton(context, Minecraft.getInstance().font,

@@ -15,8 +15,8 @@ travel, PvP, and QoL modules. It's not a standalone mod: it registers modules/HU
 Meteor Client via `MeteorAddon`, and several modules require Baritone to be present.
 
 The released 1.21.11 source is preserved on branch `1.21.11`. Branch `26.2` uses Mojang names,
-Java 25, Fabric Loader 0.19.5, Fabric API 0.161.0+26.2, and Meteor 26.2-SNAPSHOT. The port
-does not compile yet; fix the remaining Minecraft, Fabric, and Meteor API changes before publishing.
+Java 25, Fabric Loader 0.19.5, Fabric API 0.161.0+26.2, and Meteor 26.2-SNAPSHOT. The code port
+builds and passes automated checks. In-game feature parity and both graphics backends still need verification before publishing.
 
 ## Code comments & setting descriptions
 
@@ -27,7 +27,7 @@ why, or which other settings it interacts with. If it needs more than one senten
 
 ## Build & run
 
-- `./gradlew build` — full build, jar lands in `build/libs` once the 26.2 port compiles.
+- `./gradlew build` — full build, jar lands in `build/libs`.
 - `./gradlew runClient` — launch a dev client with the addon loaded (via Fabric Loom).
 - `./gradlew test` — JUnit 5 unit tests in `src/test/java` (also run by `build`). They run without
   a game instance: only test code that doesn't need Minecraft's bootstrap/registries (vanilla value
@@ -96,7 +96,7 @@ startup, so `THMHwyMonitor` and `HighwayTools` are registered without a separate
 - `commands/` — chat commands registered via `Commands.add()`.
 - `gui/` (+ `gui/themes`, `gui/widgets`) — custom GUI themes and screens. `HighwayBuilderScreen`
   replaces HighwayBuilder's flat settings list (tabs + search + status/start/stop/profiles). The
-  swap happens in `MinecraftClientMixin` on `setScreen`, not on `GuiTheme.moduleScreen`: third-party
+  swap happens in `GuiScreenMixin` on `Gui#setScreen`, not on `GuiTheme.moduleScreen`: third-party
   themes (e.g. Catppuccin) override that method with their own module screen.
 - `system/` — `THMSystem` (persisted addon-wide config/state) and `THMTab` (the "THM Addon" tab
   in Meteor's GUI, separate from module categories).
@@ -121,7 +121,7 @@ addon-specific settings screen — don't confuse the two when adding a new modul
   per frame in a render handler.
 - `utils/render/GhostRenderer` — entities with their real model and skin. `submit()` draws them in
   the vanilla entity pass (blocks occlude, glass and portals don't); `renderThroughWalls()` draws
-  after the world with a depth offset.
+  after the world through pipelines with depth testing disabled. Chams model depth also uses Blaze3D pipelines.
 
 **Shaders:** `.fsh` files in `src/main/resources/assets/thm-addon/shaders/` are main-menu
 background shaders, auto-discovered by `ShaderManager` (no registration needed). Format/porting
@@ -137,6 +137,10 @@ Shadertoy.
   into a `.fsh` file for the main-menu shader pool; it requires the user to paste GLSL because
   Shadertoy blocks scripted fetches, and it only supports single-pass shaders without buffers or
   feedback textures.
+- For the 26.2 port, use `.claude/commands/port.md` (`/port` in Claude Code) or
+  `.agents/skills/port/SKILL.md` (`$port` in Codex). Keep `PORT_26_2.md` current after each port run
+  and record confirmed constraints in `gotcha.md`. Preserve 1.21.11 behavior and verify rendering
+  on both OpenGL and Vulkan.
 
 ## Docs worth reading before touching these areas
 

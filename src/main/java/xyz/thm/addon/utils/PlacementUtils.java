@@ -181,9 +181,9 @@ public class PlacementUtils {
         }
         return -1;
     }
-    public static void clickSlot(int slot, net.minecraft.world.inventory.ClickType actionType) {
+    public static void clickSlot(int slot, net.minecraft.world.inventory.ContainerInput actionType) {
         if (mc.gameMode != null && mc.player != null) {
-            mc.gameMode.handleInventoryMouseClick(0, slot, 0, actionType, mc.player);
+            mc.gameMode.handleContainerInput(0, slot, 0, actionType, mc.player);
         }
     }
     public static boolean isPhased() {

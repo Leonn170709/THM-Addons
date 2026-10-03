@@ -44,7 +44,7 @@ public class WaveyCapeRenderLayer extends RenderLayer<AvatarRenderState, PlayerM
     }
 
     @Override
-    public void render(PoseStack matrices, SubmitNodeCollector queue, int light,
+    public void submit(PoseStack matrices, SubmitNodeCollector queue, int light,
                        AvatarRenderState state, float yaw, float pitch) {
         if (!WaveyCapesConfig.enabled) return;
 

@@ -23,7 +23,7 @@ public abstract class HighwayBuilderCameraMixin {
     @Shadow private float yRot;
     @Shadow private float xRot;
 
-    @ModifyArgs(method = "update", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/render/Camera;setRotation(FF)V"))
+    @ModifyArgs(method = "alignWithEntity", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/Camera;setRotation(FF)V"))
     private void thm$lockCameraToFreelookState(Args args) {
         HighwayBuilderTHM highwayBuilder = Modules.get().get(HighwayBuilderTHM.class);
         THMHwyMonitor highwayMonitor = Modules.get().get(THMHwyMonitor.class);

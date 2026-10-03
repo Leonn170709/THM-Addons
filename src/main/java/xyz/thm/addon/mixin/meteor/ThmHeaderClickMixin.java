@@ -33,7 +33,7 @@ public abstract class ThmHeaderClickMixin {
         if (!(self.theme instanceof ThmTheme) || !ThmChrome.settingsWindow()) return;
 
         if (ThmChrome.closeGlyphHit(click.x(), click.y())) {
-            Screen screen = Minecraft.getInstance().screen;
+            Screen screen = Minecraft.getInstance().gui.screen();
             if (screen != null) screen.onClose();
             cir.setReturnValue(true);
         }

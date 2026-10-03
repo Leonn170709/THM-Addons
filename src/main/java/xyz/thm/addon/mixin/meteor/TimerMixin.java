@@ -218,8 +218,8 @@ public abstract class TimerMixin extends Module {
         int unloadedCount = 0;
         for (int x = -radius; x <= radius; x++) {
             for (int z = -radius; z <= radius; z++) {
-                int chunkX = playerChunkPos.x + x;
-                int chunkZ = playerChunkPos.z + z;
+                int chunkX = playerChunkPos.x() + x;
+                int chunkZ = playerChunkPos.z() + z;
                 ChunkAccess chunk = chunkManager.getChunk(chunkX, chunkZ, ChunkStatus.FULL, false);
                 if (chunk == null) {
                     unloadedCount++;

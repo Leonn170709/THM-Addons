@@ -153,7 +153,7 @@ public class HotbarManager extends Module {
         select.action = () -> {
             ItemSettingScreen screen = new ItemSettingScreen(theme, setting);
             screen.onClosed(() -> item.set(setting.get().getDefaultInstance()));
-            MeteorClient.mc.setScreen(screen);
+            MeteorClient.mc.gui.setScreen(screen);
         };
 
         WButton clear = list.add(theme.button("Clear")).widget();

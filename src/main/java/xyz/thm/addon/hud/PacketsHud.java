@@ -22,6 +22,7 @@ import meteordevelopment.meteorclient.utils.render.color.Color;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.PacketType;
 import xyz.thm.addon.THMAddon;
 
 import java.util.Set;
@@ -46,19 +47,19 @@ public class PacketsHud extends HudElement {
         .build()
     );
 
-    private final Setting<Set<Class<? extends Packet<?>>>> sentPackets = sgGeneral.add(new PacketListSetting.Builder()
+    private final Setting<Set<PacketType<? extends Packet<?>>>> sentPackets = sgGeneral.add(new PacketListSetting.Builder()
         .name("sent-packets")
         .description("Sent packets to count.")
-        .filter(aClass -> PacketUtils.getC2SPackets().contains(aClass))
-        .defaultValue(new ObjectOpenHashSet<>(PacketUtils.getC2SPackets()))
+        .filter(aClass -> PacketUtils.getServerboundPackets().contains(aClass))
+        .defaultValue(new ObjectOpenHashSet<>(PacketUtils.getServerboundPackets()))
         .build()
     );
 
-    private final Setting<Set<Class<? extends Packet<?>>>> receivedPackets = sgGeneral.add(new PacketListSetting.Builder()
+    private final Setting<Set<PacketType<? extends Packet<?>>>> receivedPackets = sgGeneral.add(new PacketListSetting.Builder()
         .name("received-packets")
         .description("Received packets to count.")
-        .filter(aClass -> PacketUtils.getS2CPackets().contains(aClass))
-        .defaultValue(new ObjectOpenHashSet<>(PacketUtils.getS2CPackets()))
+        .filter(aClass -> PacketUtils.getClientboundPackets().contains(aClass))
+        .defaultValue(new ObjectOpenHashSet<>(PacketUtils.getClientboundPackets()))
         .build()
     );
 
@@ -74,12 +75,12 @@ public class PacketsHud extends HudElement {
 
     @EventHandler
     private void onReceive(PacketEvent.Receive event) {
-        if (receivedPackets.get().contains(event.packet.getClass())) receivedNow.incrementAndGet();
+        if (receivedPackets.get().contains(event.packet.type())) receivedNow.incrementAndGet();
     }
 
     @EventHandler
     private void onSent(PacketEvent.Sent event) {
-        if (sentPackets.get().contains(event.packet.getClass())) sentNow.incrementAndGet();
+        if (sentPackets.get().contains(event.packet.type())) sentNow.incrementAndGet();
     }
 
     @EventHandler

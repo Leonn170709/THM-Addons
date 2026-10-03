@@ -7,9 +7,9 @@
 package xyz.thm.addon.mixin.meteor;
 
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
-import meteordevelopment.meteorclient.mixininterface.IVec3d;
+import meteordevelopment.meteorclient.mixininterface.IVec3;
 import meteordevelopment.meteorclient.utils.Utils;
-import meteordevelopment.meteorclient.mixin.AbstractClientPlayerEntityAccessor;
+import meteordevelopment.meteorclient.mixin.AbstractClientPlayerAccessor;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.Settings;
@@ -89,7 +89,7 @@ public abstract class PopChamsGhostMixin implements GhostPose {
 
         // Ghosts get a random profile, so point them at the popping player's list entry for their skin.
         if (mc.getConnection() != null) {
-            ((AbstractClientPlayerEntityAccessor) this).meteor$setPlayerListEntry(mc.getConnection().getPlayerInfo(player.getUUID()));
+            ((AbstractClientPlayerAccessor) this).meteor$setPlayerInfo(mc.getConnection().getPlayerInfo(player.getUUID()));
         }
 
         // The wireframe would trace the outer skin layer too, so only the skin render gets it.
@@ -105,8 +105,8 @@ public abstract class PopChamsGhostMixin implements GhostPose {
         }
     }
 
-    @Redirect(method = "render", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/mixininterface/IVec3d;meteor$setY"))
-    private Vec3 thm$rise(IVec3d pos, double y) {
+    @Redirect(method = "render", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/mixininterface/IVec3;meteor$setY"))
+    private Vec3 thm$rise(IVec3 pos, double y) {
         if (!thm$settings()) return pos.meteor$setY(y);
 
         double next = Math.min(thm$risen + thm$riseSpeed.get() * Utils.frameTime, thm$riseHeight.get());

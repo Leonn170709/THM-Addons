@@ -8,7 +8,7 @@ package xyz.thm.addon.modules;
 
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import meteordevelopment.meteorclient.events.entity.player.BlockBreakingCooldownEvent;
-import meteordevelopment.meteorclient.events.meteor.KeyEvent;
+import meteordevelopment.meteorclient.events.meteor.KeyInputEvent;
 import meteordevelopment.meteorclient.events.meteor.MouseClickEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -192,9 +192,13 @@ public class Nuker extends Module {
             RenderUtilsTHM.renderBox(event, minX, minY, minZ, maxX, maxY, maxZ, sideColorBox.get(), lineColorBox.get(), shapeModeBox.get());
         }
 
+    }
+
+    @EventHandler
+    private void onRender2D(meteordevelopment.meteorclient.events.render.Render2DEvent event) {
         if (doubleMine.get()) {
-            if (normalMining != null) normalMining.renderLetter();
-            if (packetMining != null) packetMining.renderLetter();
+            if (normalMining != null) normalMining.renderLetter(event.graphics);
+            if (packetMining != null) packetMining.renderLetter(event.graphics);
         }
     }
 
@@ -204,7 +208,7 @@ public class Nuker extends Module {
     }
 
     @EventHandler
-    private void onKey(KeyEvent event) {
+    private void onKey(KeyInputEvent event) {
         if (event.action == KeyAction.Press) addTargetedBlockToList();
     }
 
@@ -269,12 +273,12 @@ public class Nuker extends Module {
 
         if (mode.get() == Mode.Flatten) pos1.setY((int) Math.floor(pY + 0.5));
 
-        AABB box = new AABB(pos1.getCenter(), pos2.getCenter());
+        AABB box = new AABB(net.minecraft.world.phys.Vec3.atCenterOf(pos1), net.minecraft.world.phys.Vec3.atCenterOf(pos2));
 
         // +2 vertically: range is measured from the eyes now, which sit ~1.62 above the feet the
         // iterator's radius is relative to.
         BlockIterator.register(Math.max((int) Math.ceil(range.get() + 1), maxh), Math.max((int) Math.ceil(range.get() + 2), maxv), (blockPos, blockState) -> {
-            Vec3 center = blockPos.getCenter();
+            Vec3 center = net.minecraft.world.phys.Vec3.atCenterOf(blockPos);
 
             switch (shape.get()) {
                 case Sphere -> {
@@ -632,7 +636,7 @@ public class Nuker extends Module {
         // Aim just inside the nearest face rather than at the centre, so a block only its near side
         // can see still counts as visible. Nudged inwards because a point exactly on the face is a
         // coin flip for the raycast.
-        Vec3 pos = RangeUtils.nearestPoint(blockPos).lerp(blockPos.getCenter(), 0.05);
+        Vec3 pos = RangeUtils.nearestPoint(blockPos).lerp(net.minecraft.world.phys.Vec3.atCenterOf(blockPos), 0.05);
         ClipContext raycastContext = new ClipContext(mc.player.getEyePosition(), pos, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player);
         BlockHitResult result = mc.level.clip(raycastContext);
         if (result == null || !result.getBlockPos().equals(blockPos)) {
@@ -642,7 +646,7 @@ public class Nuker extends Module {
     }
 
     private void addTargetedBlockToList() {
-        if (!selectBlockBind.get().isPressed() || mc.screen != null) return;
+        if (!selectBlockBind.get().isPressed() || mc.gui.screen() != null) return;
 
         HitResult hitResult = mc.hitResult;
         if (!(hitResult instanceof BlockHitResult bhr)) return;
@@ -716,19 +720,19 @@ public class Nuker extends Module {
             return BlockUtils.getBreakDelta(slot, blockState) * ((mc.player.tickCount - (packet ? packetStartTime : normalStartTime)) + 1);
         }
 
-        private void renderLetter() {
+        private void renderLetter(net.minecraft.client.gui.GuiGraphicsExtractor graphics) {
             vec3.set(blockPos.getX() + 0.5, blockPos.getY() + 0.5, blockPos.getZ() + 0.5);
             if (!NametagUtils.to2D(vec3, 2)) return;
 
-            NametagUtils.begin(vec3);
-            TextRenderer.get().begin(1.0, false, true);
+            NametagUtils.begin(vec3, graphics);
+            TextRenderer.get().begin(graphics, 1.0, false, true);
 
             String letter = packet ? "P" : "N";
             double w = TextRenderer.get().getWidth(letter) / 2.0;
             TextRenderer.get().render(letter, -w, 0.0, Color.WHITE, true);
 
             TextRenderer.get().end();
-            NametagUtils.end();
+            NametagUtils.end(graphics);
         }
     }
 

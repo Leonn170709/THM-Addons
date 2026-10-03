@@ -67,7 +67,7 @@ public abstract class AutoEatMixin implements StuckEatingRetryBridge {
             bephax$changeSlot(slot);
         }
         invManager.setEating(true);
-        boolean shouldPressKey = mc.screen == null;
+        boolean shouldPressKey = mc.gui.screen() == null;
         if (shouldPressKey) {
             mc.options.keyUse.setDown(true);
         }
@@ -85,7 +85,7 @@ public abstract class AutoEatMixin implements StuckEatingRetryBridge {
             return;
         }
         if (eating) {
-            boolean shouldPressKey = mc.screen == null;
+            boolean shouldPressKey = mc.gui.screen() == null;
             if (mc.options != null) {
                 if (shouldPressKey && !mc.options.keyUse.isDown()) {
                     mc.options.keyUse.setDown(true);

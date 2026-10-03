@@ -6,19 +6,20 @@
 
 package xyz.thm.addon.utils;
 
+import net.minecraft.network.protocol.game.ServerboundAttackPacket;
+
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.network.packet.c2s.play.*;
-import net.minecraft.network.protocol.game.ServerboundInteractPacket;
+import net.minecraft.network.protocol.game.*;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.decoration.ItemFrame;
-import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.ScaffoldingBlock;
@@ -248,7 +249,7 @@ public class PearlPhaser {
         AABB searchBox = AABB.unitCubeFromLowerCorner(Vec3.atCenterOf(hitResult.getBlockPos())).inflate(0.2);
         for (Entity entity : mc.level.getEntities(null, searchBox)) {
             if (entity instanceof ItemFrame itemFrame) {
-                mc.getConnection().send(ServerboundInteractPacket.createAttackPacket(entity, mc.player.isShiftKeyDown()));
+                mc.getConnection().send(new ServerboundAttackPacket(entity.getId()));
                 mc.getConnection().send(new ServerboundSwingPacket(InteractionHand.MAIN_HAND));
             }
         }
@@ -371,9 +372,9 @@ public class PearlPhaser {
     }
 
     private void performInventorySwapPVP(int pearlSlot) {
-        mc.gameMode.handleInventoryMouseClick(0, pearlSlot < 9 ? pearlSlot + 36 : pearlSlot, 0, ClickType.PICKUP, mc.player);
-        mc.gameMode.handleInventoryMouseClick(0, ((PlayerInventoryAccessor) mc.player.getInventory()).getSelectedSlot() + 36, 0, ClickType.PICKUP, mc.player);
-        mc.gameMode.handleInventoryMouseClick(0, pearlSlot < 9 ? pearlSlot + 36 : pearlSlot, 0, ClickType.PICKUP, mc.player);
+        mc.gameMode.handleContainerInput(0, pearlSlot < 9 ? pearlSlot + 36 : pearlSlot, 0, ContainerInput.PICKUP, mc.player);
+        mc.gameMode.handleContainerInput(0, ((PlayerInventoryAccessor) mc.player.getInventory()).getSelectedSlot() + 36, 0, ContainerInput.PICKUP, mc.player);
+        mc.gameMode.handleContainerInput(0, pearlSlot < 9 ? pearlSlot + 36 : pearlSlot, 0, ContainerInput.PICKUP, mc.player);
     }
 
     public enum SelfPlaceType {

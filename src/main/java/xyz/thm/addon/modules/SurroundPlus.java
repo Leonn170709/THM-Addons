@@ -6,6 +6,8 @@
 
 package xyz.thm.addon.modules;
 
+import net.minecraft.network.protocol.game.ServerboundAttackPacket;
+
 import xyz.thm.addon.utils.PacketPlaceTracker;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
@@ -26,12 +28,12 @@ import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientboundAddEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundExplodePacket;
-import net.minecraft.network.protocol.game.ServerboundInteractPacket;
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
-import net.minecraft.util.math.*;
+import net.minecraft.core.*;
+import net.minecraft.world.phys.*;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -566,7 +568,7 @@ public class SurroundPlus extends Module {
     }
 
     private void handlePacket(Packet<?> packet) {
-        if (packet instanceof ClientboundAddEntityPacket p && desyncProtection.get() && p.getType() == EntityType.END_CRYSTAL) {
+        if (packet instanceof ClientboundAddEntityPacket p && desyncProtection.get() && p.getType() == net.minecraft.world.entity.EntityTypes.END_CRYSTAL) {
             BlockPos pos = BlockPos.containing(p.getX(), p.getY(), p.getZ());
             if (!mc.level.getBlockState(pos).canBeReplaced()) mc.level.setBlockAndUpdate(pos, Blocks.AIR.defaultBlockState());
         }
@@ -592,7 +594,7 @@ public class SurroundPlus extends Module {
             return;
         }
 
-        if (packet instanceof ClientboundAddEntityPacket p && prePlaceCrystalSpawn.get() && p.getType() == EntityType.END_CRYSTAL) {
+        if (packet instanceof ClientboundAddEntityPacket p && prePlaceCrystalSpawn.get() && p.getType() == net.minecraft.world.entity.EntityTypes.END_CRYSTAL) {
             BlockPos pos = BlockPos.containing(p.getX(), p.getY(), p.getZ());
             if (surroundCache.contains(pos)) placeFallbackDirect(pos);
         }
@@ -611,7 +613,7 @@ public class SurroundPlus extends Module {
                 .findFirst()
                 .orElse(null);
             if (crystal != null) {
-                mc.getConnection().send(ServerboundInteractPacket.createAttackPacket(crystal, mc.player.isShiftKeyDown()));
+                mc.getConnection().send(new ServerboundAttackPacket(crystal.getId()));
                 mc.getConnection().send(new ServerboundSwingPacket(InteractionHand.MAIN_HAND));
                 return;
             }

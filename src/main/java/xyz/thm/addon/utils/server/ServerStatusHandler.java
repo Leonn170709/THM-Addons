@@ -11,7 +11,7 @@ import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.GuiMessageTag;
+import net.minecraft.client.multiplayer.chat.GuiMessageTag;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.GameType;
@@ -508,7 +508,7 @@ public final class ServerStatusHandler {
         int radius = mc.options.getEffectiveRenderDistance();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
-                LevelChunk chunk = mc.level.getChunkSource().getChunkNow(center.x + dx, center.z + dz);
+                LevelChunk chunk = mc.level.getChunkSource().getChunkNow(center.x() + dx, center.z() + dz);
                 if (chunk == null) continue;
                 for (LevelChunkSection section : chunk.getSections()) {
                     if (section == null || section.hasOnlyAir()) continue;

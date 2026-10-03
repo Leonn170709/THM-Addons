@@ -10,7 +10,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import meteordevelopment.meteorclient.commands.Command;
 import net.minecraft.client.multiplayer.PlayerInfo;
-import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.client.multiplayer.ClientSuggestionProvider;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
@@ -34,7 +34,7 @@ public class UUIDCommand extends Command {
     }
 
     @Override
-    public void build(LiteralArgumentBuilder<SharedSuggestionProvider> builder) {
+    public void build(LiteralArgumentBuilder<ClientSuggestionProvider> builder) {
         // .uuid -> eigene UUID
         builder.executes(context -> {
             if (mc.player == null) return SINGLE_SUCCESS;

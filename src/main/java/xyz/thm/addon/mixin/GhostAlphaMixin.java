@@ -6,15 +6,22 @@
 
 package xyz.thm.addon.mixin;
 
-import net.minecraft.client.renderer.SubmitNodeStorage;
+import net.minecraft.client.renderer.SubmitNodeCollection;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import com.llamalad7.mixinextras.sugar.Local;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import xyz.thm.addon.utils.render.GhostRenderer;
 
 /** Last stop before the tint is baked in, so Meteor's Chams color fades along with the ghost. */
-@Mixin(SubmitNodeStorage.class)
+@Mixin(SubmitNodeCollection.class)
 public class GhostAlphaMixin {
+    @ModifyVariable(method = "submitModel", at = @At("HEAD"), argsOnly = true)
+    private RenderType thm$chamsDepth(RenderType type, @Local(argsOnly = true) Object state) {
+        return GhostRenderer.chamsRenderType(type, state);
+    }
+
     @ModifyVariable(method = "submitModel", at = @At("HEAD"), argsOnly = true, ordinal = 2)
     private int thm$fadeGhost(int color) {
         if (!GhostRenderer.isFading()) return color;

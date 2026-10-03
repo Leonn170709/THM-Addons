@@ -22,8 +22,8 @@ import meteordevelopment.meteorclient.systems.modules.misc.DiscordPresence;
 import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.misc.MeteorStarscript;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.gui.screen.option.*;
-import net.minecraft.client.gui.screen.world.*;
+import net.minecraft.client.gui.screens.options.*;
+import net.minecraft.client.gui.screens.worldselection.*;
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.DirectJoinServerScreen;
 import net.minecraft.client.gui.screens.LevelLoadingScreen;
@@ -41,11 +41,12 @@ import net.minecraft.client.gui.screens.options.VideoSettingsScreen;
 import net.minecraft.client.gui.screens.options.controls.ControlsScreen;
 import net.minecraft.client.gui.screens.packs.PackSelectionScreen;
 import net.minecraft.client.gui.screens.worldselection.CreateWorldScreen;
-import net.minecraft.client.gui.screens.worldselection.EditGameRulesScreen;
+import net.minecraft.client.gui.screens.worldselection.WorldCreationGameRulesScreen;
 import net.minecraft.client.gui.screens.worldselection.EditWorldScreen;
 import net.minecraft.client.gui.screens.worldselection.SelectWorldScreen;
 import net.minecraft.realms.RealmsScreen;
-import net.minecraft.util.Tuple;
+import java.util.Map;
+import java.util.AbstractMap;
 import net.minecraft.util.Util;
 import org.meteordev.starscript.Script;
 import xyz.thm.addon.THMAddon;
@@ -129,7 +130,7 @@ public class DiscordRPC extends Module {
     private final List<Script> line2Scripts = new ArrayList<>();
     private int line2Ticks, line2I;
 
-    public static final List<Tuple<String, String>> customStates = new ArrayList<>();
+    public static final List<Map.Entry<String, String>> customStates = new ArrayList<>();
 
     static {
         registerCustomState("com.terraformersmc.modmenu.gui", "Browsing mods");
@@ -144,17 +145,17 @@ public class DiscordRPC extends Module {
 
     public static void registerCustomState(String packageName, String state) {
         for (var pair : customStates) {
-            if (pair.getA().equals(packageName)) {
-                pair.setB(state);
+            if (pair.getKey().equals(packageName)) {
+                pair.setValue(state);
                 return;
             }
         }
 
-        customStates.add(new Tuple<>(packageName, state));
+        customStates.add(new AbstractMap.SimpleEntry<>(packageName, state));
     }
 
     public static void unregisterCustomState(String packageName) {
-        customStates.removeIf(pair -> pair.getA().equals(packageName));
+        customStates.removeIf(pair -> pair.getKey().equals(packageName));
     }
 
     @Override
@@ -180,7 +181,7 @@ public class DiscordRPC extends Module {
     }
 
     public void checkRPC() {
-        if (mc.screen == null) return;
+        if (mc.gui.screen() == null) return;
         DiscordPresence presence = Modules.get().get(DiscordPresence.class);
         if (Modules.get().get(DiscordPresence.class) == null) return;
         assert presence != null;
@@ -276,25 +277,25 @@ public class DiscordRPC extends Module {
             if (!lastWasInMainMenu) {
                 rpc.setDetails("THM Addon " + THMAddon.VERSION);
 
-                if (mc.screen instanceof TitleScreen) rpc.setState("In main menu");
-                else if (mc.screen instanceof SelectWorldScreen) rpc.setState("Selecting world");
-                else if (mc.screen instanceof CreateWorldScreen || mc.screen instanceof EditGameRulesScreen) rpc.setState("Creating world");
-                else if (mc.screen instanceof EditWorldScreen) rpc.setState("Editing world");
-                else if (mc.screen instanceof LevelLoadingScreen) rpc.setState("Loading world");
-                else if (mc.screen instanceof JoinMultiplayerScreen) rpc.setState("Selecting server");
-                else if (mc.screen instanceof ManageServerScreen) rpc.setState("Adding server");
-                else if (mc.screen instanceof ConnectScreen || mc.screen instanceof DirectJoinServerScreen) rpc.setState("Connecting to server");
-                else if (mc.screen instanceof WidgetScreen) rpc.setState("Browsing Meteor's GUI");
-                else if (mc.screen instanceof OptionsScreen || mc.screen instanceof SkinCustomizationScreen || mc.screen instanceof SoundOptionsScreen || mc.screen instanceof VideoSettingsScreen || mc.screen instanceof ControlsScreen || mc.screen instanceof LanguageSelectScreen || mc.screen instanceof ChatOptionsScreen || mc.screen instanceof PackSelectionScreen || mc.screen instanceof AccessibilityOptionsScreen) rpc.setState("Changing options");
-                else if (mc.screen instanceof WinScreen) rpc.setState("Reading credits");
-                else if (mc.screen instanceof RealmsScreen) rpc.setState("Browsing Realms");
+                if (mc.gui.screen() instanceof TitleScreen) rpc.setState("In main menu");
+                else if (mc.gui.screen() instanceof SelectWorldScreen) rpc.setState("Selecting world");
+                else if (mc.gui.screen() instanceof CreateWorldScreen || mc.gui.screen() instanceof WorldCreationGameRulesScreen) rpc.setState("Creating world");
+                else if (mc.gui.screen() instanceof EditWorldScreen) rpc.setState("Editing world");
+                else if (mc.gui.screen() instanceof LevelLoadingScreen) rpc.setState("Loading world");
+                else if (mc.gui.screen() instanceof JoinMultiplayerScreen) rpc.setState("Selecting server");
+                else if (mc.gui.screen() instanceof ManageServerScreen) rpc.setState("Adding server");
+                else if (mc.gui.screen() instanceof ConnectScreen || mc.gui.screen() instanceof DirectJoinServerScreen) rpc.setState("Connecting to server");
+                else if (mc.gui.screen() instanceof WidgetScreen) rpc.setState("Browsing Meteor's GUI");
+                else if (mc.gui.screen() instanceof OptionsScreen || mc.gui.screen() instanceof SkinCustomizationScreen || mc.gui.screen() instanceof SoundOptionsScreen || mc.gui.screen() instanceof VideoSettingsScreen || mc.gui.screen() instanceof ControlsScreen || mc.gui.screen() instanceof LanguageSelectScreen || mc.gui.screen() instanceof ChatOptionsScreen || mc.gui.screen() instanceof PackSelectionScreen || mc.gui.screen() instanceof AccessibilityOptionsScreen) rpc.setState("Changing options");
+                else if (mc.gui.screen() instanceof WinScreen) rpc.setState("Reading credits");
+                else if (mc.gui.screen() instanceof RealmsScreen) rpc.setState("Browsing Realms");
                 else {
                     boolean setState = false;
-                    if (mc.screen != null) {
-                        String className = mc.screen.getClass().getName();
+                    if (mc.gui.screen() != null) {
+                        String className = mc.gui.screen().getClass().getName();
                         for (var pair : customStates) {
-                            if (className.startsWith(pair.getA())) {
-                                rpc.setState(pair.getB());
+                            if (className.startsWith(pair.getKey())) {
+                                rpc.setState(pair.getValue());
                                 setState = true;
                                 break;
                             }

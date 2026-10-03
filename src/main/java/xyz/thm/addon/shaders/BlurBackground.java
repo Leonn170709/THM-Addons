@@ -6,7 +6,9 @@
 
 package xyz.thm.addon.shaders;
 
+import com.mojang.blaze3d.GpuFormat;
 import com.mojang.blaze3d.buffers.GpuBuffer;
+import com.mojang.blaze3d.pipeline.BindGroupLayout;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.platform.Window;
@@ -19,15 +21,13 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
-import com.mojang.blaze3d.textures.TextureFormat;
-import org.lwjgl.system.MemoryStack;
-import xyz.thm.addon.THMAddon;
-
 import java.nio.ByteBuffer;
-import java.util.OptionalInt;
+import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
+import org.lwjgl.system.MemoryStack;
+import xyz.thm.addon.THMAddon;
 
 // "Frosted glass" blur for just the window rectangle (not the whole shader background): copies
 // that region of the already-rendered framebuffer into a small offscreen texture, runs a real
@@ -150,7 +150,7 @@ class BlurBackground {
         GpuDevice device = RenderSystem.getDevice();
         if (!ensurePipelines(device)) return false;
 
-        RenderTarget framebuffer = Minecraft.getInstance().getMainRenderTarget();
+        RenderTarget framebuffer = Minecraft.getInstance().gameRenderer.mainRenderTarget();
         GpuTextureView mainView = framebuffer.getColorTextureView();
         if (mainView == null) return false;
 
@@ -181,22 +181,20 @@ class BlurBackground {
         if (!ensurePipelines(device)) return false;
 
         Minecraft mc = Minecraft.getInstance();
-        RenderTarget framebuffer = mc.getMainRenderTarget();
+        RenderTarget framebuffer = mc.gameRenderer.mainRenderTarget();
         GpuTextureView mainView = framebuffer.getColorTextureView();
         if (mainView == null) return false;
 
         Window window = mc.getWindow();
         double scaleX = framebuffer.width / (double) window.getGuiScaledWidth();
         double scaleY = framebuffer.height / (double) window.getGuiScaledHeight();
-        int px1 = (int) Math.round(x1 * scaleX);
-        int pw = (int) Math.round((x2 - x1) * scaleX);
-        int ph = (int) Math.round((y2 - y1) * scaleY);
+        int px1 = Math.clamp((int) Math.round(x1 * scaleX), 0, framebuffer.width);
+        int px2 = Math.clamp((int) Math.round(x2 * scaleX), px1, framebuffer.width);
+        int py1 = Math.clamp((int) Math.round(framebuffer.height - y2 * scaleY), 0, framebuffer.height);
+        int py2 = Math.clamp((int) Math.round(framebuffer.height - y1 * scaleY), py1, framebuffer.height);
+        int pw = px2 - px1;
+        int ph = py2 - py1;
         if (pw <= 0 || ph <= 0) return false;
-        // gl_FragCoord/glScissor both use bottom-left origin (Y up) in raw GL, unlike every 2D
-        // coordinate elsewhere in this codebase (Y down from the top) - flip once here so the
-        // scissored region and the fragment shader's sampling agree with where the window
-        // actually is, instead of a several-pixel seam at the top/bottom from the mismatch.
-        int py1 = (int) Math.round(framebuffer.height - y2 * scaleY);
 
         int workW = Math.max(MIN_TEXTURE_SIZE, pw / WORK_SCALE);
         int workH = Math.max(MIN_TEXTURE_SIZE, ph / WORK_SCALE);
@@ -219,12 +217,13 @@ class BlurBackground {
 
         // Pass 4: blit A back onto the main framebuffer at full size, scissored to the window
         // rect - the bilinear sampler does the upscale, which is fine since it's already blurred.
-        try (RenderPass pass = encoder.createRenderPass(() -> "THM blur blit", mainView, OptionalInt.empty())) {
+        try (RenderPass pass = encoder.createRenderPass(() -> "THM blur blit", mainView, Optional.empty())) {
             pass.enableScissor(px1, py1, pw, ph);
             pass.setPipeline(blitPipeline);
+            RenderSystem.bindDefaultUniforms(pass);
             pass.setUniform("BlitRect", rectBuffer);
             pass.bindTexture("InSampler", viewA, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
-            pass.draw(0, 3);
+            pass.draw(3, 1, 0, 0);
         }
 
         return true;
@@ -232,11 +231,12 @@ class BlurBackground {
 
     private static void drawFullscreen(CommandEncoder encoder, RenderPipeline pipeline, GpuTextureView target,
                                         String uniformName, GpuBuffer uniformBuffer, GpuTextureView source) {
-        try (RenderPass pass = encoder.createRenderPass(() -> "THM blur pass", target, OptionalInt.empty())) {
+        try (RenderPass pass = encoder.createRenderPass(() -> "THM blur pass", target, Optional.empty())) {
             pass.setPipeline(pipeline);
+            RenderSystem.bindDefaultUniforms(pass);
             pass.setUniform(uniformName, uniformBuffer);
             pass.bindTexture("InSampler", source, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
-            pass.draw(0, 3);
+            pass.draw(3, 1, 0, 0);
         }
     }
 
@@ -276,24 +276,24 @@ class BlurBackground {
             .withLocation(Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "blur_pass"))
             .withVertexShader(VSH_ID)
             .withFragmentShader(BLUR_FSH_ID)
-            .withUniform("BlurParams", UniformType.UNIFORM_BUFFER)
-            .withSampler("InSampler")
+            .withBindGroupLayout(BindGroupLayout.builder().withUniform("BlurParams", UniformType.UNIFORM_BUFFER).build())
+            .withBindGroupLayout(BindGroupLayout.builder().withSampler("InSampler").build())
             .build();
 
         blitPipeline = RenderPipeline.builder(RenderPipelines.POST_PROCESSING_SNIPPET)
             .withLocation(Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "blur_blit"))
             .withVertexShader(VSH_ID)
             .withFragmentShader(BLIT_FSH_ID)
-            .withUniform("BlitRect", UniformType.UNIFORM_BUFFER)
-            .withSampler("InSampler")
+            .withBindGroupLayout(BindGroupLayout.builder().withUniform("BlitRect", UniformType.UNIFORM_BUFFER).build())
+            .withBindGroupLayout(BindGroupLayout.builder().withSampler("InSampler").build())
             .build();
 
         extractPipeline = RenderPipeline.builder(RenderPipelines.POST_PROCESSING_SNIPPET)
             .withLocation(Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "blur_extract"))
             .withVertexShader(VSH_ID)
             .withFragmentShader(EXTRACT_FSH_ID)
-            .withUniform("BlitRect", UniformType.UNIFORM_BUFFER)
-            .withSampler("InSampler")
+            .withBindGroupLayout(BindGroupLayout.builder().withUniform("BlitRect", UniformType.UNIFORM_BUFFER).build())
+            .withBindGroupLayout(BindGroupLayout.builder().withSampler("InSampler").build())
             .build();
 
         boolean blurOk = device.precompilePipeline(blurPipeline, BlurBackground::shaderSource).isValid();
@@ -319,7 +319,7 @@ class BlurBackground {
         if (scaledTexture != null) scaledTexture.close();
 
         scaledTexture = device.createTexture(() -> "THM shader scaled",
-            GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, TextureFormat.RGBA8, w, h, 1, 1);
+            GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, GpuFormat.RGBA8_UNORM, w, h, 1, 1);
         scaledView = device.createTextureView(scaledTexture);
         scaledWidth = w;
         scaledHeight = h;
@@ -334,8 +334,8 @@ class BlurBackground {
         if (textureB != null) textureB.close();
 
         int usage = GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING;
-        textureA = device.createTexture(() -> "THM blur A", usage, TextureFormat.RGBA8, w, h, 1, 1);
-        textureB = device.createTexture(() -> "THM blur B", usage, TextureFormat.RGBA8, w, h, 1, 1);
+        textureA = device.createTexture(() -> "THM blur A", usage, GpuFormat.RGBA8_UNORM, w, h, 1, 1);
+        textureB = device.createTexture(() -> "THM blur B", usage, GpuFormat.RGBA8_UNORM, w, h, 1, 1);
         viewA = device.createTextureView(textureA);
         viewB = device.createTextureView(textureB);
         texWidth = w;

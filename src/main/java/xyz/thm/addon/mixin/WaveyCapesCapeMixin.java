@@ -16,7 +16,7 @@ import xyz.thm.addon.waveycapes.WaveyCapesConfig;
 @Mixin(CapeLayer.class)
 public class WaveyCapesCapeMixin {
 
-    @Inject(method = "render", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "submit", at = @At("HEAD"), cancellable = true)
     private void thm$skipWhenWavyEnabled(CallbackInfo ci) {
         if (WaveyCapesConfig.enabled) ci.cancel();
     }

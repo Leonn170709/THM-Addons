@@ -54,7 +54,7 @@ public abstract class NotebotMixin extends Module {
     @Shadow private boolean anyNoteblockTuned;
     @Shadow @Final private Map<Note, BlockPos> noteBlockPositions;
     @Shadow @Final private Map<BlockPos, Integer> tuneHits;
-    @Shadow @Final private List<BlockPos> clickedBlocks;
+    @Shadow @Final private java.util.Set<BlockPos> clickedBlocks;
 
     @Shadow public abstract void pause();
 

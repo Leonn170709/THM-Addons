@@ -24,6 +24,11 @@ base {
 repositories {
     mavenCentral()
     maven {
+        name = "modrinth"
+        url = uri("https://api.modrinth.com/maven")
+        content { includeGroup("maven.modrinth") }
+    }
+    maven {
         name = "meteor-maven"
         url = uri("https://maven.meteordev.org/releases")
     }
@@ -44,6 +49,11 @@ dependencies {
 
     // Baritone
     compileOnly(libs.baritone)
+
+    // Inspect optional mixin targets without loading these mods into the dev client.
+    testRuntimeOnly("maven.modrinth:sodium:mc26.2-0.9.2-fabric")
+    testRuntimeOnly("maven.modrinth:xaeros-minimap:fabric-26.2-26.5.1")
+    testRuntimeOnly("maven.modrinth:xaeros-world-map:fabric-26.2-1.46.1")
 
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
@@ -230,7 +240,7 @@ tasks {
         options.release = 25
         options.isFork = true
         options.forkOptions.memoryMaximumSize = "3g"
-options.compilerArgs.add("-Xlint:deprecation")
+        options.compilerArgs.add("-Xlint:deprecation")
         options.compilerArgs.add("-Xlint:unchecked")
     }
 }

@@ -93,7 +93,7 @@ public final class StartupDialog {
             // tinyfd refuses any text containing quotes and shows its own error instead of the message.
             String text = hasUrl ? message + "\n\nOK opens the download page, Cancel just closes." : message;
             boolean download = TinyFileDialogs.tinyfd_messageBox(
-                withoutQuotes(title), withoutQuotes(text), hasUrl ? "okcancel" : "ok", "error", true);
+                withoutQuotes(title), withoutQuotes(text), hasUrl ? "okcancel" : "ok", "error", 1) != 0;
             if (hasUrl && download) openBrowser(downloadUrl);
             return true;
         } catch (Throwable e) {

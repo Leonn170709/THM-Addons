@@ -12,7 +12,7 @@ import meteordevelopment.meteorclient.commands.Command;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
-import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.client.multiplayer.ClientSuggestionProvider;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 
 public class DesyncCommand extends Command {
@@ -35,7 +35,7 @@ public class DesyncCommand extends Command {
     }
 
     @Override
-    public void build(LiteralArgumentBuilder<SharedSuggestionProvider> builder) {
+    public void build(LiteralArgumentBuilder<ClientSuggestionProvider> builder) {
         // .desync — toggles
         builder.executes(context -> {
             if (desynced) disable();

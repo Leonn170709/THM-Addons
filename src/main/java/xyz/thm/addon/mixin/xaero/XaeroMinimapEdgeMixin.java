@@ -8,7 +8,7 @@ package xyz.thm.addon.mixin.xaero;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.level.Level;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.level.chunk.EmptyLevelChunk;
 import net.minecraft.world.level.chunk.LevelChunk;
 import org.spongepowered.asm.mixin.Mixin;
@@ -29,14 +29,14 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 public abstract class XaeroMinimapEdgeMixin {
     @Redirect(
         method = "writeTile",
-        at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;getChunk(II)Lnet/minecraft/world/level/chunk/LevelChunk;", remap = true)
+        at = @At(value = "INVOKE", target = "Lnet/minecraft/client/multiplayer/ClientLevel;getChunk(II)Lnet/minecraft/world/level/chunk/LevelChunk;", remap = true)
     )
-    private LevelChunk thm$neighborAlwaysLoaded(Level world, int x, int z) {
+    private LevelChunk thm$neighborAlwaysLoaded(ClientLevel world, int x, int z) {
         LevelChunk chunk = world.getChunk(x, z);
         if (!(chunk instanceof EmptyLevelChunk)) return chunk;
 
         Player player = Minecraft.getInstance().player;
         if (player == null) return chunk;
-        return world.getChunk(player.chunkPosition().x, player.chunkPosition().z);
+        return world.getChunk(player.chunkPosition().x(), player.chunkPosition().z());
     }
 }

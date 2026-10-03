@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import meteordevelopment.meteorclient.systems.modules.Modules;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.inventory.AbstractRecipeBookScreen;
@@ -91,8 +91,8 @@ public abstract class InventoryScreenMixin extends AbstractRecipeBookScreen<Inve
         if (saveLoadoutButton != null) saveLoadoutButton.visible = loadouts.isActive();
         if (loadLoadoutButton != null) loadLoadoutButton.visible = loadouts.isActive();
     }
-    @Inject(method = "render", at = @At("TAIL"))
-    private void mixinRender(GuiGraphics context, int mouseX, int mouseY, float delta, CallbackInfo ci) {
+    @Inject(method = "extractRenderState(Lnet/minecraft/client/gui/GuiGraphicsExtractor;IIF)V", at = @At("TAIL"))
+    private void mixinRender(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta, CallbackInfo ci) {
         if (loadouts == null) {
             Modules modules = Modules.get();
             if (modules == null ) return;

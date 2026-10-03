@@ -17,6 +17,7 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.protocol.game.ServerboundInteractPacket;
+import net.minecraft.network.protocol.game.ServerboundAttackPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 import net.minecraft.world.entity.Entity;
@@ -24,7 +25,6 @@ import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
 import net.minecraft.world.item.Items;
 import xyz.thm.addon.THMAddon;
 
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
@@ -33,7 +33,6 @@ public class CrystalMetrics extends HudElement {
     public static final HudElementInfo<CrystalMetrics> INFO = new HudElementInfo<>(THMAddon.HUD_GROUP, "crystal-metrics", "ThunderHack Style Monitor.", CrystalMetrics::new);
 
     private final Minecraft mc = Minecraft.getInstance();
-    private static Field entityIdField;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgVisuals = settings.createGroup("Visuals");
@@ -60,20 +59,6 @@ public class CrystalMetrics extends HudElement {
     private long lastGraphUpdate = 0;
     private double currentCPA = 0;
 
-    static {
-        try {
-            for (Field f : ServerboundInteractPacket.class.getDeclaredFields()) {
-                if (f.getType() == int.class) {
-                    f.setAccessible(true);
-                    entityIdField = f;
-                    break;
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
     public CrystalMetrics() {
         super(INFO);
         MeteorClient.EVENT_BUS.subscribe(this);
@@ -91,12 +76,11 @@ public class CrystalMetrics extends HudElement {
         else if (event.packet instanceof ServerboundUseItemPacket p) {
             if (mc.player.getItemInHand(p.getHand()).getItem() == Items.END_CRYSTAL) action = true;
         }
+        else if (event.packet instanceof ServerboundAttackPacket p) {
+            action = mc.level.getEntity(p.entityId()) instanceof EndCrystal;
+        }
         else if (event.packet instanceof ServerboundInteractPacket p) {
-            Entity t = null;
-            if (entityIdField != null) {
-                try { t = mc.level.getEntity((int) entityIdField.get(p)); } catch (Exception ignored) {}
-            }
-            if (t instanceof EndCrystal) action = true;
+            action = mc.level.getEntity(p.entityId()) instanceof EndCrystal;
         }
 
         if (action) {

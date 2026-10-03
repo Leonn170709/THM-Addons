@@ -42,7 +42,7 @@ public class OffhandMixin {
 
         // With a screen open the player is dragging that stack — theirs, don't touch it, just sit out.
         // Otherwise it is a leftover from a desynced swap: park it so the module isn't stuck forever.
-        if (MeteorClient.mc.screen != null || !InventoryManager.parkCursor()) ci.cancel();
+        if (MeteorClient.mc.gui.screen() != null || !InventoryManager.parkCursor()) ci.cancel();
     }
 
     @Inject(method = "onTick", at = @At("RETURN"))

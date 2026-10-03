@@ -341,16 +341,7 @@ public class FriendsSyncModule extends Module {
 
         static void submit(net.minecraft.client.Minecraft mc, String cmd) {
             CommandSubmitter submitter = new CommandSubmitter();
-            try {
-                java.lang.reflect.Field f = net.minecraft.client.gui.screens.Screen.class.getDeclaredField("client");
-                f.setAccessible(true);
-                f.set(submitter, mc);
-                submitter.handleChatInput(cmd, false);
-            } catch (Exception e) {
-                // fallback: goes through Meteor's sendChatMessage hook
-                if (cmd.startsWith("/")) mc.player.connection.sendCommand(cmd.substring(1));
-                else mc.player.connection.sendChat(cmd);
-            }
+            submitter.handleChatInput(cmd, false);
         }
     }
 }

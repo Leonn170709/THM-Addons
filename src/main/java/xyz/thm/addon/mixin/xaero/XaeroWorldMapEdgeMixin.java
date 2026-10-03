@@ -31,6 +31,6 @@ public abstract class XaeroWorldMapEdgeMixin {
 
         Player player = Minecraft.getInstance().player;
         if (player == null) return chunk;
-        return world.getChunk(player.chunkPosition().x, player.chunkPosition().z);
+        return world.getChunk(player.chunkPosition().x(), player.chunkPosition().z());
     }
 }

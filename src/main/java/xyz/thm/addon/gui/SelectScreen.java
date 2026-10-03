@@ -22,11 +22,11 @@ import java.util.function.Function;
 
 /**
  * Reusable searchable single-select picker screen (like PaketLimiter's packet list, but one pick).
- * Open with {@code mc.setScreen(...)}; the callback fires with the chosen option and the screen closes.
+ * Open with {@code mc.gui.setScreen(...)}; the callback fires with the chosen option and the screen closes.
  *
  * <pre>{@code
- * mc.setScreen(SelectScreen.of(theme, "Select Packet", names, name -> { selected = name; refresh(); }));
- * mc.setScreen(new SelectScreen<>(theme, "Select Home", homes, Home::name, home -> ...));
+ * mc.gui.setScreen(SelectScreen.of(theme, "Select Packet", names, name -> { selected = name; refresh(); }));
+ * mc.gui.setScreen(new SelectScreen<>(theme, "Select Home", homes, Home::name, home -> ...));
  * }</pre>
  */
 public class SelectScreen<T> extends WindowScreen {

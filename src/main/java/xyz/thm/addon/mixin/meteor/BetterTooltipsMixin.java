@@ -53,7 +53,7 @@ public class BetterTooltipsMixin extends Module {
 	private final Setting<BetterTooltips.DisplayWhen> displayWhen = (Setting<BetterTooltips.DisplayWhen>)sgGeneral.get("display-when");
 
 
-	@ModifyArgs(method = "appendTooltip", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/events/game/ItemStackTooltipEvent;appendStart(Lnet/minecraft/text/Text;)V"))
+	@ModifyArgs(method = "appendTooltip", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/events/game/ItemStackTooltipEvent;appendStart(Lnet/minecraft/network/chat/Component;)V"))
 	private void appendTooltipStart(Args args) {
 		Component text = args.get(0);
 		String str = THMUtils.GetVerbatim(text.getString());
@@ -75,7 +75,7 @@ public class BetterTooltipsMixin extends Module {
 		}
 	}
 
-	@ModifyArgs(method = "appendTooltip", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/events/game/ItemStackTooltipEvent;appendEnd(Lnet/minecraft/text/Text;)V"))
+	@ModifyArgs(method = "appendTooltip", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/events/game/ItemStackTooltipEvent;appendEnd(Lnet/minecraft/network/chat/Component;)V"))
 	private void appendTooltipEnd(Args args) {
 		Component text = args.get(0);
 		String str = THMUtils.GetVerbatim(text.getString());
@@ -101,7 +101,7 @@ public class BetterTooltipsMixin extends Module {
 		}
 	}
 
-	@ModifyArgs(method = "appendPreviewTooltipText", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/events/game/ItemStackTooltipEvent;appendEnd(Lnet/minecraft/text/Text;)V"))
+	@ModifyArgs(method = "appendPreviewTooltipText", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/events/game/ItemStackTooltipEvent;appendEnd(Lnet/minecraft/network/chat/Component;)V"))
 	private void appendPreviewTooltipTextEnd(Args args) {
 		Component text = args.get(0);
 		String str = THMUtils.GetVerbatim(text.getString());

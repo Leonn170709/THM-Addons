@@ -6,6 +6,8 @@
 
 package xyz.thm.addon.modules;
 
+import net.minecraft.network.protocol.game.ServerboundAttackPacket;
+
 import meteordevelopment.meteorclient.events.entity.EntityAddedEvent;
 import meteordevelopment.meteorclient.events.render.Render2DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -26,7 +28,6 @@ import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.network.protocol.game.ServerboundInteractPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.LivingEntity;
@@ -40,7 +41,6 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import xyz.thm.addon.THMAddon;
-import xyz.thm.addon.mixin.accessor.PlayerInteractEntityC2SPacketAccessor;
 import xyz.thm.addon.system.THMSystem;
 import xyz.thm.addon.utils.PlacementUtils;
 import xyz.thm.addon.utils.RenderUtilsTHM;
@@ -66,14 +66,8 @@ import java.util.Map;
  * per-invocation rotate methods - it never touches RotationUtils' shared singleton fields
  * (movementFix/mouseSensFix/preserveTicks/webJumpFixEnabled), which are global to every module.
  *
- * ID-predict is ported (see "ID Predict" settings): on 2b2t-style anarchy servers it's the
- * single biggest edge a crystal aura can have, since it lets the explode happen the same tick
- * the crystal is placed instead of waiting a tick for the spawn packet to round-trip - a real
- * client-vs-client fight is usually decided by whoever's aura reacts faster. It works by
- * guessing the new crystal's entity id (ids are assigned sequentially by the server) and firing
- * a raw attack packet at that guessed id after a short delay, via a mixin-exposed setter on
- * PlayerInteractEntityC2SPacket's normally-final entityId field (PlayerInteractEntityC2SPacketAccessor).
- * If the guess is wrong the packet is just a harmless no-op server-side.
+ * ID prediction sends ServerboundAttackPacket for the expected next crystal ID after a short delay.
+ * An incorrect ID is ignored by the server.
  *
  * Deliberately NOT ported from BlackOut: movement extrapolation (multi-tick position prediction -
  * DamageUtils.crystalDamage's own predict-movement flag, exposed here as predict-movement, covers
@@ -702,12 +696,12 @@ public class CrystalAuraTHM extends Module {
             labelPos.set(label.pos.getX() + 0.5, label.pos.getY() + 0.5, label.pos.getZ() + 0.5);
             if (!NametagUtils.to2D(labelPos, damageTextScale.get())) continue;
 
-            NametagUtils.begin(labelPos);
-            TextRenderer.get().begin(1.0, false, true);
+            NametagUtils.begin(labelPos, event.graphics);
+            TextRenderer.get().begin(event.graphics, 1.0, false, true);
             double w = TextRenderer.get().getWidth(label.text) / 2.0;
             TextRenderer.get().render(label.text, -w, 0.0, placeLineColor.get(), true);
             TextRenderer.get().end();
-            NametagUtils.end();
+            NametagUtils.end(event.graphics);
         }
     }
 
@@ -760,8 +754,7 @@ public class CrystalAuraTHM extends Module {
     private void sendPredictedAttack(int entityId) {
         if (mc.player == null) return;
 
-        ServerboundInteractPacket packet = ServerboundInteractPacket.createAttackPacket(mc.player, mc.player.isShiftKeyDown());
-        ((PlayerInteractEntityC2SPacketAccessor) packet).setEntityId(entityId);
+        var packet = new ServerboundAttackPacket(entityId);
         mc.getConnection().send(packet);
         mc.player.swing(InteractionHand.MAIN_HAND);
     }

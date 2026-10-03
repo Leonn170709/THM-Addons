@@ -11,6 +11,10 @@
 
 package xyz.thm.addon.modules;
 
+import net.minecraft.world.item.DyeColor;
+
+import meteordevelopment.meteorclient.utils.misc.ListMode;
+
 import io.netty.channel.ChannelFutureListener;
 import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
@@ -23,8 +27,8 @@ import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.render.Render2DEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
-import meteordevelopment.meteorclient.mixin.ShulkerBoxScreenHandlerAccessor;
-import meteordevelopment.meteorclient.mixininterface.IVec3d;
+import meteordevelopment.meteorclient.mixin.ShulkerBoxMenuAccessor;
+import meteordevelopment.meteorclient.mixininterface.IVec3;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.renderer.text.TextRenderer;
 import meteordevelopment.meteorclient.settings.*;
@@ -57,7 +61,7 @@ import meteordevelopment.meteorclient.utils.world.TickRate;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
 import net.minecraft.ChatFormatting;
-import net.minecraft.block.*;
+import net.minecraft.world.level.block.*;
 import net.minecraft.client.CameraType;
 import net.minecraft.client.Options;
 import net.minecraft.client.Screenshot;
@@ -70,7 +74,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.item.*;
+import net.minecraft.world.item.*;
 import net.minecraft.network.Connection;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -86,7 +90,9 @@ import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.util.Mth;
-import net.minecraft.util.math.*;
+import net.minecraft.core.*;
+import meteordevelopment.meteorclient.utils.player.Rotations;
+import net.minecraft.world.phys.*;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.effect.MobEffect;
@@ -98,7 +104,7 @@ import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ArrowItem;
 import net.minecraft.world.item.BlockItem;
@@ -2073,7 +2079,7 @@ public class HighwayBuilderTHM extends Module {
     private record SpeedMineSettingsSnapshot(
         boolean wasActive,
         SpeedMine.Mode mode,
-        SpeedMine.ListMode blocksFilter,
+        ListMode blocksFilter,
         List<Block> blocks,
         boolean instamine,
         boolean grimBypass
@@ -2619,11 +2625,11 @@ public class HighwayBuilderTHM extends Module {
         if (Modules.get().get(InstantRebreak.class).isActive())
             warning("It's recommended to disable the Instant Rebreak module because HighwayBuilder manages ender chest rebreaking internally.");
         SpeedMine speedMine = Modules.get().get(SpeedMine.class);
-        Setting<SpeedMine.ListMode> speedMineBlocksFilter = speedMine.settings.get("blocks-filter", SpeedMine.ListMode.class);
+        Setting<ListMode> speedMineBlocksFilter = speedMine.settings.get("blocks-filter", ListMode.class);
         @SuppressWarnings("unchecked")
         Setting<List<Block>> speedMineBlocks = (Setting<List<Block>>) speedMine.settings.get("blocks");
         if (speedMineBlocksFilter != null
-            && speedMineBlocksFilter.get() == SpeedMine.ListMode.Blacklist
+            && speedMineBlocksFilter.get() == ListMode.Blacklist
             && speedMineBlocks != null
             && speedMineBlocks.get().contains(Blocks.NETHERRACK)) {
             warning("It's recommended to add Netherrack to the blacklist in Speed Mine (Ignore if you let highway builder manage it)");
@@ -3966,7 +3972,7 @@ public class HighwayBuilderTHM extends Module {
         bridge.thm$forceStopEating(eatingPauseRecoveryToken);
         resetEatingRetryProgress(now);
 
-        if (mc.screen != null) {
+        if (mc.gui.screen() != null) {
             closeHandledScreen();
             eatingRetryPhase = EatingRetryPhase.PENDING_SCREEN_CLOSE;
             eatingPauseSettleTicks = 0;
@@ -3981,7 +3987,7 @@ public class HighwayBuilderTHM extends Module {
             case NONE -> {
             }
             case PENDING_SCREEN_CLOSE -> {
-                if (mc.screen == null) {
+                if (mc.gui.screen() == null) {
                     eatingRetryPhase = EatingRetryPhase.PENDING_SCREEN_SETTLE;
                     eatingPauseSettleTicks = 1;
                 }
@@ -4942,7 +4948,7 @@ public class HighwayBuilderTHM extends Module {
         float sidewaysAmount = input.sidewaysAmount();
         double y = event.movement.y;
         if (forwardAmount == 0.0f && sidewaysAmount == 0.0f) {
-            ((IVec3d) event.movement).meteor$set(0.0, y, 0.0);
+            ((IVec3) event.movement).meteor$set(0.0, y, 0.0);
             return;
         }
 
@@ -4954,7 +4960,7 @@ public class HighwayBuilderTHM extends Module {
 
         double x = (-sin * forwardAmount * forwardSpeed) + (cos * sidewaysAmount * lateralSpeed);
         double z = (cos * forwardAmount * forwardSpeed) + (sin * sidewaysAmount * lateralSpeed);
-        ((IVec3d) event.movement).meteor$set(x, y, z);
+        ((IVec3) event.movement).meteor$set(x, y, z);
     }
 
     private double currentThmForwardSpeedPerTick() {
@@ -5375,8 +5381,8 @@ public class HighwayBuilderTHM extends Module {
     private void onRender2d(Render2DEvent event) {
         if (suspended || !renderMine.get()) return;
 
-        if (normalMining != null) normalMining.renderLetter();
-        if (packetMining != null) packetMining.renderLetter();
+        if (normalMining != null) normalMining.renderLetter(event.graphics);
+        if (packetMining != null) packetMining.renderLetter(event.graphics);
     }
 
     @EventHandler
@@ -5524,8 +5530,8 @@ public class HighwayBuilderTHM extends Module {
 
         speedMine.mode.set(SpeedMine.Mode.Damage);
 
-        Setting<SpeedMine.ListMode> blocksFilter = speedMine.settings.get("blocks-filter", SpeedMine.ListMode.class);
-        if (blocksFilter != null) blocksFilter.set(SpeedMine.ListMode.Blacklist);
+        Setting<ListMode> blocksFilter = speedMine.settings.get("blocks-filter", ListMode.class);
+        if (blocksFilter != null) blocksFilter.set(ListMode.Blacklist);
 
         Setting<List<Block>> blocksSetting = (Setting<List<Block>>) speedMine.settings.get("blocks");
         if (blocksSetting != null) blocksSetting.set(buildAutosetupSpeedMineBlacklist());
@@ -5541,22 +5547,22 @@ public class HighwayBuilderTHM extends Module {
         return new ArrayList<>(List.of(
             Blocks.NETHERRACK,
             Blocks.SHULKER_BOX,
-            Blocks.WHITE_SHULKER_BOX,
-            Blocks.ORANGE_SHULKER_BOX,
-            Blocks.MAGENTA_SHULKER_BOX,
-            Blocks.LIGHT_BLUE_SHULKER_BOX,
-            Blocks.YELLOW_SHULKER_BOX,
-            Blocks.LIME_SHULKER_BOX,
-            Blocks.PINK_SHULKER_BOX,
-            Blocks.GRAY_SHULKER_BOX,
-            Blocks.LIGHT_GRAY_SHULKER_BOX,
-            Blocks.CYAN_SHULKER_BOX,
-            Blocks.PURPLE_SHULKER_BOX,
-            Blocks.BLUE_SHULKER_BOX,
-            Blocks.BROWN_SHULKER_BOX,
-            Blocks.GREEN_SHULKER_BOX,
-            Blocks.RED_SHULKER_BOX,
-            Blocks.BLACK_SHULKER_BOX
+            Blocks.DYED_SHULKER_BOX.pick(DyeColor.WHITE),
+            Blocks.DYED_SHULKER_BOX.pick(DyeColor.ORANGE),
+            Blocks.DYED_SHULKER_BOX.pick(DyeColor.MAGENTA),
+            Blocks.DYED_SHULKER_BOX.pick(DyeColor.LIGHT_BLUE),
+            Blocks.DYED_SHULKER_BOX.pick(DyeColor.YELLOW),
+            Blocks.DYED_SHULKER_BOX.pick(DyeColor.LIME),
+            Blocks.DYED_SHULKER_BOX.pick(DyeColor.PINK),
+            Blocks.DYED_SHULKER_BOX.pick(DyeColor.GRAY),
+            Blocks.DYED_SHULKER_BOX.pick(DyeColor.LIGHT_GRAY),
+            Blocks.DYED_SHULKER_BOX.pick(DyeColor.CYAN),
+            Blocks.DYED_SHULKER_BOX.pick(DyeColor.PURPLE),
+            Blocks.DYED_SHULKER_BOX.pick(DyeColor.BLUE),
+            Blocks.DYED_SHULKER_BOX.pick(DyeColor.BROWN),
+            Blocks.DYED_SHULKER_BOX.pick(DyeColor.GREEN),
+            Blocks.DYED_SHULKER_BOX.pick(DyeColor.RED),
+            Blocks.DYED_SHULKER_BOX.pick(DyeColor.BLACK)
         ));
     }
 
@@ -5601,7 +5607,7 @@ public class HighwayBuilderTHM extends Module {
 
     @SuppressWarnings("unchecked")
     private SpeedMineSettingsSnapshot captureSpeedMineSettings(SpeedMine speedMine) {
-        Setting<SpeedMine.ListMode> blocksFilter = speedMine.settings.get("blocks-filter", SpeedMine.ListMode.class);
+        Setting<ListMode> blocksFilter = speedMine.settings.get("blocks-filter", ListMode.class);
         Setting<List<Block>> blocksSetting = (Setting<List<Block>>) speedMine.settings.get("blocks");
         Setting<Boolean> instamineSetting = (Setting<Boolean>) speedMine.settings.get("instamine");
         Setting<Boolean> grimBypassSetting = (Setting<Boolean>) speedMine.settings.get("grim-bypass");
@@ -5609,7 +5615,7 @@ public class HighwayBuilderTHM extends Module {
         List<Block> blocks = blocksSetting != null ? new ArrayList<>(blocksSetting.get()) : new ArrayList<>();
         boolean instamine = instamineSetting != null && instamineSetting.get();
         boolean grimBypass = grimBypassSetting != null && grimBypassSetting.get();
-        SpeedMine.ListMode filter = blocksFilter != null ? blocksFilter.get() : SpeedMine.ListMode.Blacklist;
+        ListMode filter = blocksFilter != null ? blocksFilter.get() : ListMode.Blacklist;
 
         return new SpeedMineSettingsSnapshot(
             speedMine.isActive(),
@@ -5628,8 +5634,8 @@ public class HighwayBuilderTHM extends Module {
 
         speedMine.mode.set(SpeedMine.Mode.Damage);
 
-        Setting<SpeedMine.ListMode> blocksFilter = speedMine.settings.get("blocks-filter", SpeedMine.ListMode.class);
-        if (blocksFilter != null) blocksFilter.set(SpeedMine.ListMode.Blacklist);
+        Setting<ListMode> blocksFilter = speedMine.settings.get("blocks-filter", ListMode.class);
+        if (blocksFilter != null) blocksFilter.set(ListMode.Blacklist);
 
         Setting<List<Block>> blocksSetting = (Setting<List<Block>>) speedMine.settings.get("blocks");
         if (blocksSetting != null) {
@@ -5664,7 +5670,7 @@ public class HighwayBuilderTHM extends Module {
         SpeedMineSettingsSnapshot snapshot = speedMineSettingsSnapshot;
         speedMine.mode.set(snapshot.mode());
 
-        Setting<SpeedMine.ListMode> blocksFilter = speedMine.settings.get("blocks-filter", SpeedMine.ListMode.class);
+        Setting<ListMode> blocksFilter = speedMine.settings.get("blocks-filter", ListMode.class);
         if (blocksFilter != null) blocksFilter.set(snapshot.blocksFilter());
 
         Setting<List<Block>> blocksSetting = (Setting<List<Block>>) speedMine.settings.get("blocks");
@@ -5785,7 +5791,7 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private void closeHandledScreen() {
-        if (mc.player != null && mc.screen != null) mc.player.closeContainer();
+        if (mc.player != null && mc.gui.screen() != null) mc.player.closeContainer();
     }
 
     private void setState(State state) {
@@ -7078,7 +7084,7 @@ public class HighwayBuilderTHM extends Module {
         WButton tabbed = theme.button("Tabbed control screen");
         tabbed.action = () -> {
             THMSystem.get().tabbedHighwayGui.set(true);
-            mc.setScreen(theme.moduleScreen(this));
+            mc.gui.setScreen(theme.moduleScreen(this));
         };
         return tabbed;
     }
@@ -8228,7 +8234,7 @@ public class HighwayBuilderTHM extends Module {
                 return RESTOCK_WATCHDOG_SETUP_TIMEOUT_TICKS;
             }
 
-            if (b.state == State.Restock && b.mc.screen != null) {
+            if (b.state == State.Restock && b.mc.gui.screen() != null) {
                 return RESTOCK_WATCHDOG_TRANSFER_TIMEOUT_TICKS;
             }
 
@@ -8333,7 +8339,7 @@ public class HighwayBuilderTHM extends Module {
                 }
             }
 
-            if (b.mc.screen != null) {
+            if (b.mc.gui.screen() != null) {
                 b.closeHandledScreen();
                 return true;
             }
@@ -8446,7 +8452,7 @@ public class HighwayBuilderTHM extends Module {
         }
 
         private void appendScreenSignature(StringBuilder sb) {
-            String screenName = b.mc.screen == null ? "none" : b.mc.screen.getClass().getSimpleName();
+            String screenName = b.mc.gui.screen() == null ? "none" : b.mc.gui.screen().getClass().getSimpleName();
             int screenSyncId = b.mc.player.containerMenu != null ? b.mc.player.containerMenu.containerId : -1;
             ItemStack cursorStack = b.mc.player.containerMenu != null
                 ? b.mc.player.containerMenu.getCarried()
@@ -10562,7 +10568,7 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private void takeStatsProofScreenshot(String sessionId, String reason, StatsScreenshotSurface surface, long sequence, long captureToken) {
-        if (mc == null || mc.getMainRenderTarget() == null) {
+        if (mc == null || mc.gameRenderer.mainRenderTarget() == null) {
             finishStatsScreenshotCapture(captureToken);
             flushPendingWebhookStats(null);
             return;
@@ -10570,7 +10576,7 @@ public class HighwayBuilderTHM extends Module {
 
         String fileName = buildStatsScreenshotFileName(sessionId, surface, sequence);
         try {
-            Screenshot.grab(mc.gameDirectory, fileName, mc.getMainRenderTarget(), 1, message -> {
+            Screenshot.grab(mc.gameDirectory, fileName, mc.gameRenderer.mainRenderTarget(), 1, message -> {
                 try {
                     mc.execute(() -> {
                         finishStatsScreenshotCapture(captureToken);
@@ -11810,11 +11816,11 @@ public class HighwayBuilderTHM extends Module {
 
         if (emptySlot == -1) return false;
 
-        mc.gameMode.handleInventoryMouseClick(
+        mc.gameMode.handleContainerInput(
             mc.player.containerMenu.containerId,
             SlotUtils.indexToId(emptySlot),
             0,
-            ClickType.PICKUP,
+            ContainerInput.PICKUP,
             mc.player
         );
 
@@ -11843,11 +11849,11 @@ public class HighwayBuilderTHM extends Module {
             return true;
         }
 
-        mc.gameMode.handleInventoryMouseClick(
+        mc.gameMode.handleContainerInput(
             mc.player.containerMenu.containerId,
             SlotUtils.indexToId(trashSlot),
             0,
-            ClickType.PICKUP,
+            ContainerInput.PICKUP,
             mc.player
         );
 
@@ -11907,11 +11913,11 @@ public class HighwayBuilderTHM extends Module {
         if (wasActive) antiDrop.toggle();
 
         try {
-            mc.gameMode.handleInventoryMouseClick(
+            mc.gameMode.handleContainerInput(
                 mc.player.containerMenu.containerId,
                 -999,
                 0,
-                ClickType.PICKUP,
+                ContainerInput.PICKUP,
                 mc.player
             );
         } finally {
@@ -13544,8 +13550,8 @@ public class HighwayBuilderTHM extends Module {
             Vec3 vec1 = new Vec3(0, 0, 0);
             Vec3 vec2 = new Vec3(0, 0, 0);
 
-            ((IVec3d) vec1).meteor$set(mc.player.getX(), mc.player.getY() + mc.player.getEyeHeight(), mc.player.getZ());
-            ((IVec3d) vec2).meteor$set(entity.getX(), entity.getY() + 0.5, entity.getZ());
+            ((IVec3) vec1).meteor$set(mc.player.getX(), mc.player.getY() + mc.player.getEyeHeight(), mc.player.getZ());
+            ((IVec3) vec2).meteor$set(entity.getX(), entity.getY() + 0.5, entity.getZ());
             return mc.level.clip(new ClipContext(vec1, vec2, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player)).getType() == HitResult.Type.MISS;
         }
 
@@ -13926,8 +13932,8 @@ public class HighwayBuilderTHM extends Module {
                     Vec3 vec1 = new Vec3(0, 0, 0);
                     Vec3 vec2 = new Vec3(0, 0, 0);
 
-                    ((IVec3d) vec1).meteor$set(b.mc.player.getX(), b.mc.player.getY() + b.mc.player.getEyeHeight(), b.mc.player.getZ());
-                    ((IVec3d) vec2).meteor$set(entity.getX(), entity.getY() + 0.5, entity.getZ());
+                    ((IVec3) vec1).meteor$set(b.mc.player.getX(), b.mc.player.getY() + b.mc.player.getEyeHeight(), b.mc.player.getZ());
+                    ((IVec3) vec2).meteor$set(entity.getX(), entity.getY() + 0.5, entity.getZ());
                     return b.mc.level.clip(new ClipContext(vec1, vec2, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, b.mc.player)).getType() == HitResult.Type.MISS;
                 }
 
@@ -14372,11 +14378,11 @@ public class HighwayBuilderTHM extends Module {
                     return true;
                 }
 
-                b.mc.gameMode.handleInventoryMouseClick(
+                b.mc.gameMode.handleContainerInput(
                     b.mc.player.containerMenu.containerId,
                     SlotUtils.indexToId(trashSlot),
                     0,
-                    ClickType.PICKUP,
+                    ContainerInput.PICKUP,
                     b.mc.player
                 );
 
@@ -14403,11 +14409,11 @@ public class HighwayBuilderTHM extends Module {
                 int trashSlot = findTrashSwapSlot(b, false);
                 if (trashSlot == -1) return false;
 
-                b.mc.gameMode.handleInventoryMouseClick(
+                b.mc.gameMode.handleContainerInput(
                     b.mc.player.containerMenu.containerId,
                     SlotUtils.indexToId(trashSlot),
                     0,
-                    ClickType.PICKUP,
+                    ContainerInput.PICKUP,
                     b.mc.player
                 );
 
@@ -14831,7 +14837,7 @@ public class HighwayBuilderTHM extends Module {
                 }
 
                 if (chestVisible) {
-                    if (b.mc.screen instanceof ContainerScreen screen) {
+                    if (b.mc.gui.screen() instanceof ContainerScreen screen) {
                         // wait for the screen to be properly loaded
                         if (screen.getMenu().containerId != b.syncId) return;
 
@@ -16359,7 +16365,7 @@ public class HighwayBuilderTHM extends Module {
 
                 if (!b.mc.player.containerMenu.getCarried().isEmpty()) {
                     b.restockDebug("Restock.tick cursor stack not empty: %s.", b.mc.player.containerMenu.getCarried().getItem());
-                    if (b.mc.screen != null) b.closeHandledScreen();
+                    if (b.mc.gui.screen() != null) b.closeHandledScreen();
                     if (!b.mc.player.containerMenu.getCarried().isEmpty()
                         && !b.clearCursorStackToEmptySlot("Restock.tick")
                         && !b.dropCursorStackIfSafe("Restock.tick")) {
@@ -16388,11 +16394,11 @@ public class HighwayBuilderTHM extends Module {
                         Container foodContainerInventory = null;
                         boolean directEnderChestFoodContainer = false;
 
-                        if (b.mc.screen instanceof ShulkerBoxScreen screen
+                        if (b.mc.gui.screen() instanceof ShulkerBoxScreen screen
                             && screen.getMenu().containerId == b.syncId) {
-                            foodContainerInventory = ((ShulkerBoxScreenHandlerAccessor) screen.getMenu()).meteor$getInventory();
+                            foodContainerInventory = ((ShulkerBoxMenuAccessor) screen.getMenu()).meteor$getContainer();
                         }
-                        else if (b.mc.screen instanceof ContainerScreen screen
+                        else if (b.mc.gui.screen() instanceof ContainerScreen screen
                             && screen.getMenu().containerId == b.syncId) {
                             foodContainerInventory = screen.getMenu().getContainer();
                             directEnderChestFoodContainer = true;
@@ -16405,9 +16411,9 @@ public class HighwayBuilderTHM extends Module {
                         }
                     }
                     if (b.restockTask.enderChests
-                        && b.mc.screen instanceof ShulkerBoxScreen screen
+                        && b.mc.gui.screen() instanceof ShulkerBoxScreen screen
                         && screen.getMenu().containerId == b.syncId) {
-                        Container inv = ((ShulkerBoxScreenHandlerAccessor) screen.getMenu()).meteor$getInventory();
+                        Container inv = ((ShulkerBoxMenuAccessor) screen.getMenu()).meteor$getContainer();
                         if (returnSmallestExtraEnderChestStackToContainer(b)) {
                             delayTimer = b.inventoryDelay.get();
                             return;
@@ -16419,7 +16425,7 @@ public class HighwayBuilderTHM extends Module {
                     indicateStopping = true;
                     breakContainer = true;
                     stopTimer = 12;
-                    if (b.mc.screen != null) b.closeHandledScreen();
+                    if (b.mc.gui.screen() != null) b.closeHandledScreen();
                     return;
                 }
                 if (b.restockTask.canTransitionToMineEnderChests() && !indicateStopping) {
@@ -16430,7 +16436,7 @@ public class HighwayBuilderTHM extends Module {
                     indicateStopping = true;
                     breakContainer = true;
                     stopTimer = 12;
-                    if (b.mc.screen != null) b.closeHandledScreen();
+                    if (b.mc.gui.screen() != null) b.closeHandledScreen();
                     return;
                 }
 
@@ -16448,11 +16454,11 @@ public class HighwayBuilderTHM extends Module {
                 switch (blockState.getBlock()) {
                     // if we have placed a shulker box there should be items inside we want
                     case ShulkerBoxBlock ignored -> {
-                        if (b.mc.screen instanceof ShulkerBoxScreen screen) {
+                        if (b.mc.gui.screen() instanceof ShulkerBoxScreen screen) {
                             // wait for the screen to be properly loaded
                             if (screen.getMenu().containerId != b.syncId) return;
 
-                            Container inv = ((ShulkerBoxScreenHandlerAccessor) screen.getMenu()).meteor$getInventory();
+                            Container inv = ((ShulkerBoxMenuAccessor) screen.getMenu()).meteor$getContainer();
 
                             if (restockItems(b, inv)) {
                                 delayTimer = b.inventoryDelay.get();
@@ -16476,7 +16482,7 @@ public class HighwayBuilderTHM extends Module {
 
                     // we are either pulling items themselves, or shulkers containing items from your ec
                     case EnderChestBlock ignored -> {
-                        if (b.mc.screen instanceof ContainerScreen screen) {
+                        if (b.mc.gui.screen() instanceof ContainerScreen screen) {
                             // wait for the screen to be properly loaded
                             if (screen.getMenu().containerId != b.syncId) return;
 
@@ -16672,7 +16678,7 @@ public class HighwayBuilderTHM extends Module {
                 int beforeProgress = session != null ? session.getProgressTowardsTarget() : 0;
                 int beforeUsablePulledEchests = session != null ? session.getUsablePulledEchests() : 0;
                 if (!grabFromInventory(b, inv, filterItem)) return false;
-                if (b.restockTask.food && sourcePhase == RestockTask.SourcePhase.EnderChest && b.mc.screen instanceof ContainerScreen) {
+                if (b.restockTask.food && sourcePhase == RestockTask.SourcePhase.EnderChest && b.mc.gui.screen() instanceof ContainerScreen) {
                     b.invalidateEChestMemorySnapshot("direct-food-pull");
                 }
                 b.restockTask.noteSourceForwardProgress(sourcePhase, beforeProgress, beforeUsablePulledEchests);
@@ -16844,7 +16850,7 @@ public class HighwayBuilderTHM extends Module {
                         return true;
                     }
 
-                    if (b.mc.screen != null) b.closeHandledScreen();
+                    if (b.mc.gui.screen() != null) b.closeHandledScreen();
                     if (!b.mc.player.containerMenu.getCarried().isEmpty()) {
                         dropCursorBypassAntiDrop(b);
                     }
@@ -16862,7 +16868,7 @@ public class HighwayBuilderTHM extends Module {
                 for (int i = 0; i < b.mc.player.containerMenu.slots.size(); i++) {
                     Slot slot = b.mc.player.containerMenu.slots.get(i);
                     if (slot.container == b.mc.player.getInventory() && slot.getItem().isEmpty()) {
-                        b.mc.gameMode.handleInventoryMouseClick(b.mc.player.containerMenu.containerId, i, 0, ClickType.PICKUP, b.mc.player);
+                        b.mc.gameMode.handleContainerInput(b.mc.player.containerMenu.containerId, i, 0, ContainerInput.PICKUP, b.mc.player);
                         if (b.mc.player.containerMenu.getCarried().isEmpty()) return true;
                     }
                 }
@@ -17348,7 +17354,7 @@ public class HighwayBuilderTHM extends Module {
                     return true;
                 }
 
-                if (!(b.mc.screen instanceof ContainerScreen screen)) {
+                if (!(b.mc.gui.screen() instanceof ContainerScreen screen)) {
                     handleContainerBlock(b, blockPos);
                     return true;
                 }
@@ -17362,11 +17368,11 @@ public class HighwayBuilderTHM extends Module {
                     ItemStack trackedShulker = b.mc.player.getInventory().getItem(trackedSlot);
                     if (!b.isContainerItemEmpty(trackedShulker)) {
                         ItemStack before = trackedShulker.copy();
-                        b.mc.gameMode.handleInventoryMouseClick(
+                        b.mc.gameMode.handleContainerInput(
                             b.mc.player.containerMenu.containerId,
                             SlotUtils.indexToId(trackedSlot),
                             0,
-                            ClickType.QUICK_MOVE,
+                            ContainerInput.QUICK_MOVE,
                             b.mc.player
                         );
                         ItemStack after = b.mc.player.getInventory().getItem(trackedSlot);
@@ -17491,7 +17497,7 @@ public class HighwayBuilderTHM extends Module {
                     return true;
                 }
 
-                if (!(b.mc.screen instanceof ContainerScreen screen)) {
+                if (!(b.mc.gui.screen() instanceof ContainerScreen screen)) {
                     handleContainerBlock(b, blockPos);
                     return true;
                 }
@@ -17505,11 +17511,11 @@ public class HighwayBuilderTHM extends Module {
                     ItemStack trackedShulker = b.mc.player.getInventory().getItem(trackedSlot);
                     if (!b.isContainerItemEmpty(trackedShulker)) {
                         ItemStack before = trackedShulker.copy();
-                        b.mc.gameMode.handleInventoryMouseClick(
+                        b.mc.gameMode.handleContainerInput(
                             b.mc.player.containerMenu.containerId,
                             SlotUtils.indexToId(trackedSlot),
                             0,
-                            ClickType.QUICK_MOVE,
+                            ContainerInput.QUICK_MOVE,
                             b.mc.player
                         );
                         ItemStack after = b.mc.player.getInventory().getItem(trackedSlot);
@@ -17585,11 +17591,11 @@ public class HighwayBuilderTHM extends Module {
                 if (matchingEnderChestStacks <= 1 || smallestSlot == -1) return false;
 
                 ItemStack before = b.mc.player.getInventory().getItem(smallestSlot).copy();
-                b.mc.gameMode.handleInventoryMouseClick(
+                b.mc.gameMode.handleContainerInput(
                     b.mc.player.containerMenu.containerId,
                     SlotUtils.indexToId(smallestSlot),
                     0,
-                    ClickType.QUICK_MOVE,
+                    ContainerInput.QUICK_MOVE,
                     b.mc.player
                 );
 
@@ -17815,8 +17821,8 @@ public class HighwayBuilderTHM extends Module {
                     Vec3 vec1 = new Vec3(0, 0, 0);
                     Vec3 vec2 = new Vec3(0, 0, 0);
 
-                    ((IVec3d) vec1).meteor$set(b.mc.player.getX(), b.mc.player.getY() + b.mc.player.getEyeHeight(), b.mc.player.getZ());
-                    ((IVec3d) vec2).meteor$set(entity.getX(), entity.getY() + 0.5, entity.getZ());
+                    ((IVec3) vec1).meteor$set(b.mc.player.getX(), b.mc.player.getY() + b.mc.player.getEyeHeight(), b.mc.player.getZ());
+                    ((IVec3) vec2).meteor$set(entity.getX(), entity.getY() + 0.5, entity.getZ());
                     return b.mc.level.clip(new ClipContext(vec1, vec2, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, b.mc.player)).getType() == HitResult.Type.MISS;
                 }, SortPriority.LowestDistance);
 
@@ -18333,11 +18339,11 @@ public class HighwayBuilderTHM extends Module {
                 }
             }
 
-            b.mc.gameMode.handleInventoryMouseClick(
+            b.mc.gameMode.handleContainerInput(
                 b.mc.player.containerMenu.containerId,
                 SlotUtils.indexToId(hotbarSlot),
                 0,
-                ClickType.PICKUP,
+                ContainerInput.PICKUP,
                 b.mc.player
             );
 
@@ -19830,19 +19836,19 @@ public class HighwayBuilderTHM extends Module {
             return BlockUtils.getBreakDelta(slot , blockState) * ((b.mc.player.tickCount - (packet ? packetStartTime : normalStartTime)) + 1);
         }
 
-        public void renderLetter() {
+        public void renderLetter(net.minecraft.client.gui.GuiGraphicsExtractor graphics) {
             vec3.set(blockPos.getX() + 0.5, blockPos.getY() + 0.5, blockPos.getZ() + 0.5);
             if (!NametagUtils.to2D(vec3, 2)) return;
 
-            NametagUtils.begin(vec3);
-            TextRenderer.get().begin(1.0, false, true);
+            NametagUtils.begin(vec3, graphics);
+            TextRenderer.get().begin(graphics, 1.0, false, true);
 
             String letter = packet ? "P" : "N";
             double w = TextRenderer.get().getWidth(letter) / 2.0;
             TextRenderer.get().render(letter, -w, 0.0, Color.WHITE, true);
 
             TextRenderer.get().end();
-            NametagUtils.end();
+            NametagUtils.end(graphics);
         }
     }
 

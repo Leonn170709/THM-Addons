@@ -29,7 +29,7 @@ public class DeathChatScreen extends ChatScreen {
         // Re-opening from inside removed() would be overwritten by the setScreen call that got us
         // here, so it goes through the client's own task queue instead.
         mc.execute(() -> {
-            if (mc.screen == null && mc.player != null && mc.player.isDeadOrDying()) mc.setScreen(parent);
+            if (mc.gui.screen() == null && mc.player != null && mc.player.isDeadOrDying()) mc.gui.setScreen(parent);
         });
     }
 }

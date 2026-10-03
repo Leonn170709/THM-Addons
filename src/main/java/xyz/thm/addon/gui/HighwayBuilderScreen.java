@@ -185,7 +185,7 @@ public class HighwayBuilderScreen extends WindowScreen {
         }
 
         WButton savePresetButton = add(theme.button("Save current preset")).expandX().widget();
-        savePresetButton.action = () -> mc.setScreen(new PresetNameScreen());
+        savePresetButton.action = () -> mc.gui.setScreen(new PresetNameScreen());
         if (!presetStatus.isEmpty()) add(theme.label(presetStatus)).expandX();
 
         add(theme.horizontalSeparator()).expandX();
@@ -219,7 +219,7 @@ public class HighwayBuilderScreen extends WindowScreen {
         classic.tooltip = "Switch back to Meteor's list; change it again in the THM tab.";
         classic.action = () -> {
             THMSystem.get().tabbedHighwayGui.set(false);
-            mc.setScreen(theme.moduleScreen(module));
+            mc.gui.setScreen(theme.moduleScreen(module));
         };
 
         WHorizontalList bind = add(theme.horizontalList()).expandX().widget();

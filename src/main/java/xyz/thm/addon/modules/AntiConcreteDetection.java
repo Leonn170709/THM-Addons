@@ -59,7 +59,7 @@ public class AntiConcreteDetection extends Module {
 
             if (isButtonBlock(block) || isTorchBlock(block)) {
                 if (rotate.get()) {
-                    Rotations.rotate(Rotations.getYaw(blockPos.getCenter()), Rotations.getPitch(blockPos.getCenter()));
+                    Rotations.rotate(Rotations.getYaw(net.minecraft.world.phys.Vec3.atCenterOf(blockPos)), Rotations.getPitch(net.minecraft.world.phys.Vec3.atCenterOf(blockPos)));
                 }
 
                 if (breakMode.get() == BreakMode.Hold) {

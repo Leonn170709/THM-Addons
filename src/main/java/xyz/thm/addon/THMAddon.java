@@ -58,8 +58,8 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
 
     static {METADATA = FabricLoader.getInstance().getModContainer(MOD_ID).orElseThrow().getMetadata();
         VERSION = METADATA.getVersion().getFriendlyString();
-        MAIN = new Category("THM Highway", Items.OBSIDIAN.getDefaultInstance());
-        PVP = new Category("THM PVP", Items.END_CRYSTAL.getDefaultInstance());}
+        MAIN = new Category("THM Highway", Items.OBSIDIAN::getDefaultInstance);
+        PVP = new Category("THM PVP", Items.END_CRYSTAL::getDefaultInstance);}
 
     public static File GetConfigFile(String key, String filename) {
         return new File(new File(new File(new File(MeteorClient.FOLDER, "thm"), key), Utils.getFileWorldName()), filename);
@@ -68,7 +68,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
     public void onInitializeClient() {
         if (!FabricLoader.getInstance().isModLoaded("anarchymod")) {
             try {
-                PayloadTypeRegistry.playC2S().register(JoinPayload.ID, JoinPayload.CODEC);
+                PayloadTypeRegistry.serverboundPlay().register(JoinPayload.ID, JoinPayload.CODEC);
                 ClientPlayConnectionEvents.JOIN.register((listener, sender, client) -> {
                     if (!THMUtils.isNot6B6T()) {
                         sender.sendPacket(new JoinPayload());

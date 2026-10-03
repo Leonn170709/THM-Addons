@@ -26,7 +26,8 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.util.Mth;
-import net.minecraft.util.math.*;
+import net.minecraft.core.*;
+import net.minecraft.world.phys.*;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -862,7 +863,7 @@ public class HighwayTools extends Module {
         if (mc.player == null || boat == null) return false;
         if (mc.player.distanceToSqr(boat) > BOAT_INTERACT_RANGE * BOAT_INTERACT_RANGE) return false;
 
-        mc.gameMode.interact(mc.player, boat, InteractionHand.MAIN_HAND);
+        mc.gameMode.interact(mc.player, boat, new net.minecraft.world.phys.EntityHitResult(boat), InteractionHand.MAIN_HAND);
         boatMountGraceTicks = BOAT_MOUNT_GRACE_TICKS;
         return isRidingBoat();
     }
@@ -1069,8 +1070,8 @@ public class HighwayTools extends Module {
             .append(snapshot.center().getX()).append(',')
             .append(snapshot.center().getY()).append(',')
             .append(snapshot.center().getZ()).append(',')
-            .append(new ChunkPos(snapshot.center()).x).append(',')
-            .append(new ChunkPos(snapshot.center()).z).append(',')
+            .append(ChunkPos.containing(snapshot.center()).x()).append(',')
+            .append(ChunkPos.containing(snapshot.center()).z()).append(',')
             .append(String.format(Locale.ROOT, "%.3f", snapshot.playerPos().x)).append(',')
             .append(String.format(Locale.ROOT, "%.3f", snapshot.playerPos().y)).append(',')
             .append(String.format(Locale.ROOT, "%.3f", snapshot.playerPos().z)).append(',')
@@ -1207,8 +1208,8 @@ public class HighwayTools extends Module {
     }
 
     private int countObsidianInChunk(LocalPlayer player) {
-        ChunkPos chunkPos = new ChunkPos(player.blockPosition());
-        LevelChunk chunk = mc.level.getChunk(chunkPos.x, chunkPos.z);
+        ChunkPos chunkPos = ChunkPos.containing(player.blockPosition());
+        LevelChunk chunk = mc.level.getChunk(chunkPos.x(), chunkPos.z());
 
         int minX = chunkPos.getMinBlockX();
         int minZ = chunkPos.getMinBlockZ();

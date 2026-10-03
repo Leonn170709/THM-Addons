@@ -39,10 +39,11 @@ import net.minecraft.nbt.NbtOps;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.HashedStack;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.packet.c2s.play.*;
+import net.minecraft.network.protocol.game.*;
 import net.minecraft.network.protocol.BundleDelimiterPacket;
 import net.minecraft.network.protocol.BundlePacket;
 import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.PacketType;
 import net.minecraft.network.protocol.game.ClientboundBlockChangedAckPacket;
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
@@ -97,19 +98,19 @@ public class PacketLoggerTHM extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgOutput = settings.createGroup("Output");
 
-    private final Setting<Set<Class<? extends Packet<?>>>> s2cPackets = sgGeneral.add(new PacketListSetting.Builder()
+    private final Setting<Set<PacketType<? extends Packet<?>>>> s2cPackets = sgGeneral.add(new PacketListSetting.Builder()
         .name("S2C-packets")
         .description("Server-to-client packets to log.")
-        .filter(aClass -> PacketUtils.getS2CPackets().contains(aClass))
-        .defaultValue(new ObjectOpenHashSet<>(PacketUtils.getS2CPackets()))
+        .filter(aClass -> PacketUtils.getClientboundPackets().contains(aClass))
+        .defaultValue(new ObjectOpenHashSet<>(PacketUtils.getClientboundPackets()))
         .build()
     );
 
-    private final Setting<Set<Class<? extends Packet<?>>>> c2sPackets = sgGeneral.add(new PacketListSetting.Builder()
+    private final Setting<Set<PacketType<? extends Packet<?>>>> c2sPackets = sgGeneral.add(new PacketListSetting.Builder()
         .name("C2S-packets")
         .description("Client-to-server packets to log.")
-        .filter(aClass -> PacketUtils.getC2SPackets().contains(aClass))
-        .defaultValue(new ObjectOpenHashSet<>(PacketUtils.getC2SPackets()))
+        .filter(aClass -> PacketUtils.getServerboundPackets().contains(aClass))
+        .defaultValue(new ObjectOpenHashSet<>(PacketUtils.getServerboundPackets()))
         .build()
     );
 
@@ -245,12 +246,12 @@ public class PacketLoggerTHM extends Module {
 
     @EventHandler(priority = EventPriority.HIGHEST + 1)
     private void onReceivePacket(PacketEvent.Receive event) {
-        if (s2cPackets.get().contains(event.packet.getClass())) logPacket("s2c", "<- S2C", event.packet);
+        if (s2cPackets.get().contains(event.packet.type())) logPacket("s2c", "<- S2C", event.packet);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST + 1)
     private void onSendPacket(PacketEvent.Send event) {
-        if (c2sPackets.get().contains(event.packet.getClass())) logPacket("c2s", "-> C2S", event.packet);
+        if (c2sPackets.get().contains(event.packet.type())) logPacket("c2s", "-> C2S", event.packet);
     }
 
     private void logPacket(String dir, String chatDir, Packet<?> packet) {
@@ -274,7 +275,7 @@ public class PacketLoggerTHM extends Module {
                 .append("] ");
         }
 
-        line.append(direction).append(' ').append(PacketUtils.getName(packetClass));
+        line.append(direction).append(' ').append(packetClass.getSimpleName());
 
         if (showCount.get()) {
             line.append(" (#").append(packetCounts.getInt(packetClass)).append(')');
@@ -290,7 +291,7 @@ public class PacketLoggerTHM extends Module {
 
         packetCounts.reference2IntEntrySet().stream()
             .sorted((a, b) -> Integer.compare(b.getIntValue(), a.getIntValue()))
-            .forEach(entry -> info("%s: %d", PacketUtils.getName(entry.getKey()), entry.getIntValue()));
+            .forEach(entry -> info("%s: %d", entry.getKey().getSimpleName(), entry.getIntValue()));
     }
 
     private JsonObject buildStartRecord() {
@@ -324,7 +325,7 @@ public class PacketLoggerTHM extends Module {
         record.addProperty("dir", dir);
         record.addProperty("ordinal", ordinal);
         record.addProperty("packet_class", packetClass.getName());
-        record.addProperty("packet_name", PacketUtils.getName(packetClass));
+        record.addProperty("packet_name", packetClass.getSimpleName());
         record.addProperty("packet_type_id", packet.type().id().toString());
 
         JsonObject fields;
@@ -415,7 +416,7 @@ public class PacketLoggerTHM extends Module {
             .forEach(entry -> {
                 JsonObject packetCount = new JsonObject();
                 packetCount.addProperty("packet_class", entry.getKey().getName());
-                packetCount.addProperty("packet_name", PacketUtils.getName(entry.getKey()));
+                packetCount.addProperty("packet_name", entry.getKey().getSimpleName());
                 packetCount.addProperty("count", entry.getIntValue());
                 counts.add(packetCount);
             });
@@ -430,10 +431,10 @@ public class PacketLoggerTHM extends Module {
         return files;
     }
 
-    private JsonArray packetNamesToJsonArray(Set<Class<? extends Packet<?>>> packets) {
+    private JsonArray packetNamesToJsonArray(Set<PacketType<? extends Packet<?>>> packets) {
         JsonArray array = new JsonArray();
         packets.stream()
-            .map(PacketUtils::getName)
+            .map(PacketType::toString)
             .sorted()
             .forEach(array::add);
         return array;
@@ -479,7 +480,7 @@ public class PacketLoggerTHM extends Module {
             fields.addProperty("revision", p.stateId());
             fields.addProperty("slot", p.slotNum());
             fields.addProperty("button", p.buttonNum());
-            fields.addProperty("action_type", p.clickType().name());
+            fields.addProperty("action_type", p.containerInput().name());
             fields.add("cursor", serializeItemStackHash(p.carriedItem()));
             fields.add("changed_stacks", serializeChangedStackHashes(p.changedSlots()));
             return fields;

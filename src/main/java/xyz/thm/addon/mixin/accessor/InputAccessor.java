@@ -1,0 +1,22 @@
+/*
+ * This file is part of THM Addons — https://github.com/Leonn170709/THM-Addons
+ * Copyright (c) THM Addons contributors. Credit the devs, keep the link.
+ * By using this code you agree to the license terms and to keep your repo public.
+ */
+
+package xyz.thm.addon.mixin.accessor;
+
+import net.minecraft.client.player.ClientInput;
+import net.minecraft.world.phys.Vec2;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.gen.Accessor;
+
+@Mixin(ClientInput.class)
+public interface InputAccessor {
+    @Accessor("moveVector") Vec2 thm$getMoveVector();
+    @Accessor("moveVector") void thm$setMoveVector(Vec2 value);
+    default float getMovementForward() { return thm$getMoveVector().y; }
+    default void setMovementForward(float value) { thm$setMoveVector(new Vec2(thm$getMoveVector().x, value)); }
+    default float getMovementSideways() { return thm$getMoveVector().x; }
+    default void setMovementSideways(float value) { thm$setMoveVector(new Vec2(value, thm$getMoveVector().y)); }
+}

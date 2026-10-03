@@ -155,7 +155,7 @@ public final class RangeUtils {
 
     /** Nearest point of {@code face} to the player's eyes. */
     public static Vec3 nearestPointOnFace(BlockPos pos, Direction face) {
-        if (mc.player == null) return pos.getCenter();
+        if (mc.player == null) return net.minecraft.world.phys.Vec3.atCenterOf(pos);
         return nearestPointOnFace(pos, face, mc.player.getEyePosition());
     }
 

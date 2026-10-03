@@ -23,7 +23,7 @@ THM Addons is a Meteor Client addon focused on highway automation, travel utilit
 
 ## Installation
 1. Build the addon (see below) or obtain a prebuilt jar.
-2. Place the jar in your Minecraft `mods` folder alongside Meteor Client.
+2. Place the jar in your Minecraft `mods` folder alongside Meteor Client, Fabric API, and Baritone.
 3. Launch the game with Fabric.
 
 ## Building
@@ -34,7 +34,7 @@ THM Addons is a Meteor Client addon focused on highway automation, travel utilit
    ```
 3. The jar is created in `build/libs`.
 
-The 26.2 port is in progress. The dependency setup resolves, but the source does not yet compile against the new Minecraft and Meteor APIs.
+The 26.2 code port builds and passes automated tests. This snapshot still needs in-game checks for gameplay, OpenGL, and Vulkan before release. Progress and test steps: [PORT_26_2.md](PORT_26_2.md).
 
 ## Features
 A full module-by-module overview is available in `FEATURES.md`.

@@ -36,7 +36,7 @@ public abstract class SodiumEdgeRenderMixin {
 
     @Inject(method = "updateMerged(II)V", at = @At("HEAD"), cancellable = true)
     private void thm$forceReady(int x, int z, CallbackInfo ci) {
-        long key = ChunkPos.asLong(x, z);
+        long key = ChunkPos.pack(x, z);
         if (this.chunkReady.add(key) && !this.unloadQueue.remove(key)) {
             this.loadQueue.add(key);
         }

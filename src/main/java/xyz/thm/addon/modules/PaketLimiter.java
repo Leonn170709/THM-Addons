@@ -19,6 +19,7 @@ import meteordevelopment.meteorclient.utils.network.PacketUtils;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
 import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.PacketType;
 import net.minecraft.network.protocol.common.ServerboundKeepAlivePacket;
 import net.minecraft.network.protocol.common.ServerboundPongPacket;
 import net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket;
@@ -34,16 +35,16 @@ import java.util.Set;
 
 public class PaketLimiter extends Module {
     /** Movement and keep-alive traffic: dropping any of it desyncs you, so it never counts against the limit. */
-    private static final Set<Class<? extends Packet<?>>> PRESET_BYPASS = Set.of(
-        ServerboundMovePlayerPacket.class,
-        ServerboundMovePlayerPacket.Pos.class,
-        ServerboundMovePlayerPacket.Rot.class,
-        ServerboundMovePlayerPacket.PosRot.class,
-        ServerboundMoveVehiclePacket.class,
-        ServerboundAcceptTeleportationPacket.class,
-        ServerboundKeepAlivePacket.class,
-        ServerboundPongPacket.class,
-        ServerboundPlayerCommandPacket.class
+    private static final Set<PacketType<? extends Packet<?>>> PRESET_BYPASS = Set.of(
+        net.minecraft.network.protocol.game.GamePacketTypes.SERVERBOUND_MOVE_PLAYER_POS,
+        net.minecraft.network.protocol.game.GamePacketTypes.SERVERBOUND_MOVE_PLAYER_ROT,
+        net.minecraft.network.protocol.game.GamePacketTypes.SERVERBOUND_MOVE_PLAYER_POS_ROT,
+        net.minecraft.network.protocol.game.GamePacketTypes.SERVERBOUND_MOVE_PLAYER_STATUS_ONLY,
+        net.minecraft.network.protocol.game.GamePacketTypes.SERVERBOUND_MOVE_VEHICLE,
+        net.minecraft.network.protocol.game.GamePacketTypes.SERVERBOUND_ACCEPT_TELEPORTATION,
+        net.minecraft.network.protocol.common.CommonPacketTypes.SERVERBOUND_KEEP_ALIVE,
+        net.minecraft.network.protocol.common.CommonPacketTypes.SERVERBOUND_PONG,
+        net.minecraft.network.protocol.game.GamePacketTypes.SERVERBOUND_PLAYER_COMMAND
     );
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -74,21 +75,21 @@ public class PaketLimiter extends Module {
         .build()
     );
 
-    public final Setting<Set<Class<? extends Packet<?>>>> bypass = sgGeneral.add(new PacketListSetting.Builder()
+    public final Setting<Set<PacketType<? extends Packet<?>>>> bypass = sgGeneral.add(new PacketListSetting.Builder()
         .name("bypass")
         .description("C2S packets that bypass the limiter.")
-        .filter(aClass -> PacketUtils.getC2SPackets().contains(aClass))
+        .filter(aClass -> PacketUtils.getServerboundPackets().contains(aClass))
         .defaultValue(new ObjectOpenHashSet<>(PRESET_BYPASS))
         .build()
     );
-    public final Setting<Set<Class<? extends Packet<?>>>> alwaysBlock = sgGeneral.add(new PacketListSetting.Builder()
+    public final Setting<Set<PacketType<? extends Packet<?>>>> alwaysBlock = sgGeneral.add(new PacketListSetting.Builder()
         .name("always-block")
         .description("C2S packets that are always cancelled, even if in bypass.")
-        .defaultValue(new ObjectOpenHashSet<Class<? extends Packet<?>>>(Set.of(
-            ServerboundSwingPacket.class,
-            ServerboundClientTickEndPacket.class
+        .defaultValue(new ObjectOpenHashSet<PacketType<? extends Packet<?>>>(Set.of(
+            net.minecraft.network.protocol.game.GamePacketTypes.SERVERBOUND_SWING,
+            net.minecraft.network.protocol.game.GamePacketTypes.SERVERBOUND_CLIENT_TICK_END
         )))
-        .filter(aClass -> PacketUtils.getC2SPackets().contains(aClass))
+        .filter(aClass -> PacketUtils.getServerboundPackets().contains(aClass))
         .build()
     );
 
@@ -123,11 +124,11 @@ public class PaketLimiter extends Module {
         if (builder != null && builder.isChokeHoldingOrFlushing(event.connection)) return;
         int max = limit.get();
         if (max == 0) return;
-        if (alwaysBlock.get().contains(event.packet.getClass())) {
+        if (alwaysBlock.get().contains(event.packet.type())) {
             event.cancel();
             return;
         }
-        if (bypass.get().contains(event.packet.getClass())) return;
+        if (bypass.get().contains(event.packet.type())) return;
 
         if (sentThisTick >= max) {
             // ponytail: fixed 20-tick burst cooldown, make it a setting if someone asks

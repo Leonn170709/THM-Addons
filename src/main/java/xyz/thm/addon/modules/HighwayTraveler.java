@@ -23,7 +23,7 @@ import net.minecraft.tags.BlockTags;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.EndPortalBlock;
 import net.minecraft.world.level.block.LiquidBlock;
@@ -31,7 +31,7 @@ import net.minecraft.world.level.block.NetherPortalBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
-import meteordevelopment.meteorclient.mixininterface.IVec3d;
+import meteordevelopment.meteorclient.mixininterface.IVec3;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.THMUtils;
 
@@ -485,7 +485,7 @@ public class HighwayTraveler extends Module {
         double z = sin * speed;
         double y = -waspFallSpeed.get();
 
-        ((IVec3d) event.movement).meteor$set(x, y, z);
+        ((IVec3) event.movement).meteor$set(x, y, z);
     }
 
     private boolean bounceConditionsMet(LocalPlayer p) {
@@ -533,8 +533,8 @@ public class HighwayTraveler extends Module {
             int syncId = mc.player.containerMenu.containerId;
             int chestId = SlotUtils.indexToId(CHEST_SLOT_INDEX);
             int spareId = SlotUtils.indexToId(emptySlot);
-            mc.gameMode.handleInventoryMouseClick(syncId, chestId, 0, ClickType.PICKUP, mc.player);
-            mc.gameMode.handleInventoryMouseClick(syncId, spareId, 0, ClickType.PICKUP, mc.player);
+            mc.gameMode.handleContainerInput(syncId, chestId, 0, ContainerInput.PICKUP, mc.player);
+            mc.gameMode.handleContainerInput(syncId, spareId, 0, ContainerInput.PICKUP, mc.player);
         } finally {
             THMUtils.fakeInventoryOpen(false);
         }
@@ -551,8 +551,8 @@ public class HighwayTraveler extends Module {
             int syncId = mc.player.containerMenu.containerId;
             int spareId = SlotUtils.indexToId(stashedElytraSlot);
             int chestId = SlotUtils.indexToId(CHEST_SLOT_INDEX);
-            mc.gameMode.handleInventoryMouseClick(syncId, spareId, 0, ClickType.PICKUP, mc.player);
-            mc.gameMode.handleInventoryMouseClick(syncId, chestId, 0, ClickType.PICKUP, mc.player);
+            mc.gameMode.handleContainerInput(syncId, spareId, 0, ContainerInput.PICKUP, mc.player);
+            mc.gameMode.handleContainerInput(syncId, chestId, 0, ContainerInput.PICKUP, mc.player);
         } finally {
             THMUtils.fakeInventoryOpen(false);
         }

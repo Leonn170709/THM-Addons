@@ -183,7 +183,7 @@ public class AxisViewer extends Module {
 
     @EventHandler
     private void onRender3D(Render3DEvent event) {
-        if (mc.options.hideGui) return;
+        if (mc.gui.hud.isHidden()) return;
 
         AxisType axisType;
         int y;

@@ -7,6 +7,7 @@
 package xyz.thm.addon.shaders;
 
 import com.mojang.blaze3d.buffers.GpuBuffer;
+import com.mojang.blaze3d.pipeline.BindGroupLayout;
 import com.mojang.blaze3d.pipeline.CompiledRenderPipeline;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.pipeline.RenderTarget;
@@ -17,25 +18,17 @@ import com.mojang.blaze3d.systems.GpuDevice;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.GpuTextureView;
-import org.lwjgl.system.MemoryStack;
-import xyz.thm.addon.THMAddon;
-
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.OptionalInt;
+import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
+import org.lwjgl.system.MemoryStack;
+import xyz.thm.addon.THMAddon;
 
-// Renders the currently active .fsh background as the title screen's panorama replacement.
-// Unlike the raw-GL approach this replaced, this goes through Blaze3D's actual RenderPipeline/
-// RenderPass API (the same machinery vanilla's own post-processing effects, e.g. the menu
-// blur, use), reusing vanilla's attributeless "core/screenquad" vertex shader. The .fsh files
-// were adapted from RusherHack (see assets/thm-addon/shaders/) to declare their time/mouse/
-// resolution uniforms as a single std140 block ("ThmShaderData") instead of individual
-// uniforms, since Blaze3D only supports whole-uniform-buffer bindings, not per-scalar
-// glUniform calls. Every shader was validated with glslangValidator before shipping.
+// Menu backgrounds use Blaze3D and the shared ThmShaderData uniform block.
 public class ShaderBackground {
     private static final Identifier VERTEX_SHADER = Identifier.withDefaultNamespace("core/screenquad");
     private static final long UNIFORM_BUFFER_SIZE = 32L; // std140: float time, pad, vec2 mouse, vec2 resolution
@@ -47,6 +40,19 @@ public class ShaderBackground {
     private static boolean blurBroken;
     private static boolean scaledBroken;
     private static boolean tripBroken;
+    private record BlurRegion(int x1, int y1, int x2, int y2, int strength) {}
+    private static BlurRegion requestedBlur;
+
+    // Title-screen extraction precedes drawing its panorama.
+    public static void requestBlurredRegion(int x1, int y1, int x2, int y2, int strength) {
+        requestedBlur = new BlurRegion(x1, y1, x2, y2, strength);
+    }
+
+    public static void renderRequestedBlur() {
+        BlurRegion region = requestedBlur;
+        requestedBlur = null;
+        if (region != null) renderBlurredRegion(region.x1, region.y1, region.x2, region.y2, region.strength);
+    }
 
     /** @return true if a shader was drawn (caller should skip the vanilla panorama). */
     public static boolean render() {
@@ -58,7 +64,7 @@ public class ShaderBackground {
             if (pipeline == null) return false;
 
             Minecraft mc = Minecraft.getInstance();
-            RenderTarget framebuffer = mc.getMainRenderTarget();
+            RenderTarget framebuffer = mc.gameRenderer.mainRenderTarget();
             GpuTextureView colorView = framebuffer.getColorTextureView();
             if (colorView == null) return false;
 
@@ -128,7 +134,7 @@ public class ShaderBackground {
                 .withLocation(Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "bg_" + n))
                 .withVertexShader(VERTEX_SHADER)
                 .withFragmentShader(Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, n))
-                .withUniform("ThmShaderData", UniformType.UNIFORM_BUFFER)
+                .withBindGroupLayout(BindGroupLayout.builder().withUniform("ThmShaderData", UniformType.UNIFORM_BUFFER).build())
                 .build();
 
             CompiledRenderPipeline compiled = RenderSystem.getDevice().precompilePipeline(pipeline);
@@ -167,10 +173,11 @@ public class ShaderBackground {
             encoder.writeToBuffer(uniformBuffer.slice(), data);
         }
 
-        try (RenderPass pass = encoder.createRenderPass(() -> "THM shader background", target, OptionalInt.empty())) {
+        try (RenderPass pass = encoder.createRenderPass(() -> "THM shader background", target, Optional.empty())) {
             pass.setPipeline(pipeline);
+            RenderSystem.bindDefaultUniforms(pass);
             pass.setUniform("ThmShaderData", uniformBuffer);
-            pass.draw(0, 3);
+            pass.draw(3, 1, 0, 0);
         }
     }
 }

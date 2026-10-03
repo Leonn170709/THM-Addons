@@ -203,7 +203,7 @@ public class Loadouts extends Module {
             if (assigned == null) continue;
             ItemStack current = handler.getSlot(to).getItem();
             if (debug.get()) {
-                LogUtils.getLogger().info("Assigned: {} | Current: {}", assigned.getName().getString(), current.getHoverName().getString(), this.name);
+                LogUtils.getLogger().info("Assigned: {} | Current: {}", assigned.getDefaultInstance().getHoverName().getString(), current.getHoverName().getString(), this.name);
             }
             if (current.is(assigned)) {
                 if (debug.get()) LogUtils.getLogger().info("Slot already sorted..!", this.name);
@@ -219,7 +219,7 @@ public class Loadouts extends Module {
                     occupiedBy = handler.getSlot(from).getItem();
                 }
                 if (debug.get()) {
-                    LogUtils.getLogger().info("Looking for: {} | found: {}", assigned.getName().getString(), occupiedBy.getHoverName().getString(), this.name);
+                    LogUtils.getLogger().info("Looking for: {} | found: {}", assigned.getDefaultInstance().getHoverName().getString(), occupiedBy.getHoverName().getString(), this.name);
                 }
                 if (occupiedBy.is(assigned)) {
                     if (loadout.get(from) != null && occupiedBy.is(loadout.get(from))) {

@@ -68,7 +68,7 @@ public class THMTab extends Tab {
 
             WButton wavyCapesBtn = add(theme.button("Wavy Capes Settings")).expandX().widget();
             wavyCapesBtn.action = () ->
-                Minecraft.getInstance().setScreen(WaveyCapesTab.INSTANCE.createScreen(theme));
+                Minecraft.getInstance().gui.setScreen(WaveyCapesTab.INSTANCE.createScreen(theme));
 
             add(theme.horizontalSeparator()).expandX();
 

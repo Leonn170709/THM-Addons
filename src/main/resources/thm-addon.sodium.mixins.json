@@ -1,7 +1,7 @@
 {
   "required": false,
   "package": "xyz.thm.addon.mixin.sodium",
-  "compatibilityLevel": "JAVA_21",
+  "compatibilityLevel": "JAVA_25",
   "injectors": {
     "defaultRequire": 0
   },

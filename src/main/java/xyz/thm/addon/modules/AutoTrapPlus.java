@@ -380,7 +380,7 @@ public class AutoTrapPlus extends Module {
         if (logoutTrapMode.get() == LogoutTrapMode.Auto) {
             if (!pendingLogoutSpots.isEmpty()) spotsToProcess.addAll(pendingLogoutSpots);
         } else {
-            if (logoutTrapKeybind.get().isPressed() && mc.screen == null) {
+            if (logoutTrapKeybind.get().isPressed() && mc.gui.screen() == null) {
                 if (!logoutManualPressed) {
                     logoutManualPressed = true;
                     if (!pendingLogoutSpots.isEmpty()) spotsToProcess.addAll(pendingLogoutSpots);
@@ -791,7 +791,7 @@ public class AutoTrapPlus extends Module {
     }
 
     private boolean isOutOfRange(BlockPos blockPos) {
-        Vec3 pos = blockPos.getCenter();
+        Vec3 pos = net.minecraft.world.phys.Vec3.atCenterOf(blockPos);
         if (!PlayerUtils.isWithin(pos, placeRange.get())) return true;
 
         ClipContext raycastContext = new ClipContext(mc.player.getEyePosition(), pos, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player);

@@ -186,7 +186,7 @@ public class AntiConcrete extends Module {
 
         // rotate only briefly — rotate to center of block (yaw/pitch)
         if (rotate.get()) {
-            Rotations.rotate(Rotations.getYaw(currentPos.getCenter()), Rotations.getPitch(currentPos.getCenter()));
+            Rotations.rotate(Rotations.getYaw(net.minecraft.world.phys.Vec3.atCenterOf(currentPos)), Rotations.getPitch(net.minecraft.world.phys.Vec3.atCenterOf(currentPos)));
         }
 
         // place and set cooldown to avoid placing every tick

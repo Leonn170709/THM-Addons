@@ -77,7 +77,7 @@ public class ItemCounterHud extends HudElement {
             if (scanShulkers.get() && isShulkerBox(stack)) {
                 ItemContainerContents container = stack.get(DataComponents.CONTAINER);
                 if (container != null) {
-                    for (ItemStack inner : container.nonEmptyItems()) {
+                    for (ItemStack inner : container.nonEmptyItemCopyStream().toList()) {
                         if (inner.getItem() == target) total += inner.getCount();
                     }
                 }

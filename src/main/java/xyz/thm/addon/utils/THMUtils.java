@@ -6,7 +6,7 @@
 
 package xyz.thm.addon.utils;
 
-import meteordevelopment.meteorclient.mixininterface.IPlayerMoveC2SPacket;
+import meteordevelopment.meteorclient.mixininterface.IServerboundMovePlayerPacket;
 import meteordevelopment.meteorclient.pathing.BaritoneUtils;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.fabricmc.loader.api.FabricLoader;
@@ -71,14 +71,14 @@ public class THMUtils {
     public static List<ItemStack> getContainerContents(ItemStack containerItem) {
         if (containerItem == null || containerItem.isEmpty()) return List.of();
         ItemContainerContents container = containerItem.get(DataComponents.CONTAINER);
-        return container == null ? List.of() : container.nonEmptyStream().toList();
+        return container == null ? List.of() : container.nonEmptyItemCopyStream().toList();
     }
 
     /** Real slot count of a container item (capacity, including empty slots). 0 for a non-container. */
     public static int getContainerSlotCount(ItemStack containerItem) {
         if (containerItem == null || containerItem.isEmpty()) return 0;
         ItemContainerContents container = containerItem.get(DataComponents.CONTAINER);
-        return container == null ? 0 : (int) container.stream().count();
+        return container == null ? 0 : (int) container.allItemsCopyStream().count();
     }
     private static TrayIcon trayIcon;
     private static boolean trayInitialized;
@@ -468,7 +468,7 @@ public class THMUtils {
         double z = mc.player.getZ();
 
         ServerboundMovePlayerPacket packet = new ServerboundMovePlayerPacket.Pos(x, y + height, z, false, false);
-        ((IPlayerMoveC2SPacket) packet).meteor$setTag(1337);
+        ((IServerboundMovePlayerPacket) packet).meteor$setTag(1337);
         mc.player.connection.send(packet);
     }
 
@@ -621,7 +621,7 @@ public class THMUtils {
         if (mc.player == null) return;
         try {
             String message = ChatFormatting.GRAY + msg;
-            mc.player.displayClientMessage(Component.literal(message).setStyle(style), false);
+            mc.player.sendSystemMessage(Component.literal(message).setStyle(style));
         } catch (Exception ignored) {}
     }
 

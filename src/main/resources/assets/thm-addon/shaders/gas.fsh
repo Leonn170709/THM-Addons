@@ -15,9 +15,8 @@ precision mediump float;
 //#extension GL_OES_standard_derivatives : enable
 
 
-uniform float     alpha;
-uniform vec2      speed;
-uniform float     shift;
+const vec2 speed = vec2(0.0);
+const float shift = 0.0;
 
 
 float rand(vec2 n) {

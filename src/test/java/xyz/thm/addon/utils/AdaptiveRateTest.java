@@ -12,7 +12,6 @@ import org.junit.jupiter.params.provider.CsvSource;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import AdaptiveRate;
 
 class AdaptiveRateTest {
     /** Same numbers HighwayBuilder uses for adaptive-placements. */

@@ -26,7 +26,7 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.ChatFormatting;
-import net.minecraft.block.*;
+import net.minecraft.world.level.block.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
@@ -37,7 +37,8 @@ import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.resources.Identifier;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Mth;
-import net.minecraft.util.math.*;
+import net.minecraft.core.*;
+import net.minecraft.world.phys.*;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -5099,7 +5100,7 @@ public class TunnelMinerModule extends Module {
                     new BlockHitResult(Vec3.atCenterOf(bp), Direction.UP, bp, false)));
             return;
         }
-        if (mc.screen != null) {
+        if (mc.gui.screen() != null) {
             waitTicks = 0;
             invTimer = optInvDelay();
             if (optDebugMessages()) info("Container open, looting pickaxes.");
@@ -5113,7 +5114,7 @@ public class TunnelMinerModule extends Module {
     }
 
     private void restockLoot() {
-        if (mc.screen == null) {
+        if (mc.gui.screen() == null) {
             watchdogCalc("restock-loot", "action=close-screen-null");
             setPhase(Phase.RESTOCK_CLOSE);
             return;
@@ -5298,8 +5299,8 @@ public class TunnelMinerModule extends Module {
     }
 
     private void restockClose() {
-        if (mc.screen != null) {
-            mc.screen.onClose();
+        if (mc.gui.screen() != null) {
+            mc.gui.screen().onClose();
             invTimer = optInvDelay();
             return;
         }
@@ -7288,7 +7289,7 @@ public class TunnelMinerModule extends Module {
         ItemContainerContents container = shulker.get(DataComponents.CONTAINER);
         if (container == null) return 0;
         int picks = 0;
-        for (ItemStack stack : container.nonEmptyItems()) {
+        for (ItemStack stack : container.nonEmptyItemCopyStream().toList()) {
             if (isPickaxe(stack)) picks += Math.max(1, stack.getCount());
         }
         return picks;

@@ -27,7 +27,7 @@ import meteordevelopment.meteorclient.utils.misc.HorizontalDirection;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
 import net.minecraft.client.Screenshot;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.DisconnectedScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.core.BlockPos;
@@ -520,7 +520,7 @@ public class THMHwyMonitor extends Module {
     }
 
     private String readDisconnectedScreenReasonLower() {
-        if (mc == null || !(mc.screen instanceof DisconnectedScreen screen)) return "";
+        if (mc == null || !(mc.gui.screen() instanceof DisconnectedScreen screen)) return "";
 
         Component reason = null;
         try {
@@ -1514,7 +1514,7 @@ public class THMHwyMonitor extends Module {
         if (!postRejoinDirectionGateActive) return;
         if (mc == null || mc.font == null) return;
 
-        GuiGraphics context = event.drawContext;
+        GuiGraphicsExtractor context = event.graphics;
         List<String> lines = new ArrayList<>();
         lines.add("THMHwyMonitor reconnect blocked");
         lines.add(String.format(Locale.ROOT, "Retry %d/%d", postRejoinDirectionRetryCount, POST_REJOIN_DIRECTION_RETRY_LIMIT));
@@ -1532,7 +1532,7 @@ public class THMHwyMonitor extends Module {
 
         int drawY = y;
         for (String line : lines) {
-            context.drawString(mc.font, line, x, drawY, 0xFFFFAA00, false);
+            context.text(mc.font, line, x, drawY, 0xFFFFAA00, false);
             drawY += lineHeight;
         }
     }
@@ -2480,9 +2480,9 @@ public class THMHwyMonitor extends Module {
 
     private void clearStaleDisconnectedScreenIfLiveConnected() {
         if (!hasLiveServerConnection()) return;
-        if (!(mc.screen instanceof DisconnectedScreen)) return;
+        if (!(mc.gui.screen() instanceof DisconnectedScreen)) return;
         info("Clearing stale DisconnectedScreen while client is already live in-world.");
-        mc.setScreen(null);
+        mc.gui.setScreen(null);
     }
 
     private void clearRestartAutomationStateForTerminalStop(String reason) {
@@ -3415,8 +3415,8 @@ public class THMHwyMonitor extends Module {
     }
 
     private void takeRestartScreenshot() {
-        if (mc == null || mc.getMainRenderTarget() == null) return;
-        Screenshot.grab(mc.gameDirectory, mc.getMainRenderTarget(), message -> info(message.getString()));
+        if (mc == null || mc.gameRenderer.mainRenderTarget() == null) return;
+        Screenshot.grab(mc.gameDirectory, mc.gameRenderer.mainRenderTarget(), message -> info(message.getString()));
     }
 
     private void beginPostRejoinDirectionGate(long cycleId, String contextTag) {
@@ -3740,7 +3740,7 @@ public class THMHwyMonitor extends Module {
         disableMonitorAfterIntentionalSafetyDisconnect = false;
 
         if (mc != null) {
-            mc.setScreen(new DisconnectedScreen(
+            mc.gui.setScreen(new DisconnectedScreen(
                 new TitleScreen(),
                 Component.nullToEmpty("THMHwyMonitor Safety Stop"),
                 disconnectPresentation.text()
@@ -3802,7 +3802,7 @@ public class THMHwyMonitor extends Module {
     }
 
     private boolean isSuccessfullyConnectedToServer() {
-        return hasLiveServerConnection() && !(mc.screen instanceof DisconnectedScreen);
+        return hasLiveServerConnection() && !(mc.gui.screen() instanceof DisconnectedScreen);
     }
 
     private static String inferDirectionForLine(WorkLine line, float yaw) {

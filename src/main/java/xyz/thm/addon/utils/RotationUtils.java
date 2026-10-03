@@ -18,7 +18,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import xyz.thm.addon.accessor.InputAccessor;
+import xyz.thm.addon.mixin.accessor.InputAccessor;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;

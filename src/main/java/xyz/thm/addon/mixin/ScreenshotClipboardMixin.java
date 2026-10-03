@@ -46,7 +46,7 @@ public class ScreenshotClipboardMixin {
 
     // Inject at TAIL so: (1) the file is fully written, (2) the "Saved screenshot" message
     // has already been sent — our clipboard message always appears after it.
-    @Inject(method = "method_22691", at = @At("TAIL"))
+    @Inject(method = "lambda$grab$3", at = @At("TAIL"))
     private static void onSaveScreenshotFile(NativeImage image, File file, Consumer<Component> messageReceiver, CallbackInfo ci) {
         if (!THMSystem.get().screenshotToClipboard.get()) return;
 

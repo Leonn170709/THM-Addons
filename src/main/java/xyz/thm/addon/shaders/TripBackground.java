@@ -6,7 +6,9 @@
 
 package xyz.thm.addon.shaders;
 
+import com.mojang.blaze3d.GpuFormat;
 import com.mojang.blaze3d.buffers.GpuBuffer;
+import com.mojang.blaze3d.pipeline.BindGroupLayout;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.shaders.ShaderType;
@@ -18,18 +20,16 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
-import com.mojang.blaze3d.textures.TextureFormat;
-import org.lwjgl.system.MemoryStack;
-import xyz.thm.addon.THMAddon;
-
 import java.nio.ByteBuffer;
-import java.util.OptionalInt;
+import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
+import org.lwjgl.system.MemoryStack;
+import xyz.thm.addon.THMAddon;
 
 // Joke "I'm high" full-frame post effect - the same Blaze3D framebuffer-post plumbing as
-// BlurBackground (attributeless big-triangle vertex shader, POST_EFFECT_PROCESSOR_SNIPPET
+// BlurBackground (attributeless big-triangle vertex shader, POST_PROCESSING_SNIPPET
 // pipelines, inline shader sources via precompilePipeline), but instead of a blur it warps the
 // whole screen with a nausea-style wave, pulses a green<->red tint, and double-samples so the
 // image "melts into itself". Two full-res passes per frame: copy the framebuffer into a temp
@@ -124,7 +124,7 @@ class TripBackground {
         GpuDevice device = RenderSystem.getDevice();
         if (!ensurePipelines(device)) return false;
 
-        RenderTarget framebuffer = Minecraft.getInstance().getMainRenderTarget();
+        RenderTarget framebuffer = Minecraft.getInstance().gameRenderer.mainRenderTarget();
         GpuTextureView mainView = framebuffer.getColorTextureView();
         if (mainView == null) return false;
 
@@ -136,18 +136,20 @@ class TripBackground {
         writeParams(encoder, (float) (System.nanoTime() / 1.0e9), intensity);
 
         // Pass 1: framebuffer -> temp (passthrough copy, so pass 2 has a stable source to warp).
-        try (RenderPass pass = encoder.createRenderPass(() -> "THM trip copy", tempView, OptionalInt.empty())) {
+        try (RenderPass pass = encoder.createRenderPass(() -> "THM trip copy", tempView, Optional.empty())) {
             pass.setPipeline(copyPipeline);
+            RenderSystem.bindDefaultUniforms(pass);
             pass.bindTexture("InSampler", mainView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
-            pass.draw(0, 3);
+            pass.draw(3, 1, 0, 0);
         }
 
         // Pass 2: warped temp -> main framebuffer.
-        try (RenderPass pass = encoder.createRenderPass(() -> "THM trip draw", mainView, OptionalInt.empty())) {
+        try (RenderPass pass = encoder.createRenderPass(() -> "THM trip draw", mainView, Optional.empty())) {
             pass.setPipeline(tripPipeline);
+            RenderSystem.bindDefaultUniforms(pass);
             pass.setUniform("TripParams", paramsBuffer);
             pass.bindTexture("InSampler", tempView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
-            pass.draw(0, 3);
+            pass.draw(3, 1, 0, 0);
         }
 
         return true;
@@ -172,15 +174,15 @@ class TripBackground {
             .withLocation(Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "trip_copy"))
             .withVertexShader(VSH_ID)
             .withFragmentShader(COPY_FSH_ID)
-            .withSampler("InSampler")
+            .withBindGroupLayout(BindGroupLayout.builder().withSampler("InSampler").build())
             .build();
 
         tripPipeline = RenderPipeline.builder(RenderPipelines.POST_PROCESSING_SNIPPET)
             .withLocation(Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "trip_draw"))
             .withVertexShader(VSH_ID)
             .withFragmentShader(TRIP_FSH_ID)
-            .withUniform("TripParams", UniformType.UNIFORM_BUFFER)
-            .withSampler("InSampler")
+            .withBindGroupLayout(BindGroupLayout.builder().withUniform("TripParams", UniformType.UNIFORM_BUFFER).build())
+            .withBindGroupLayout(BindGroupLayout.builder().withSampler("InSampler").build())
             .build();
 
         boolean copyOk = device.precompilePipeline(copyPipeline, TripBackground::shaderSource).isValid();
@@ -204,7 +206,7 @@ class TripBackground {
         if (temp != null) temp.close();
 
         temp = device.createTexture(() -> "THM trip temp",
-            GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, TextureFormat.RGBA8, w, h, 1, 1);
+            GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, GpuFormat.RGBA8_UNORM, w, h, 1, 1);
         tempView = device.createTextureView(temp);
         texWidth = w;
         texHeight = h;

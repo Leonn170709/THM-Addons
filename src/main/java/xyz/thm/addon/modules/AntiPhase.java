@@ -129,7 +129,7 @@ public class AntiPhase extends Module {
 
         BlockPos feet = target.blockPosition();
         if (!mc.level.getBlockState(feet).canBeReplaced()) return;
-        if (!PlayerUtils.isWithin(feet.getCenter(), reach.get())) return;
+        if (!PlayerUtils.isWithin(net.minecraft.world.phys.Vec3.atCenterOf(feet), reach.get())) return;
 
         // checkEntities off: scaffolding reports a solid shape to an absent context, so the client
         // check would reject placing inside the target — the server accepts it.

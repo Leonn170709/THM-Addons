@@ -74,6 +74,6 @@ forces alpha to `1.0`.
 - A shader that fails to compile is caught and disabled automatically (falls back to the
   vanilla panorama for that pick) — check the client log for `[THM] Main-menu shader '<name>'
   failed to compile` for the driver's actual error if something doesn't work.
-- Validate with `glslangValidator -S frag <file>` before shipping, but treat it as a smoke
-  test, not proof — it has missed at least one real compile error (misplaced `#extension`)
-  that Mojang's actual driver compiler caught. Trust the in-game log over the validator.
+- Run `tools/scripts/check-shaders.sh` before shipping. It compiles all background and inline
+  shaders for OpenGL and Vulkan using `glslangValidator`. In-game logs and visual checks are
+  still required for both active backends.

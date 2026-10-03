@@ -40,7 +40,7 @@ public abstract class HighwayBuilderEntityMixin {
         Freecam freecam = Modules.get().get(Freecam.class);
         if (freecam != null && freecam.isActive()) return;
 
-        Camera camera = mc.gameRenderer.getMainCamera();
+        Camera camera = mc.gameRenderer.mainCamera();
         float nextYaw = Mth.wrapDegrees((float) (camera.yRot() + cursorDeltaX * 0.15));
         float nextPitch = Mth.clamp((float) (camera.xRot() + cursorDeltaY * 0.15), -90.0f, 90.0f);
         ((CameraAccessor) camera).thm$setRotation(nextYaw, nextPitch);

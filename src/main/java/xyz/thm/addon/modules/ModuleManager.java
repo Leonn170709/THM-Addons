@@ -646,7 +646,7 @@ public class ModuleManager extends Module {
     private String formatEventLine(String eventType, String detail, Module module, List<String> leaseLabels, String stack) {
         String moduleName = module == null ? "none" : module.name;
         String moduleTitle = module == null ? "none" : module.title;
-        String screenName = mc == null || mc.screen == null ? "none" : mc.screen.getClass().getSimpleName();
+        String screenName = mc == null || mc.gui.screen() == null ? "none" : mc.gui.screen().getClass().getSimpleName();
         String serverState = String.valueOf(getCommittedServerState());
         boolean builderActive = isModuleActive(HighwayBuilderTHM.class);
         boolean monitorActive = isModuleActive(THMHwyMonitor.class);

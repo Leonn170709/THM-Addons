@@ -9,13 +9,13 @@ import meteordevelopment.meteorclient.commands.Command;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import meteordevelopment.meteorclient.systems.modules.Modules;
-import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.client.multiplayer.ClientSuggestionProvider;
 import xyz.thm.addon.modules.Loadouts;
 
 public class Loadout extends Command {
     public Loadout() { super("loadout", "Save and load inventory configurations."); }
     @Override
-    public void build(LiteralArgumentBuilder<SharedSuggestionProvider> builder) {
+    public void build(LiteralArgumentBuilder<ClientSuggestionProvider> builder) {
         builder.then(literal("save").then(argument("name", StringArgumentType.word()).executes(ctx -> {
             String loadoutName = ctx.getArgument("name", String.class);
             Modules mods = Modules.get();

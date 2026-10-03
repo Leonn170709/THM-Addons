@@ -587,9 +587,9 @@ public class Speedmine extends Module {
             }
         }
         Comparator<BlockPos> byDistance =
-            Comparator.comparingDouble(pos -> mc.player.getEyePosition().distanceToSqr(pos.getCenter()));
+            Comparator.comparingDouble(pos -> mc.player.getEyePosition().distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(pos)));
         // ponytail: absolute Y, not per-enemy feet level — right for one enemy, good enough for a pile of them
-        out.sort(feetFirst.get() ? Comparator.comparingInt(BlockPos::getY).thenComparing(byDistance) : byDistance);
+        out.sort(feetFirst.get() ? Comparator.<BlockPos>comparingInt(BlockPos::getY).thenComparing(byDistance) : byDistance);
         return out;
     }
 

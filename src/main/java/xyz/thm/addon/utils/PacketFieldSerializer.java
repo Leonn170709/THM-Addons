@@ -41,7 +41,7 @@ public final class PacketFieldSerializer {
 
     public static String encodePayload(Packet<?> packet, RegistryAccess registries) throws ReflectiveOperationException {
         @SuppressWarnings("unchecked")
-        StreamCodec<RegistryFriendlyByteBuf, Packet<?>> codec = (StreamCodec<RegistryFriendlyByteBuf, Packet<?>>) packet.getClass().getField("CODEC").get(null);
+        StreamCodec<RegistryFriendlyByteBuf, Packet<?>> codec = (StreamCodec<RegistryFriendlyByteBuf, Packet<?>>) packet.getClass().getField("STREAM_CODEC").get(null);
         RegistryFriendlyByteBuf buf = new RegistryFriendlyByteBuf(Unpooled.buffer(), registries);
         try {
             codec.encode(buf, packet);

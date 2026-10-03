@@ -15,12 +15,11 @@ import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.systems.modules.render.blockesp.ESPBlockData;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.world.Dir;
-import net.minecraft.client.gui.Font;
-import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
-import net.minecraft.util.math.*;
+import net.minecraft.core.*;
+import net.minecraft.world.phys.*;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -32,8 +31,6 @@ import java.util.function.Predicate;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 
-import com.mojang.blaze3d.vertex.ByteBufferBuilder;
-import com.mojang.blaze3d.vertex.PoseStack;
 
 /**
  * Preferred render utility for all THM addon rendering.
@@ -42,9 +39,6 @@ import com.mojang.blaze3d.vertex.PoseStack;
 public class RenderUtilsTHM {
     // Direction.values() hands out a fresh array on every call.
     private static final Direction[] DIRECTIONS = Direction.values();
-
-    private static final MultiBufferSource.BufferSource vertex =
-        MultiBufferSource.immediate(new ByteBufferBuilder(2048));
 
     private RenderUtilsTHM() {}
 
@@ -319,17 +313,6 @@ public class RenderUtilsTHM {
             (int) Mth.lerpInt(t, a.b, b.b),
             (int) Mth.lerpInt(t, a.a, b.a)
         );
-    }
-
-    // =========================================================
-    // 2D text (drawn into 3D world via matrix stack)
-    // =========================================================
-
-    public static void text(String text, PoseStack stack, float x, float y, int color) {
-        mc.font.drawInBatch(text, x, y, color, false,
-            stack.last().pose(), vertex,
-            Font.DisplayMode.NORMAL, 0, 15728880);
-        vertex.endBatch();
     }
 
     // =========================================================
