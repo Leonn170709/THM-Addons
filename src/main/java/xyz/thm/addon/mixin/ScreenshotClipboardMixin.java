@@ -7,9 +7,8 @@
 package xyz.thm.addon.mixin;
 
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
-import net.minecraft.client.texture.NativeImage;
-import net.minecraft.client.util.ScreenshotRecorder;
-import net.minecraft.text.Text;
+import net.minecraft.client.Screenshot;
+import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -19,6 +18,7 @@ import xyz.thm.addon.utils.THMUtils;
 import xyz.thm.addon.system.THMSystem;
 
 import javax.imageio.ImageIO;
+import com.mojang.blaze3d.platform.NativeImage;
 import java.awt.*;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
@@ -30,7 +30,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.function.Consumer;
 
-@Mixin(ScreenshotRecorder.class)
+@Mixin(Screenshot.class)
 public class ScreenshotClipboardMixin {
 
     // Minecraft launches with -Djava.awt.headless=true; override before AWT is first touched.
@@ -47,7 +47,7 @@ public class ScreenshotClipboardMixin {
     // Inject at TAIL so: (1) the file is fully written, (2) the "Saved screenshot" message
     // has already been sent — our clipboard message always appears after it.
     @Inject(method = "method_22691", at = @At("TAIL"))
-    private static void onSaveScreenshotFile(NativeImage image, File file, Consumer<Text> messageReceiver, CallbackInfo ci) {
+    private static void onSaveScreenshotFile(NativeImage image, File file, Consumer<Component> messageReceiver, CallbackInfo ci) {
         if (!THMSystem.get().screenshotToClipboard.get()) return;
 
         THMUtils.async("screenshot-clipboard", () -> {

@@ -6,19 +6,20 @@
 
 package xyz.thm.addon.utils;
 
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
+
 class RangeUtilsTest {
-    private static final Vec3d EYE = new Vec3d(0.5, 1.62, 0.5);
+    private static final Vec3 EYE = new Vec3(0.5, 1.62, 0.5);
 
     @Test
     void nearestPointClampsToCube() {
-        Vec3d p = RangeUtils.nearestPoint(new BlockPos(3, 0, 0), EYE);
-        assertEquals(new Vec3d(3.0, 1.0, 0.5), p);
+        Vec3 p = RangeUtils.nearestPoint(new BlockPos(3, 0, 0), EYE);
+        assertEquals(new Vec3(3.0, 1.0, 0.5), p);
     }
 
     @Test

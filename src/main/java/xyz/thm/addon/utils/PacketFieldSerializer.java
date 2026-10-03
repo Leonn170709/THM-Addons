@@ -14,23 +14,22 @@ import com.google.gson.JsonPrimitive;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import net.minecraft.block.BlockState;
-import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NbtElement;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.Packet;
-import net.minecraft.registry.DynamicRegistryManager;
-import net.minecraft.registry.RegistryKey;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.entry.RegistryEntry;
-
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Optional;
+import net.minecraft.core.Holder;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.Tag;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.Packet;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.state.BlockState;
 
 public final class PacketFieldSerializer {
     private PacketFieldSerializer() {
@@ -40,10 +39,10 @@ public final class PacketFieldSerializer {
         return serialize(value, new IdentityHashMap<>());
     }
 
-    public static String encodePayload(Packet<?> packet, DynamicRegistryManager registries) throws ReflectiveOperationException {
+    public static String encodePayload(Packet<?> packet, RegistryAccess registries) throws ReflectiveOperationException {
         @SuppressWarnings("unchecked")
-        PacketCodec<RegistryByteBuf, Packet<?>> codec = (PacketCodec<RegistryByteBuf, Packet<?>>) packet.getClass().getField("CODEC").get(null);
-        RegistryByteBuf buf = new RegistryByteBuf(Unpooled.buffer(), registries);
+        StreamCodec<RegistryFriendlyByteBuf, Packet<?>> codec = (StreamCodec<RegistryFriendlyByteBuf, Packet<?>>) packet.getClass().getField("CODEC").get(null);
+        RegistryFriendlyByteBuf buf = new RegistryFriendlyByteBuf(Unpooled.buffer(), registries);
         try {
             codec.encode(buf, packet);
             return ByteBufUtil.hexDump(buf, 0, buf.writerIndex());
@@ -59,13 +58,13 @@ public final class PacketFieldSerializer {
         if (value instanceof CharSequence || value instanceof Character || value instanceof Enum<?>) return new JsonPrimitive(value.toString());
         if (value instanceof byte[] bytes) return new JsonPrimitive(java.util.HexFormat.of().formatHex(bytes));
         if (value instanceof ByteBuf buf) return new JsonPrimitive(ByteBufUtil.hexDump(buf, buf.readerIndex(), buf.readableBytes()));
-        if (value instanceof RegistryKey<?> key) return new JsonPrimitive(key.getValue().toString());
-        if (value instanceof RegistryEntry<?> entry) return new JsonPrimitive(entry.getKey().map(key -> key.getValue().toString()).orElseGet(entry::toString));
-        if (value instanceof NbtElement) return new JsonPrimitive(value.toString());
+        if (value instanceof ResourceKey<?> key) return new JsonPrimitive(key.identifier().toString());
+        if (value instanceof Holder<?> entry) return new JsonPrimitive(entry.unwrapKey().map(key -> key.identifier().toString()).orElseGet(entry::toString));
+        if (value instanceof Tag) return new JsonPrimitive(value.toString());
         if (value instanceof BlockState) return new JsonPrimitive(value.toString());
         if (value instanceof ItemStack stack) {
             JsonObject item = new JsonObject();
-            item.addProperty("item_id", Registries.ITEM.getId(stack.getItem()).toString());
+            item.addProperty("item_id", BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
             item.addProperty("count", stack.getCount());
             item.addProperty("components", stack.getComponents().toString());
             return item;

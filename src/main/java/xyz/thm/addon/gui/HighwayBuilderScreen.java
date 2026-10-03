@@ -10,7 +10,6 @@ import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.GuiThemes;
 import meteordevelopment.meteorclient.gui.WidgetScreen;
 import meteordevelopment.meteorclient.systems.modules.Module;
-import net.minecraft.client.gui.screen.Screen;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
@@ -29,6 +28,7 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.settings.Settings;
 import meteordevelopment.meteorclient.systems.modules.Modules;
+import net.minecraft.client.gui.screens.Screen;
 import xyz.thm.addon.hud.HighwayHud;
 import xyz.thm.addon.modules.HighwayBuilderTHM;
 import xyz.thm.addon.system.THMSystem;
@@ -280,7 +280,7 @@ public class HighwayBuilderScreen extends WindowScreen {
     }
 
     private static boolean mouseHeld() {
-        return GLFW.glfwGetMouseButton(mc.getWindow().getHandle(), GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS;
+        return GLFW.glfwGetMouseButton(mc.getWindow().handle(), GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS;
     }
 
     private void updateStatus() {
@@ -312,7 +312,7 @@ public class HighwayBuilderScreen extends WindowScreen {
 
             WHorizontalList actions = add(theme.horizontalList()).expandX().widget();
             WButton save = actions.add(theme.button("Save")).expandX().widget();
-            actions.add(theme.button("Cancel")).expandX().widget().action = this::close;
+            actions.add(theme.button("Cancel")).expandX().widget().action = this::onClose;
             save.action = this::save;
             enterAction = this::save;
         }
@@ -322,7 +322,7 @@ public class HighwayBuilderScreen extends WindowScreen {
                 selectedCustomPreset = HighwayPresetManager.save(name.get());
                 presetStatus = "Saved " + selectedCustomPreset + ".json.";
                 HighwayBuilderScreen.this.reload();
-                close();
+                onClose();
             } catch (IOException e) {
                 error.set(e.getMessage() == null ? "Could not save preset." : e.getMessage());
             }

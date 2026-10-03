@@ -8,20 +8,20 @@ package xyz.thm.addon.mixin;
 
 import io.netty.channel.ChannelFutureListener;
 import meteordevelopment.meteorclient.systems.modules.Modules;
-import net.minecraft.network.ClientConnection;
-import net.minecraft.network.packet.Packet;
+import net.minecraft.network.Connection;
+import net.minecraft.network.protocol.Packet;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import xyz.thm.addon.modules.HighwayBuilderTHM;
 
-@Mixin(ClientConnection.class)
+@Mixin(Connection.class)
 public abstract class ClientConnectionChokeMixin {
-    @Inject(method = "send(Lnet/minecraft/network/packet/Packet;Lio/netty/channel/ChannelFutureListener;Z)V", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "send(Lnet/minecraft/network/protocol/Packet;Lio/netty/channel/ChannelFutureListener;Z)V", at = @At("HEAD"), cancellable = true)
     private void thm$holdPacket(Packet<?> packet, ChannelFutureListener listener, boolean flush, CallbackInfo ci) {
         Modules modules = Modules.get();
         HighwayBuilderTHM builder = modules == null ? null : modules.get(HighwayBuilderTHM.class);
-        if (builder != null && builder.holdOutgoingPacket((ClientConnection) (Object) this, packet, listener, flush)) ci.cancel();
+        if (builder != null && builder.holdOutgoingPacket((Connection) (Object) this, packet, listener, flush)) ci.cancel();
     }
 }

@@ -12,7 +12,7 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.combat.AutoWeb;
-import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.world.entity.player.Player;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -22,7 +22,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(value = AutoWeb.class, remap = false)
 public abstract class AutoWebMixin {
-    @Shadow private PlayerEntity target;
+    @Shadow private Player target;
 
     @Unique private Setting<Boolean> thm$ignoreNaked;
 
@@ -42,12 +42,12 @@ public abstract class AutoWebMixin {
         method = "onTick",
         at = @At(
             value = "INVOKE",
-            target = "Lmeteordevelopment/meteorclient/utils/player/InvUtils;findInHotbar([Lnet/minecraft/item/Item;)Lmeteordevelopment/meteorclient/utils/player/FindItemResult;"
+            target = "Lmeteordevelopment/meteorclient/utils/player/InvUtils;findInHotbar([Lnet/minecraft/world/item/Item;)Lmeteordevelopment/meteorclient/utils/player/FindItemResult;"
         ),
         cancellable = true
     )
     private void thm$skipNakedTargets(TickEvent.Pre event, CallbackInfo ci) {
         if (thm$ignoreNaked == null || !thm$ignoreNaked.get()) return;
-        if (target != null && target.getArmor() == 0) ci.cancel();
+        if (target != null && target.getArmorValue() == 0) ci.cancel();
     }
 }

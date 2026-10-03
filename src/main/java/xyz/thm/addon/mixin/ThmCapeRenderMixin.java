@@ -7,12 +7,12 @@
 package xyz.thm.addon.mixin;
 
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.AbstractClientPlayerEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.entity.player.SkinTextures;
-import net.minecraft.util.AssetInfo;
-import net.minecraft.util.Identifier;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.core.ClientAsset;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.player.PlayerSkin;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -21,16 +21,16 @@ import xyz.thm.addon.system.THMSystem;
 import xyz.thm.addon.utils.CapeManager;
 import xyz.thm.addon.utils.ThmMembers;
 
-@Mixin(AbstractClientPlayerEntity.class)
+@Mixin(AbstractClientPlayer.class)
 public abstract class ThmCapeRenderMixin {
 
     @Inject(method = "getSkin", at = @At("RETURN"), cancellable = true)
-    private void thm$injectCape(CallbackInfoReturnable<SkinTextures> cir) {
+    private void thm$injectCape(CallbackInfoReturnable<PlayerSkin> cir) {
         THMSystem system = THMSystem.get();
         if (system == null) return;
 
-        PlayerEntity self = (PlayerEntity) (Object) this;
-        MinecraftClient mc = MinecraftClient.getInstance();
+        Player self = (Player) (Object) this;
+        Minecraft mc = Minecraft.getInstance();
 
         String capeId;
         if (mc.player == (Object) self) {
@@ -42,14 +42,14 @@ public abstract class ThmCapeRenderMixin {
             if (!FabricLoader.getInstance().isDevelopmentEnvironment() && !ThmMembers.isThmMember(self)) return;
         }
 
-        SkinTextures original = cir.getReturnValue();
+        PlayerSkin original = cir.getReturnValue();
         if (original == null) return;
 
         Identifier capeTexture = CapeManager.getCapeTexture(capeId);
         if (capeTexture == null) return;
 
-        AssetInfo.TextureAssetInfo capeAsset = new AssetInfo.TextureAssetInfo(capeTexture, capeTexture);
-        cir.setReturnValue(new SkinTextures(
+        ClientAsset.ResourceTexture capeAsset = new ClientAsset.ResourceTexture(capeTexture, capeTexture);
+        cir.setReturnValue(new PlayerSkin(
             original.body(),
             capeAsset,
             capeAsset,

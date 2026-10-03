@@ -6,9 +6,9 @@
 
 package xyz.thm.addon.gui;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.ChatScreen;
-import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.ChatScreen;
+import net.minecraft.client.gui.screens.Screen;
 
 /**
  * Chat opened from the death screen. Sending (Enter) and Esc both leave the player on no screen at
@@ -25,11 +25,11 @@ public class DeathChatScreen extends ChatScreen {
     @Override
     public void removed() {
         super.removed();
-        MinecraftClient mc = MinecraftClient.getInstance();
+        Minecraft mc = Minecraft.getInstance();
         // Re-opening from inside removed() would be overwritten by the setScreen call that got us
         // here, so it goes through the client's own task queue instead.
         mc.execute(() -> {
-            if (mc.currentScreen == null && mc.player != null && mc.player.isDead()) mc.setScreen(parent);
+            if (mc.screen == null && mc.player != null && mc.player.isDeadOrDying()) mc.setScreen(parent);
         });
     }
 }

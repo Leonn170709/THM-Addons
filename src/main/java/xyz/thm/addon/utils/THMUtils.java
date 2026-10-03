@@ -10,21 +10,21 @@ import meteordevelopment.meteorclient.mixininterface.IPlayerMoveC2SPacket;
 import meteordevelopment.meteorclient.pathing.BaritoneUtils;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ServerInfo;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.ContainerComponent;
-import net.minecraft.item.ItemStack;
-import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
-import net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
-import net.minecraft.text.ClickEvent;
-import net.minecraft.text.Style;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.World;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.Style;
+import net.minecraft.network.protocol.game.ServerboundContainerClosePacket;
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
+import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.modules.TunnelMinerModule;
@@ -70,14 +70,14 @@ public class THMUtils {
     /** Non-empty contents of a container item (shulker, etc.), whatever its real slot count. Empty for a non-container. */
     public static List<ItemStack> getContainerContents(ItemStack containerItem) {
         if (containerItem == null || containerItem.isEmpty()) return List.of();
-        ContainerComponent container = containerItem.get(DataComponentTypes.CONTAINER);
-        return container == null ? List.of() : container.streamNonEmpty().toList();
+        ItemContainerContents container = containerItem.get(DataComponents.CONTAINER);
+        return container == null ? List.of() : container.nonEmptyStream().toList();
     }
 
     /** Real slot count of a container item (capacity, including empty slots). 0 for a non-container. */
     public static int getContainerSlotCount(ItemStack containerItem) {
         if (containerItem == null || containerItem.isEmpty()) return 0;
-        ContainerComponent container = containerItem.get(DataComponentTypes.CONTAINER);
+        ItemContainerContents container = containerItem.get(DataComponents.CONTAINER);
         return container == null ? 0 : (int) container.stream().count();
     }
     private static TrayIcon trayIcon;
@@ -92,7 +92,7 @@ public class THMUtils {
     }
 
     public static boolean tunnelMinerGoTo(int x, int z, int stealthMode, boolean renderingEnabled) {
-        if (mc == null || !mc.isOnThread()) {
+        if (mc == null || !mc.isSameThread()) {
             THMAddon.LOG.warn(
                 "TunnelMiner goTo rejected: must be called on the Minecraft client thread. target=({}, {}) [stealthMode={},render={}]",
                 x,
@@ -132,7 +132,7 @@ public class THMUtils {
     }
 
     public static BlockPos forward(BlockPos pos, int distance) {
-        return switch (mc.player.getHorizontalFacing()) {
+        return switch (mc.player.getDirection()) {
             case SOUTH -> pos.south(distance);
             case NORTH -> pos.north(distance);
             case WEST -> pos.west(distance);
@@ -141,7 +141,7 @@ public class THMUtils {
     }
 
     public static BlockPos backward(BlockPos pos, int distance) {
-        return switch (mc.player.getHorizontalFacing()) {
+        return switch (mc.player.getDirection()) {
             case SOUTH -> pos.north(distance);
             case NORTH -> pos.south(distance);
             case WEST -> pos.east(distance);
@@ -150,7 +150,7 @@ public class THMUtils {
     }
 
     public static BlockPos left(BlockPos pos, int distance) {
-        return switch (mc.player.getHorizontalFacing()) {
+        return switch (mc.player.getDirection()) {
             case SOUTH -> pos.east(distance);
             case NORTH -> pos.west(distance);
             case WEST -> pos.south(distance);
@@ -159,7 +159,7 @@ public class THMUtils {
     }
 
     public static BlockPos right(BlockPos pos, int distance) {
-        return switch (mc.player.getHorizontalFacing()) {
+        return switch (mc.player.getDirection()) {
             case SOUTH -> pos.west(distance);
             case NORTH -> pos.east(distance);
             case WEST -> pos.north(distance);
@@ -436,13 +436,13 @@ public class THMUtils {
     }
 
     public static boolean isNot6B6T() {
-        assert mc.world != null;
+        assert mc.level != null;
         if (FabricLoader.getInstance().isDevelopmentEnvironment()) return false; // Bypass check in dev environment
-        if (mc.isIntegratedServerRunning()) return true;
+        if (mc.hasSingleplayerServer()) return true;
         refreshAnarchyModDomainsAsync();
-        ServerInfo server = mc.getCurrentServerEntry();
+        ServerData server = mc.getCurrentServer();
         if (server == null) return false;
-        String address = server.address == null ? "" : server.address.trim().toLowerCase(Locale.ROOT);
+        String address = server.ip == null ? "" : server.ip.trim().toLowerCase(Locale.ROOT);
         if (address.isEmpty()) return false;
         int colon = address.indexOf(':');
         String host = colon >= 0 ? address.substring(0, colon) : address;
@@ -455,10 +455,10 @@ public class THMUtils {
     }
 
     public static double getDamage(ItemStack i) {
-        return (((double) (i.getMaxDamage() - i.getDamage()) / i.getMaxDamage()) * 100);
+        return (((double) (i.getMaxDamage() - i.getDamageValue()) / i.getMaxDamage()) * 100);
     }
-    public static Vec3d positionInDirection(Vec3d pos, double yaw, double distance) {
-        Vec3d offset = yawToDirection(yaw).multiply(distance);
+    public static Vec3 positionInDirection(Vec3 pos, double yaw, double distance) {
+        Vec3 offset = yawToDirection(yaw).scale(distance);
         return pos.add(offset);
     }
 
@@ -467,27 +467,27 @@ public class THMUtils {
         double y = mc.player.getY();
         double z = mc.player.getZ();
 
-        PlayerMoveC2SPacket packet = new PlayerMoveC2SPacket.PositionAndOnGround(x, y + height, z, false, false);
+        ServerboundMovePlayerPacket packet = new ServerboundMovePlayerPacket.Pos(x, y + height, z, false, false);
         ((IPlayerMoveC2SPacket) packet).meteor$setTag(1337);
-        mc.player.networkHandler.sendPacket(packet);
+        mc.player.connection.send(packet);
     }
 
-    public static Vec3d yawToDirection(double yaw) {
+    public static Vec3 yawToDirection(double yaw) {
         yaw = yaw * Math.PI / 180;
         double x = -Math.sin(yaw);
         double z = Math.cos(yaw);
-        return new Vec3d(x, 0, z);
+        return new Vec3(x, 0, z);
     }
 
-    public static double distancePointToDirection(Vec3d point, Vec3d direction, @Nullable Vec3d start) {
-        if (start == null) start = Vec3d.ZERO;
-        point = point.multiply(new Vec3d(1, 0, 1));
-        start = start.multiply(new Vec3d(1, 0, 1));
-        direction = direction.multiply(new Vec3d(1, 0, 1));
-        Vec3d directionVec = point.subtract(start);
-        double projectionLength = directionVec.dotProduct(direction) / direction.lengthSquared();
-        Vec3d projection = direction.multiply(projectionLength);
-        Vec3d perp = directionVec.subtract(projection);
+    public static double distancePointToDirection(Vec3 point, Vec3 direction, @Nullable Vec3 start) {
+        if (start == null) start = Vec3.ZERO;
+        point = point.multiply(new Vec3(1, 0, 1));
+        start = start.multiply(new Vec3(1, 0, 1));
+        direction = direction.multiply(new Vec3(1, 0, 1));
+        Vec3 directionVec = point.subtract(start);
+        double projectionLength = directionVec.dot(direction) / direction.lengthSqr();
+        Vec3 projection = direction.scale(projectionLength);
+        Vec3 perp = directionVec.subtract(projection);
         return perp.length();
     }
 
@@ -526,9 +526,9 @@ public class THMUtils {
     }
 
     public static boolean isOnOfficialHighway() {
-        if (mc.player == null || mc.world == null) return false;
+        if (mc.player == null || mc.level == null) return false;
         if (isNot6B6T()) return false;
-        if (mc.world.getRegistryKey() != World.NETHER) return false;
+        if (mc.level.dimension() != Level.NETHER) return false;
         return isOnMainHighway();
     }
     public static String GetVerbatim(String text)
@@ -558,17 +558,17 @@ public class THMUtils {
         return new String(data, 0, idx);
     }
     public static void startFly() {
-        if (mc.player != null && mc.player.networkHandler != null) {
-            mc.player.networkHandler.sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_FALL_FLYING));
+        if (mc.player != null && mc.player.connection != null) {
+            mc.player.connection.send(new ServerboundPlayerCommandPacket(mc.player, ServerboundPlayerCommandPacket.Action.START_FALL_FLYING));
         }
     }
 
     public static void fakeInventoryOpen(boolean open) {
-        if (mc.player != null && mc.player.networkHandler != null) {
+        if (mc.player != null && mc.player.connection != null) {
             if (open)
-                mc.player.networkHandler.sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.OPEN_INVENTORY));
+                mc.player.connection.send(new ServerboundPlayerCommandPacket(mc.player, ServerboundPlayerCommandPacket.Action.OPEN_INVENTORY));
             else
-                mc.player.networkHandler.sendPacket(new CloseHandledScreenC2SPacket(0));
+                mc.player.connection.send(new ServerboundContainerClosePacket(0));
         }
     }
     public static boolean isBaritoneInstalled() {
@@ -620,18 +620,18 @@ public class THMUtils {
     public static void sendClientMsg(String msg, Style style) {
         if (mc.player == null) return;
         try {
-            String message = Formatting.GRAY + msg;
-            mc.player.sendMessage(Text.literal(message).setStyle(style), false);
+            String message = ChatFormatting.GRAY + msg;
+            mc.player.displayClientMessage(Component.literal(message).setStyle(style), false);
         } catch (Exception ignored) {}
     }
 
-    public static boolean checkOrCreateFile(MinecraftClient mc, String fileName) {
+    public static boolean checkOrCreateFile(Minecraft mc, String fileName) {
         File file = FabricLoader.getInstance().getGameDir().resolve(fileName).toFile();
         if (!file.exists()) {
             try {
                 if (file.createNewFile()) {
                     if (mc.player != null) {
-                        sendMsg(Text.of("Created " + file.getName() + " in your meteor-client folder."));
+                        sendMsg(Component.nullToEmpty("Created " + file.getName() + " in your meteor-client folder."));
                         Style style = Style.EMPTY.withClickEvent(new ClickEvent.OpenFile(file.getAbsolutePath()));
                         sendClientMsg("Click \u00a72\u00a7lhere \u00a7r\u00a77to open the file.", style);
                     }

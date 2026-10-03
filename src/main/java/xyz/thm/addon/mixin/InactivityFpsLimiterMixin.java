@@ -6,8 +6,8 @@
 
 package xyz.thm.addon.mixin;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.option.InactivityFpsLimiter;
+import com.mojang.blaze3d.platform.FramerateLimitTracker;
+import net.minecraft.client.Minecraft;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -19,14 +19,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * still apply; {@code update()} is a pure switch over {@code getLimitReason()}, so forcing NONE there
  * covers every reduction path at once and keeps the F3 readout honest.
  */
-@Mixin(InactivityFpsLimiter.class)
+@Mixin(FramerateLimitTracker.class)
 public class InactivityFpsLimiterMixin {
-    @Inject(method = "getLimitReason", at = @At("HEAD"), cancellable = true)
-    private void thm$neverReduceFps(CallbackInfoReturnable<InactivityFpsLimiter.LimitReason> cir) {
-        MinecraftClient mc = MinecraftClient.getInstance();
+    @Inject(method = "getThrottleReason", at = @At("HEAD"), cancellable = true)
+    private void thm$neverReduceFps(CallbackInfoReturnable<FramerateLimitTracker.FramerateThrottleReason> cir) {
+        Minecraft mc = Minecraft.getInstance();
         if (mc.options == null) return;
-        if ("never".equals(mc.options.getInactivityFpsLimit().getValue().asString())) {
-            cir.setReturnValue(InactivityFpsLimiter.LimitReason.NONE);
+        if ("never".equals(mc.options.inactivityFpsLimit().get().getSerializedName())) {
+            cir.setReturnValue(FramerateLimitTracker.FramerateThrottleReason.NONE);
         }
     }
 }

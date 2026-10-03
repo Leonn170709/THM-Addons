@@ -13,7 +13,7 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.combat.AutoLog;
 import meteordevelopment.meteorclient.systems.modules.misc.AutoReconnect;
-import net.minecraft.text.Text;
+import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -47,8 +47,8 @@ public class AutoLogMixin {
         );
     }
 
-    @Inject(method = "disconnect(Lnet/minecraft/text/Text;)V", at = @At("HEAD"), cancellable = true)
-    private void thm$onDisconnect(Text reason, CallbackInfo ci) {
+    @Inject(method = "disconnect(Lnet/minecraft/network/chat/Component;)V", at = @At("HEAD"), cancellable = true)
+    private void thm$onDisconnect(Component reason, CallbackInfo ci) {
         String reasonText = thm$reasonText(reason);
 
         if (thm$isEnabled(thm$disableHwyMonitorReconnect)) {
@@ -70,7 +70,7 @@ public class AutoLogMixin {
     }
 
     @Unique
-    private String thm$reasonText(Text reason) {
+    private String thm$reasonText(Component reason) {
         String text = reason == null ? null : reason.getString();
         return text == null || text.isBlank() ? "unknown" : text;
     }

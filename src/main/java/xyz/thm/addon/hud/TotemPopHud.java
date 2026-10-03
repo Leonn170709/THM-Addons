@@ -10,8 +10,8 @@ import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.TotemTracker;
 
@@ -62,10 +62,10 @@ public class TotemPopHud extends HudElement {
         if (mc.player == null) return 0;
 
         int count = 0;
-        for (ItemStack stack : mc.player.getInventory().getMainStacks()) {
+        for (ItemStack stack : mc.player.getInventory().getNonEquipmentItems()) {
             if (stack.getItem() == Items.TOTEM_OF_UNDYING) count += stack.getCount();
         }
-        if (mc.player.getOffHandStack().getItem() == Items.TOTEM_OF_UNDYING) count += mc.player.getOffHandStack().getCount();
+        if (mc.player.getOffhandItem().getItem() == Items.TOTEM_OF_UNDYING) count += mc.player.getOffhandItem().getCount();
         return count;
     }
 }

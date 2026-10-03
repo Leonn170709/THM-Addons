@@ -10,14 +10,13 @@ import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.WidgetScreen;
 import meteordevelopment.meteorclient.settings.GenericSetting;
 import meteordevelopment.meteorclient.settings.IGeneric;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtList;
-import net.minecraft.nbt.NbtString;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
-
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.StringTag;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Predicate;
@@ -68,19 +67,19 @@ public class ItemPriorityList implements IGeneric<ItemPriorityList> {
     }
 
     @Override
-    public NbtCompound toTag() {
-        NbtCompound tag = new NbtCompound();
-        NbtList list = new NbtList();
-        for (Item item : selected) list.add(NbtString.of(Registries.ITEM.getId(item).toString()));
+    public CompoundTag toTag() {
+        CompoundTag tag = new CompoundTag();
+        ListTag list = new ListTag();
+        for (Item item : selected) list.add(StringTag.valueOf(BuiltInRegistries.ITEM.getKey(item).toString()));
         tag.put("selected", list);
         return tag;
     }
 
     @Override
-    public ItemPriorityList fromTag(NbtCompound tag) {
+    public ItemPriorityList fromTag(CompoundTag tag) {
         selected.clear();
         tag.getListOrEmpty("selected").forEach(el -> {
-            Item item = Registries.ITEM.get(Identifier.of(el.asString().orElse("minecraft:air")));
+            Item item = BuiltInRegistries.ITEM.getValue(Identifier.parse(el.asString().orElse("minecraft:air")));
             if (item != Items.AIR) selected.add(item);
         });
         return this;

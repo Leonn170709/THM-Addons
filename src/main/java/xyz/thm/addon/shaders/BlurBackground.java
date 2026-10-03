@@ -8,7 +8,10 @@ package xyz.thm.addon.shaders;
 
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.pipeline.RenderTarget;
+import com.mojang.blaze3d.platform.Window;
 import com.mojang.blaze3d.shaders.ShaderType;
+import com.mojang.blaze3d.shaders.UniformType;
 import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.GpuDevice;
 import com.mojang.blaze3d.systems.RenderPass;
@@ -17,17 +20,14 @@ import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.textures.TextureFormat;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gl.Framebuffer;
-import net.minecraft.client.gl.RenderPipelines;
-import net.minecraft.client.gl.UniformType;
-import net.minecraft.client.util.Window;
-import net.minecraft.util.Identifier;
 import org.lwjgl.system.MemoryStack;
 import xyz.thm.addon.THMAddon;
 
 import java.nio.ByteBuffer;
 import java.util.OptionalInt;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.resources.Identifier;
 
 // "Frosted glass" blur for just the window rectangle (not the whole shader background): copies
 // that region of the already-rendered framebuffer into a small offscreen texture, runs a real
@@ -38,10 +38,10 @@ import java.util.OptionalInt;
 // to the 19 shader files, and all shader sources here are supplied inline (no .fsh resource
 // files) via GpuDevice#precompilePipeline(pipeline, sourceGetter).
 class BlurBackground {
-    private static final Identifier VSH_ID = Identifier.of(THMAddon.MOD_ID, "blur_vsh");
-    private static final Identifier BLUR_FSH_ID = Identifier.of(THMAddon.MOD_ID, "blur_pass_fsh");
-    private static final Identifier BLIT_FSH_ID = Identifier.of(THMAddon.MOD_ID, "blur_blit_fsh");
-    private static final Identifier EXTRACT_FSH_ID = Identifier.of(THMAddon.MOD_ID, "blur_extract_fsh");
+    private static final Identifier VSH_ID = Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "blur_vsh");
+    private static final Identifier BLUR_FSH_ID = Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "blur_pass_fsh");
+    private static final Identifier BLIT_FSH_ID = Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "blur_blit_fsh");
+    private static final Identifier EXTRACT_FSH_ID = Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "blur_extract_fsh");
     private static final float MAX_RADIUS = 20f; // texels, at strength = 100
     // The shader render + both blur passes work at 1/WORK_SCALE resolution - a blurred image
     // already destroys fine detail, so downsampling before blurring and upsampling on the final
@@ -150,12 +150,12 @@ class BlurBackground {
         GpuDevice device = RenderSystem.getDevice();
         if (!ensurePipelines(device)) return false;
 
-        Framebuffer framebuffer = MinecraftClient.getInstance().getFramebuffer();
-        GpuTextureView mainView = framebuffer.getColorAttachmentView();
+        RenderTarget framebuffer = Minecraft.getInstance().getMainRenderTarget();
+        GpuTextureView mainView = framebuffer.getColorTextureView();
         if (mainView == null) return false;
 
-        int w = Math.max(MIN_TEXTURE_SIZE, framebuffer.textureWidth / SHADER_SCALE);
-        int h = Math.max(MIN_TEXTURE_SIZE, framebuffer.textureHeight / SHADER_SCALE);
+        int w = Math.max(MIN_TEXTURE_SIZE, framebuffer.width / SHADER_SCALE);
+        int h = Math.max(MIN_TEXTURE_SIZE, framebuffer.height / SHADER_SCALE);
         ensureScaledTexture(device, w, h);
 
         ShaderBackground.drawInto(shaderPipeline, scaledView, w, h);
@@ -180,14 +180,14 @@ class BlurBackground {
         GpuDevice device = RenderSystem.getDevice();
         if (!ensurePipelines(device)) return false;
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        Framebuffer framebuffer = mc.getFramebuffer();
-        GpuTextureView mainView = framebuffer.getColorAttachmentView();
+        Minecraft mc = Minecraft.getInstance();
+        RenderTarget framebuffer = mc.getMainRenderTarget();
+        GpuTextureView mainView = framebuffer.getColorTextureView();
         if (mainView == null) return false;
 
         Window window = mc.getWindow();
-        double scaleX = framebuffer.textureWidth / (double) window.getScaledWidth();
-        double scaleY = framebuffer.textureHeight / (double) window.getScaledHeight();
+        double scaleX = framebuffer.width / (double) window.getGuiScaledWidth();
+        double scaleY = framebuffer.height / (double) window.getGuiScaledHeight();
         int px1 = (int) Math.round(x1 * scaleX);
         int pw = (int) Math.round((x2 - x1) * scaleX);
         int ph = (int) Math.round((y2 - y1) * scaleY);
@@ -196,7 +196,7 @@ class BlurBackground {
         // coordinate elsewhere in this codebase (Y down from the top) - flip once here so the
         // scissored region and the fragment shader's sampling agree with where the window
         // actually is, instead of a several-pixel seam at the top/bottom from the mismatch.
-        int py1 = (int) Math.round(framebuffer.textureHeight - y2 * scaleY);
+        int py1 = (int) Math.round(framebuffer.height - y2 * scaleY);
 
         int workW = Math.max(MIN_TEXTURE_SIZE, pw / WORK_SCALE);
         int workH = Math.max(MIN_TEXTURE_SIZE, ph / WORK_SCALE);
@@ -204,7 +204,7 @@ class BlurBackground {
 
         float radius = Math.max(1f, strength / 100f * MAX_RADIUS);
         CommandEncoder encoder = device.createCommandEncoder();
-        writeRect(encoder, px1, py1, pw, ph, framebuffer.textureWidth, framebuffer.textureHeight);
+        writeRect(encoder, px1, py1, pw, ph, framebuffer.width, framebuffer.height);
 
         // Pass 1: sample the window's region out of the main framebuffer, downscaled into A.
         drawFullscreen(encoder, extractPipeline, viewA, "BlitRect", rectBuffer, mainView);
@@ -223,7 +223,7 @@ class BlurBackground {
             pass.enableScissor(px1, py1, pw, ph);
             pass.setPipeline(blitPipeline);
             pass.setUniform("BlitRect", rectBuffer);
-            pass.bindTexture("InSampler", viewA, RenderSystem.getSamplerCache().get(FilterMode.LINEAR));
+            pass.bindTexture("InSampler", viewA, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
             pass.draw(0, 3);
         }
 
@@ -235,7 +235,7 @@ class BlurBackground {
         try (RenderPass pass = encoder.createRenderPass(() -> "THM blur pass", target, OptionalInt.empty())) {
             pass.setPipeline(pipeline);
             pass.setUniform(uniformName, uniformBuffer);
-            pass.bindTexture("InSampler", source, RenderSystem.getSamplerCache().get(FilterMode.LINEAR));
+            pass.bindTexture("InSampler", source, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
             pass.draw(0, 3);
         }
     }
@@ -272,24 +272,24 @@ class BlurBackground {
     private static boolean ensurePipelines(GpuDevice device) {
         if (pipelinesValid != null) return pipelinesValid;
 
-        blurPipeline = RenderPipeline.builder(RenderPipelines.POST_EFFECT_PROCESSOR_SNIPPET)
-            .withLocation(Identifier.of(THMAddon.MOD_ID, "blur_pass"))
+        blurPipeline = RenderPipeline.builder(RenderPipelines.POST_PROCESSING_SNIPPET)
+            .withLocation(Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "blur_pass"))
             .withVertexShader(VSH_ID)
             .withFragmentShader(BLUR_FSH_ID)
             .withUniform("BlurParams", UniformType.UNIFORM_BUFFER)
             .withSampler("InSampler")
             .build();
 
-        blitPipeline = RenderPipeline.builder(RenderPipelines.POST_EFFECT_PROCESSOR_SNIPPET)
-            .withLocation(Identifier.of(THMAddon.MOD_ID, "blur_blit"))
+        blitPipeline = RenderPipeline.builder(RenderPipelines.POST_PROCESSING_SNIPPET)
+            .withLocation(Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "blur_blit"))
             .withVertexShader(VSH_ID)
             .withFragmentShader(BLIT_FSH_ID)
             .withUniform("BlitRect", UniformType.UNIFORM_BUFFER)
             .withSampler("InSampler")
             .build();
 
-        extractPipeline = RenderPipeline.builder(RenderPipelines.POST_EFFECT_PROCESSOR_SNIPPET)
-            .withLocation(Identifier.of(THMAddon.MOD_ID, "blur_extract"))
+        extractPipeline = RenderPipeline.builder(RenderPipelines.POST_PROCESSING_SNIPPET)
+            .withLocation(Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "blur_extract"))
             .withVertexShader(VSH_ID)
             .withFragmentShader(EXTRACT_FSH_ID)
             .withUniform("BlitRect", UniformType.UNIFORM_BUFFER)

@@ -6,16 +6,16 @@
 
 package xyz.thm.addon.utils.server;
 
-import net.minecraft.network.PacketByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
-public class JoinPayload implements CustomPayload {
-    public static final CustomPayload.Id<JoinPayload> ID = new CustomPayload.Id<>(Identifier.of("anarchymod", "join"));
-    public static final PacketCodec<PacketByteBuf, JoinPayload> CODEC = PacketCodec.of((payload, buf) -> {},buf -> new JoinPayload());
-    public static final CustomPayload.Type<PacketByteBuf, JoinPayload> TYPE = new CustomPayload.Type<>(ID, CODEC);
+public class JoinPayload implements CustomPacketPayload {
+    public static final CustomPacketPayload.Type<JoinPayload> ID = new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath("anarchymod", "join"));
+    public static final StreamCodec<FriendlyByteBuf, JoinPayload> CODEC = StreamCodec.ofMember((payload, buf) -> {},buf -> new JoinPayload());
+    public static final CustomPacketPayload.TypeAndCodec<FriendlyByteBuf, JoinPayload> TYPE = new CustomPacketPayload.TypeAndCodec<>(ID, CODEC);
 
     @Override
-    public CustomPayload.Id<? extends CustomPayload> getId() {return ID;}
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {return ID;}
 }

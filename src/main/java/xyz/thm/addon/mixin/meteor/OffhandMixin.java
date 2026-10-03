@@ -38,17 +38,17 @@ public class OffhandMixin {
             ci.cancel();
             return;
         }
-        if (MeteorClient.mc.player.currentScreenHandler.getCursorStack().isEmpty()) return;
+        if (MeteorClient.mc.player.containerMenu.getCarried().isEmpty()) return;
 
         // With a screen open the player is dragging that stack — theirs, don't touch it, just sit out.
         // Otherwise it is a leftover from a desynced swap: park it so the module isn't stuck forever.
-        if (MeteorClient.mc.currentScreen != null || !InventoryManager.parkCursor()) ci.cancel();
+        if (MeteorClient.mc.screen != null || !InventoryManager.parkCursor()) ci.cancel();
     }
 
     @Inject(method = "onTick", at = @At("RETURN"))
     private void thm$clearCursorAfter(TickEvent.Pre event, CallbackInfo ci) {
         // Cursor was empty above, so anything on it now is the swap's own leftover. Never ours to drop:
         // a failed park just leaves it for the next tick's HEAD to retry.
-        if (!MeteorClient.mc.player.currentScreenHandler.getCursorStack().isEmpty()) InventoryManager.parkCursor();
+        if (!MeteorClient.mc.player.containerMenu.getCarried().isEmpty()) InventoryManager.parkCursor();
     }
 }

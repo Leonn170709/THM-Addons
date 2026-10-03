@@ -26,17 +26,17 @@ import meteordevelopment.meteorclient.systems.modules.world.Timer;
 import meteordevelopment.meteorclient.utils.misc.HorizontalDirection;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.DisconnectedScreen;
-import net.minecraft.client.gui.screen.TitleScreen;
-import net.minecraft.client.util.ScreenshotRecorder;
-import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
-import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.chunk.ChunkStatus;
+import net.minecraft.client.Screenshot;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.DisconnectedScreen;
+import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
+import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.server.ServerReconnectService;
 import xyz.thm.addon.utils.server.ServerStatusHandler;
@@ -346,7 +346,7 @@ public class THMHwyMonitor extends Module {
     private record ForwardDestroyPacketSample(
         int tick,
         BlockPos pos,
-        PlayerActionC2SPacket.Action action
+        ServerboundPlayerActionPacket.Action action
     ) {}
 
     private record ForwardPacketDesyncWindow(
@@ -520,9 +520,9 @@ public class THMHwyMonitor extends Module {
     }
 
     private String readDisconnectedScreenReasonLower() {
-        if (mc == null || !(mc.currentScreen instanceof DisconnectedScreen screen)) return "";
+        if (mc == null || !(mc.screen instanceof DisconnectedScreen screen)) return "";
 
-        Text reason = null;
+        Component reason = null;
         try {
             if (!disconnectedScreenReasonFieldResolved) {
                 disconnectedScreenReasonFieldResolved = true;
@@ -531,7 +531,7 @@ public class THMHwyMonitor extends Module {
                     disconnectedScreenReasonField.setAccessible(true);
                 } catch (NoSuchFieldException ignored) {
                     for (Field field : DisconnectedScreen.class.getDeclaredFields()) {
-                        if (Text.class.isAssignableFrom(field.getType())) {
+                        if (Component.class.isAssignableFrom(field.getType())) {
                             field.setAccessible(true);
                             disconnectedScreenReasonField = field;
                             break;
@@ -542,7 +542,7 @@ public class THMHwyMonitor extends Module {
 
             if (disconnectedScreenReasonField != null) {
                 Object value = disconnectedScreenReasonField.get(screen);
-                if (value instanceof Text text) reason = text;
+                if (value instanceof Component text) reason = text;
             }
         } catch (Throwable ignored) {
             // If reflection fails we still have message-based restart evidence.
@@ -556,7 +556,7 @@ public class THMHwyMonitor extends Module {
     public void onActivate() {
         cacheRecoveryYawOnMonitorToggle();
         if (Float.isNaN(lastReliableRecoveryYaw) && mc != null && mc.player != null) {
-            lastReliableRecoveryYaw = mc.player.getYaw();
+            lastReliableRecoveryYaw = mc.player.getYRot();
         }
         preTickYawSnapshot = lastReliableRecoveryYaw;
         preTickYawSnapshotAtMs = System.currentTimeMillis();
@@ -647,8 +647,8 @@ public class THMHwyMonitor extends Module {
         if (mc == null) return;
 
         float yaw = Float.NaN;
-        if (mc.player != null) yaw = mc.player.getYaw();
-        else if (mc.getCameraEntity() != null) yaw = mc.getCameraEntity().getYaw();
+        if (mc.player != null) yaw = mc.player.getYRot();
+        else if (mc.getCameraEntity() != null) yaw = mc.getCameraEntity().getYRot();
         if (Float.isNaN(yaw)) return;
 
         lastReliableRecoveryYaw = yaw;
@@ -675,7 +675,7 @@ public class THMHwyMonitor extends Module {
     }
 
     private void onReconnectMainServerReady(long cycleId, String contextTag, long armedAtMs, long detectedAtMs) {
-        if (mc != null && !mc.isOnThread()) {
+        if (mc != null && !mc.isSameThread()) {
             mc.execute(() -> onReconnectMainServerReady(cycleId, contextTag, armedAtMs, detectedAtMs));
             return;
         }
@@ -722,7 +722,7 @@ public class THMHwyMonitor extends Module {
         long armedAtMs,
         long failedAtMs
     ) {
-        if (mc != null && !mc.isOnThread()) {
+        if (mc != null && !mc.isSameThread()) {
             mc.execute(() -> onReconnectFailure(cycleId, reason, detail, contextTag, armedAtMs, failedAtMs));
             return;
         }
@@ -834,21 +834,21 @@ public class THMHwyMonitor extends Module {
     @EventHandler
     private void onPacketReceive(PacketEvent.Receive event) {
         if (stashMoverReconnectHandlingActive()) return;
-        if (!(event.packet instanceof PlayerPositionLookS2CPacket)) return;
+        if (!(event.packet instanceof ClientboundPlayerPositionPacket)) return;
         queueForwardCorrectionPacket();
     }
 
     @EventHandler
     private void onPacketSend(PacketEvent.Send event) {
         if (stashMoverReconnectHandlingActive()) return;
-        if (!(event.packet instanceof PlayerActionC2SPacket packet)) return;
+        if (!(event.packet instanceof ServerboundPlayerActionPacket packet)) return;
         recordForwardDestroyPacket(packet);
     }
 
     @EventHandler(priority = 1000)
     private void onTickCaptureYawBeforeOtherModules(TickEvent.Pre event) {
         if (mc == null || mc.player == null) return;
-        preTickYawSnapshot = mc.player.getYaw();
+        preTickYawSnapshot = mc.player.getYRot();
         preTickYawSnapshotAtMs = System.currentTimeMillis();
     }
 
@@ -1365,7 +1365,7 @@ public class THMHwyMonitor extends Module {
     private void onTick(TickEvent.Pre event) {
         handleReconnectAutomationTickLane();
 
-        if (mc.player == null || mc.world == null) {
+        if (mc.player == null || mc.level == null) {
             resetRubberbandGhostblockWatch();
             clearPendingAlignmentGateRequest();
             return;
@@ -1413,7 +1413,7 @@ public class THMHwyMonitor extends Module {
 
         HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
         if (builder == null || !builder.isActive()) {
-            if (mc.player != null) lastReliableRecoveryYaw = mc.player.getYaw();
+            if (mc.player != null) lastReliableRecoveryYaw = mc.player.getYRot();
             trackedSegment = null;
             trackedDirection = "";
             resetForwardProgressWatch();
@@ -1458,7 +1458,7 @@ public class THMHwyMonitor extends Module {
         if (recoveryCause == RecoveryCause.Misalignment) {
             if (!tryPassMainServerAlignmentGate()) return;
 
-            if (!isActive() || mc.player == null || mc.world == null) {
+            if (!isActive() || mc.player == null || mc.level == null) {
                 clearPendingAlignmentGateRequest();
                 return;
             }
@@ -1512,9 +1512,9 @@ public class THMHwyMonitor extends Module {
     @EventHandler
     private void onRender2D(Render2DEvent event) {
         if (!postRejoinDirectionGateActive) return;
-        if (mc == null || mc.textRenderer == null) return;
+        if (mc == null || mc.font == null) return;
 
-        DrawContext context = event.drawContext;
+        GuiGraphics context = event.drawContext;
         List<String> lines = new ArrayList<>();
         lines.add("THMHwyMonitor reconnect blocked");
         lines.add(String.format(Locale.ROOT, "Retry %d/%d", postRejoinDirectionRetryCount, POST_REJOIN_DIRECTION_RETRY_LIMIT));
@@ -1524,15 +1524,15 @@ public class THMHwyMonitor extends Module {
         int x = 8;
         int y = 8;
         int width = 0;
-        for (String line : lines) width = Math.max(width, mc.textRenderer.getWidth(line));
+        for (String line : lines) width = Math.max(width, mc.font.width(line));
 
-        int lineHeight = mc.textRenderer.fontHeight + 2;
+        int lineHeight = mc.font.lineHeight + 2;
         int height = (lines.size() * lineHeight) + 6;
         context.fill(x - 4, y - 4, x + width + 6, y + height, 0xCC000000);
 
         int drawY = y;
         for (String line : lines) {
-            context.drawText(mc.textRenderer, line, x, drawY, 0xFFFFAA00, false);
+            context.drawString(mc.font, line, x, drawY, 0xFFFFAA00, false);
             drawY += lineHeight;
         }
     }
@@ -1827,10 +1827,10 @@ public class THMHwyMonitor extends Module {
         }
     }
 
-    private void recordForwardDestroyPacket(PlayerActionC2SPacket packet) {
-        PlayerActionC2SPacket.Action action = packet.getAction();
-        if (action != PlayerActionC2SPacket.Action.START_DESTROY_BLOCK
-            && action != PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK) {
+    private void recordForwardDestroyPacket(ServerboundPlayerActionPacket packet) {
+        ServerboundPlayerActionPacket.Action action = packet.getAction();
+        if (action != ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK
+            && action != ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK) {
             return;
         }
 
@@ -1855,8 +1855,8 @@ public class THMHwyMonitor extends Module {
             forwardPacketDesyncLastSummary = "";
         }
 
-        int tick = mc.player.age;
-        forwardDestroyPacketSamples.add(new ForwardDestroyPacketSample(tick, packet.getPos().toImmutable(), action));
+        int tick = mc.player.tickCount;
+        forwardDestroyPacketSamples.add(new ForwardDestroyPacketSample(tick, packet.getPos().immutable(), action));
         pruneForwardPacketDesyncSamples(tick);
     }
 
@@ -1907,7 +1907,7 @@ public class THMHwyMonitor extends Module {
     private ForwardPacketDesyncWindow currentForwardPacketDesyncWindow() {
         if (mc == null || mc.player == null) return null;
         if (forwardDestroyPacketSamples.isEmpty()) return null;
-        pruneForwardPacketDesyncSamples(mc.player.age);
+        pruneForwardPacketDesyncSamples(mc.player.tickCount);
 
         Map<BlockPos, int[]> countsByPos = new HashMap<>();
         int starts = 0;
@@ -1920,10 +1920,10 @@ public class THMHwyMonitor extends Module {
             lastTick = Math.max(lastTick, sample.tick);
 
             int[] counts = countsByPos.computeIfAbsent(sample.pos, ignored -> new int[2]);
-            if (sample.action == PlayerActionC2SPacket.Action.START_DESTROY_BLOCK) {
+            if (sample.action == ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK) {
                 starts++;
                 counts[0]++;
-            } else if (sample.action == PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK) {
+            } else if (sample.action == ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK) {
                 aborts++;
                 counts[1]++;
             }
@@ -2001,7 +2001,7 @@ public class THMHwyMonitor extends Module {
             return GhostblockReconnectTrigger.None;
         }
 
-        if (mc.player == null || mc.world == null || builder == null || !builder.isActive()) {
+        if (mc.player == null || mc.level == null || builder == null || !builder.isActive()) {
             resetRubberbandGhostblockWatch();
             resetForwardPacketDesyncEpisode("builder-inactive");
             return GhostblockReconnectTrigger.None;
@@ -2344,7 +2344,7 @@ public class THMHwyMonitor extends Module {
             triggerLabel,
             cycleId
         );
-        mc.getNetworkHandler().getConnection().disconnect(Text.of("THMHwyMonitor Forward " + triggerLabel + " recovery"));
+        mc.getConnection().getConnection().disconnect(Component.nullToEmpty("THMHwyMonitor Forward " + triggerLabel + " recovery"));
         return true;
     }
 
@@ -2434,10 +2434,10 @@ public class THMHwyMonitor extends Module {
     private boolean hasLiveServerConnection() {
         return mc != null
             && mc.player != null
-            && mc.world != null
-            && mc.getNetworkHandler() != null
-            && mc.getNetworkHandler().getConnection() != null
-            && mc.getNetworkHandler().getConnection().isOpen();
+            && mc.level != null
+            && mc.getConnection() != null
+            && mc.getConnection().getConnection() != null
+            && mc.getConnection().getConnection().isConnected();
     }
 
     private ServerState getCommittedServerState() {
@@ -2480,7 +2480,7 @@ public class THMHwyMonitor extends Module {
 
     private void clearStaleDisconnectedScreenIfLiveConnected() {
         if (!hasLiveServerConnection()) return;
-        if (!(mc.currentScreen instanceof DisconnectedScreen)) return;
+        if (!(mc.screen instanceof DisconnectedScreen)) return;
         info("Clearing stale DisconnectedScreen while client is already live in-world.");
         mc.setScreen(null);
     }
@@ -2514,7 +2514,7 @@ public class THMHwyMonitor extends Module {
 
         long now = System.currentTimeMillis();
         if (now < delayedMainServerResumeAtMs) return;
-        if (mc == null || mc.player == null || mc.world == null) return;
+        if (mc == null || mc.player == null || mc.level == null) return;
         if (!isHighwayRecoveryAllowedOnCurrentServer()) return;
 
         long cycleId = delayedMainServerResumeCycleId;
@@ -2541,7 +2541,7 @@ public class THMHwyMonitor extends Module {
     private float resolveRecoveryDirectionYawForInference(HighwayBuilderTHM builder) {
         HorizontalDirection direction = resolveWorkingDirectionForAlignment(
             builder,
-            mc != null && mc.player != null ? mc.player.getYaw() : Float.NaN
+            mc != null && mc.player != null ? mc.player.getYRot() : Float.NaN
         );
         return direction == null ? Float.NaN : direction.yaw;
     }
@@ -2979,11 +2979,11 @@ public class THMHwyMonitor extends Module {
     public AlignmentResult IsAlignedResult(boolean cardinal, boolean diagonal, boolean ring, boolean diamond, boolean trueCenterMode) {
         if (mc.player == null) return AlignmentResult.notAligned();
 
-        return IsAlignedResult(mc.player.getX(), mc.player.getZ(), mc.player.getYaw(), cardinal, diagonal, ring, diamond, trueCenterMode);
+        return IsAlignedResult(mc.player.getX(), mc.player.getZ(), mc.player.getYRot(), cardinal, diagonal, ring, diamond, trueCenterMode);
     }
 
     public AlignmentResult IsAlignedResult(double playerX, double playerZ, boolean cardinal, boolean diagonal, boolean ring, boolean diamond, boolean trueCenterMode) {
-        float yaw = mc.player != null ? mc.player.getYaw() : Float.NaN;
+        float yaw = mc.player != null ? mc.player.getYRot() : Float.NaN;
         return IsAlignedResult(playerX, playerZ, yaw, cardinal, diagonal, ring, diamond, trueCenterMode);
     }
 
@@ -3378,23 +3378,23 @@ public class THMHwyMonitor extends Module {
     }
 
     private boolean isSafeLocalStallEscapeTarget(RecoveryTarget target) {
-        if (mc == null || mc.world == null || mc.player == null || target == null) return false;
+        if (mc == null || mc.level == null || mc.player == null || target == null) return false;
 
-        BlockPos feetPos = BlockPos.ofFloored(target.targetX(), mc.player.getY(), target.targetZ());
-        BlockPos headPos = feetPos.up();
-        BlockPos floorPos = feetPos.down();
-        BlockState feetState = mc.world.getBlockState(feetPos);
-        BlockState headState = mc.world.getBlockState(headPos);
-        BlockState floorState = mc.world.getBlockState(floorPos);
+        BlockPos feetPos = BlockPos.containing(target.targetX(), mc.player.getY(), target.targetZ());
+        BlockPos headPos = feetPos.above();
+        BlockPos floorPos = feetPos.below();
+        BlockState feetState = mc.level.getBlockState(feetPos);
+        BlockState headState = mc.level.getBlockState(headPos);
+        BlockState floorState = mc.level.getBlockState(floorPos);
 
         return isClearLocalStallEscapeSpace(feetState, feetPos)
             && isClearLocalStallEscapeSpace(headState, headPos)
-            && floorState.isSolidBlock(mc.world, floorPos);
+            && floorState.isRedstoneConductor(mc.level, floorPos);
     }
 
     private boolean isClearLocalStallEscapeSpace(BlockState state, BlockPos pos) {
-        if (mc == null || mc.world == null || state == null || pos == null) return false;
-        return (state.isAir() || state.isReplaceable()) && state.getCollisionShape(mc.world, pos).isEmpty();
+        if (mc == null || mc.level == null || state == null || pos == null) return false;
+        return (state.isAir() || state.canBeReplaced()) && state.getCollisionShape(mc.level, pos).isEmpty();
     }
 
     private void triggerMonitorSafeBuilderHardFail(HighwayBuilderTHM builder, String message, Object... args) {
@@ -3415,8 +3415,8 @@ public class THMHwyMonitor extends Module {
     }
 
     private void takeRestartScreenshot() {
-        if (mc == null || mc.getFramebuffer() == null) return;
-        ScreenshotRecorder.saveScreenshot(mc.runDirectory, mc.getFramebuffer(), message -> info(message.getString()));
+        if (mc == null || mc.getMainRenderTarget() == null) return;
+        Screenshot.grab(mc.gameDirectory, mc.getMainRenderTarget(), message -> info(message.getString()));
     }
 
     private void beginPostRejoinDirectionGate(long cycleId, String contextTag) {
@@ -3439,7 +3439,7 @@ public class THMHwyMonitor extends Module {
             clearPostRejoinDirectionGateState();
             return;
         }
-        if (activeReconnectCycleId <= 0L || mc == null || mc.player == null || mc.world == null) return;
+        if (activeReconnectCycleId <= 0L || mc == null || mc.player == null || mc.level == null) return;
         if (postRejoinDirectionNextAttemptAtMs > System.currentTimeMillis()) return;
         if (!isHighwayRecoveryAllowedOnCurrentServer()) {
             postRejoinDirectionBlockReason = "waiting-main-server";
@@ -3519,7 +3519,7 @@ public class THMHwyMonitor extends Module {
     }
 
     private PostRejoinDirectionResult determineConclusivePostRejoinWorkingDirection() {
-        if (mc.player == null || mc.world == null) return PostRejoinDirectionResult.blocked("player-or-world-missing", "");
+        if (mc.player == null || mc.level == null) return PostRejoinDirectionResult.blocked("player-or-world-missing", "");
 
         HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
         HorizontalDirection cachedDirection = builder == null ? null : builder.getCachedWorkingDirectionForMonitorReconnect(activeReconnectCycleId);
@@ -3584,7 +3584,7 @@ public class THMHwyMonitor extends Module {
         String yawPreferredCode = normalizeDirection(directionCode(postRejoinLastCompleteProbeWinner));
         HorizontalDirection yawPreferred = parseDirectionCode(chooseSegmentTravelDirection(
             reconnectSegment.segment(),
-            mc.player.getYaw(),
+            mc.player.getYRot(),
             yawPreferredCode
         ));
         if (yawPreferred != null) {
@@ -3629,7 +3629,7 @@ public class THMHwyMonitor extends Module {
             ),
             trackedSegment,
             resolvedPreferredDirection,
-            mc.player.getYaw(),
+            mc.player.getYRot(),
             RECONNECT_LINE_AMBIGUITY_THRESHOLD
         );
         if (resolved == null || resolved.distance() > RECONNECT_LINE_MAX_DISTANCE) return null;
@@ -3647,7 +3647,7 @@ public class THMHwyMonitor extends Module {
     }
 
     private AxisProbeResult probeAxis(HorizontalDirection dirA, HorizontalDirection dirB, int y, boolean obsidianProbe) {
-        if (mc.player == null || mc.world == null) {
+        if (mc.player == null || mc.level == null) {
             return new AxisProbeResult(false, false, null, dirA, 0, dirB, 0);
         }
 
@@ -3657,12 +3657,12 @@ public class THMHwyMonitor extends Module {
         int nearB = 0;
 
         for (int distance = 1; distance <= POST_REJOIN_AXIS_PROBE_DISTANCE; distance++) {
-            BlockPos probeA = BlockPos.ofFloored(
+            BlockPos probeA = BlockPos.containing(
                 mc.player.getX() + (dirA.offsetX * distance),
                 y,
                 mc.player.getZ() + (dirA.offsetZ * distance)
             );
-            BlockPos probeB = BlockPos.ofFloored(
+            BlockPos probeB = BlockPos.containing(
                 mc.player.getX() + (dirB.offsetX * distance),
                 y,
                 mc.player.getZ() + (dirB.offsetZ * distance)
@@ -3673,11 +3673,11 @@ public class THMHwyMonitor extends Module {
             }
 
             boolean matchA = obsidianProbe
-                ? mc.world.getBlockState(probeA).getBlock() == Blocks.OBSIDIAN
-                : mc.world.getBlockState(probeA).isAir();
+                ? mc.level.getBlockState(probeA).getBlock() == Blocks.OBSIDIAN
+                : mc.level.getBlockState(probeA).isAir();
             boolean matchB = obsidianProbe
-                ? mc.world.getBlockState(probeB).getBlock() == Blocks.OBSIDIAN
-                : mc.world.getBlockState(probeB).isAir();
+                ? mc.level.getBlockState(probeB).getBlock() == Blocks.OBSIDIAN
+                : mc.level.getBlockState(probeB).isAir();
 
             if (matchA) totalA++;
             if (matchB) totalB++;
@@ -3698,15 +3698,15 @@ public class THMHwyMonitor extends Module {
     }
 
     private boolean isReconnectProbeChunkLoaded(BlockPos probe) {
-        if (mc == null || mc.world == null) return false;
-        return mc.world.getChunkManager().getChunk(probe.getX() >> 4, probe.getZ() >> 4, ChunkStatus.FULL, false) != null;
+        if (mc == null || mc.level == null) return false;
+        return mc.level.getChunkSource().getChunk(probe.getX() >> 4, probe.getZ() >> 4, ChunkStatus.FULL, false) != null;
     }
 
     private void enterReconnectSafetyStop(String reason) {
         HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
         long cycleId = activeReconnectCycleId;
         HighwayBuilderTHM.StatsDisconnectPresentation disconnectPresentation = builder == null
-            ? new HighwayBuilderTHM.StatsDisconnectPresentation(Text.of("THMHwyMonitor Safety Stop: " + reason), null)
+            ? new HighwayBuilderTHM.StatsDisconnectPresentation(Component.nullToEmpty("THMHwyMonitor Safety Stop: " + reason), null)
             : builder.getReconnectSafetyStopPresentation(reason, cycleId);
 
         if (cycleId > 0L) schedulePendingAbortRestore(cycleId, "reconnect-safety-stop:" + reason);
@@ -3726,7 +3726,7 @@ public class THMHwyMonitor extends Module {
         tryPendingAbortRestore("reconnect-safety-stop");
 
         if (hasLiveServerConnection()) {
-            mc.getNetworkHandler().getConnection().disconnect(disconnectPresentation.text());
+            mc.getConnection().getConnection().disconnect(disconnectPresentation.text());
             if (builder != null) {
                 builder.scheduleRetiredStatsDisconnectScreenshot(
                     disconnectPresentation.retiredSessionId(),
@@ -3742,7 +3742,7 @@ public class THMHwyMonitor extends Module {
         if (mc != null) {
             mc.setScreen(new DisconnectedScreen(
                 new TitleScreen(),
-                Text.of("THMHwyMonitor Safety Stop"),
+                Component.nullToEmpty("THMHwyMonitor Safety Stop"),
                 disconnectPresentation.text()
             ));
             if (builder != null) {
@@ -3759,8 +3759,8 @@ public class THMHwyMonitor extends Module {
     private void applyPostRejoinYaw(HorizontalDirection direction) {
         if (mc.player == null || !isHighwayRecoveryAllowedOnCurrentServer()) return;
 
-        float pitch = mc.player.getPitch();
-        mc.player.setYaw(direction.yaw);
+        float pitch = mc.player.getXRot();
+        mc.player.setYRot(direction.yaw);
         if (BaritoneUtils.IS_AVAILABLE) {
             IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
             if (baritone != null) baritone.getLookBehavior().updateTarget(new Rotation(direction.yaw, pitch), false);
@@ -3802,7 +3802,7 @@ public class THMHwyMonitor extends Module {
     }
 
     private boolean isSuccessfullyConnectedToServer() {
-        return hasLiveServerConnection() && !(mc.currentScreen instanceof DisconnectedScreen);
+        return hasLiveServerConnection() && !(mc.screen instanceof DisconnectedScreen);
     }
 
     private static String inferDirectionForLine(WorkLine line, float yaw) {
@@ -3912,8 +3912,8 @@ public class THMHwyMonitor extends Module {
     private void applyWorkingYaw() {
         if (pendingCorrectionTarget == null || mc.player == null || recoveryBuilder == null || !isHighwayRecoveryAllowedOnCurrentServer()) return;
         float yaw = pendingCorrectionTarget.yaw();
-        mc.player.setYaw(yaw);
-        mc.player.setPitch(20.0f);
+        mc.player.setYRot(yaw);
+        mc.player.setXRot(20.0f);
 
         if (!BaritoneUtils.IS_AVAILABLE) return;
         IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
@@ -3926,8 +3926,8 @@ public class THMHwyMonitor extends Module {
         if (pendingCorrectionTarget == null || mc.player == null) return;
 
         // Final exact snap to computed aligned line position so true-center is strict.
-        mc.player.setVelocity(0.0, mc.player.getVelocity().y, 0.0);
-        mc.player.setPosition(pendingCorrectionTarget.targetX(), mc.player.getY(), pendingCorrectionTarget.targetZ());
+        mc.player.setDeltaMovement(0.0, mc.player.getDeltaMovement().y, 0.0);
+        mc.player.setPos(pendingCorrectionTarget.targetX(), mc.player.getY(), pendingCorrectionTarget.targetZ());
     }
 
     private static double distanceToLine(double x, double z, double a, double b, double c) {

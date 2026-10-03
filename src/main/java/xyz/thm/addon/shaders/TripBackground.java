@@ -8,7 +8,9 @@ package xyz.thm.addon.shaders;
 
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.shaders.ShaderType;
+import com.mojang.blaze3d.shaders.UniformType;
 import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.GpuDevice;
 import com.mojang.blaze3d.systems.RenderPass;
@@ -17,16 +19,14 @@ import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.textures.TextureFormat;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gl.Framebuffer;
-import net.minecraft.client.gl.RenderPipelines;
-import net.minecraft.client.gl.UniformType;
-import net.minecraft.util.Identifier;
 import org.lwjgl.system.MemoryStack;
 import xyz.thm.addon.THMAddon;
 
 import java.nio.ByteBuffer;
 import java.util.OptionalInt;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.resources.Identifier;
 
 // Joke "I'm high" full-frame post effect - the same Blaze3D framebuffer-post plumbing as
 // BlurBackground (attributeless big-triangle vertex shader, POST_EFFECT_PROCESSOR_SNIPPET
@@ -35,9 +35,9 @@ import java.util.OptionalInt;
 // image "melts into itself". Two full-res passes per frame: copy the framebuffer into a temp
 // texture (can't sample + write the same target), then draw the distorted result back over it.
 class TripBackground {
-    private static final Identifier VSH_ID = Identifier.of(THMAddon.MOD_ID, "trip_vsh");
-    private static final Identifier COPY_FSH_ID = Identifier.of(THMAddon.MOD_ID, "trip_copy_fsh");
-    private static final Identifier TRIP_FSH_ID = Identifier.of(THMAddon.MOD_ID, "trip_fsh");
+    private static final Identifier VSH_ID = Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "trip_vsh");
+    private static final Identifier COPY_FSH_ID = Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "trip_copy_fsh");
+    private static final Identifier TRIP_FSH_ID = Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "trip_fsh");
     private static final long PARAMS_SIZE = 16L; // std140: vec4(time, intensity, unused, unused)
 
     private static final String VSH_SRC = """
@@ -124,11 +124,11 @@ class TripBackground {
         GpuDevice device = RenderSystem.getDevice();
         if (!ensurePipelines(device)) return false;
 
-        Framebuffer framebuffer = MinecraftClient.getInstance().getFramebuffer();
-        GpuTextureView mainView = framebuffer.getColorAttachmentView();
+        RenderTarget framebuffer = Minecraft.getInstance().getMainRenderTarget();
+        GpuTextureView mainView = framebuffer.getColorTextureView();
         if (mainView == null) return false;
 
-        int w = framebuffer.textureWidth, h = framebuffer.textureHeight;
+        int w = framebuffer.width, h = framebuffer.height;
         if (w <= 0 || h <= 0) return false;
         ensureTexture(device, w, h);
 
@@ -138,7 +138,7 @@ class TripBackground {
         // Pass 1: framebuffer -> temp (passthrough copy, so pass 2 has a stable source to warp).
         try (RenderPass pass = encoder.createRenderPass(() -> "THM trip copy", tempView, OptionalInt.empty())) {
             pass.setPipeline(copyPipeline);
-            pass.bindTexture("InSampler", mainView, RenderSystem.getSamplerCache().get(FilterMode.LINEAR));
+            pass.bindTexture("InSampler", mainView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
             pass.draw(0, 3);
         }
 
@@ -146,7 +146,7 @@ class TripBackground {
         try (RenderPass pass = encoder.createRenderPass(() -> "THM trip draw", mainView, OptionalInt.empty())) {
             pass.setPipeline(tripPipeline);
             pass.setUniform("TripParams", paramsBuffer);
-            pass.bindTexture("InSampler", tempView, RenderSystem.getSamplerCache().get(FilterMode.LINEAR));
+            pass.bindTexture("InSampler", tempView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
             pass.draw(0, 3);
         }
 
@@ -168,15 +168,15 @@ class TripBackground {
     private static boolean ensurePipelines(GpuDevice device) {
         if (pipelinesValid != null) return pipelinesValid;
 
-        copyPipeline = RenderPipeline.builder(RenderPipelines.POST_EFFECT_PROCESSOR_SNIPPET)
-            .withLocation(Identifier.of(THMAddon.MOD_ID, "trip_copy"))
+        copyPipeline = RenderPipeline.builder(RenderPipelines.POST_PROCESSING_SNIPPET)
+            .withLocation(Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "trip_copy"))
             .withVertexShader(VSH_ID)
             .withFragmentShader(COPY_FSH_ID)
             .withSampler("InSampler")
             .build();
 
-        tripPipeline = RenderPipeline.builder(RenderPipelines.POST_EFFECT_PROCESSOR_SNIPPET)
-            .withLocation(Identifier.of(THMAddon.MOD_ID, "trip_draw"))
+        tripPipeline = RenderPipeline.builder(RenderPipelines.POST_PROCESSING_SNIPPET)
+            .withLocation(Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "trip_draw"))
             .withVertexShader(VSH_ID)
             .withFragmentShader(TRIP_FSH_ID)
             .withUniform("TripParams", UniformType.UNIFORM_BUFFER)

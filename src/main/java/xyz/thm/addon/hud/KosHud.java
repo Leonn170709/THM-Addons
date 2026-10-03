@@ -91,7 +91,7 @@ public class KosHud extends HudElement {
         if (mc.player == null) return;
 
         // Get all online players from tab list
-        List<String> onlinePlayers = new ArrayList<>(mc.player.networkHandler.getPlayerList().stream()
+        List<String> onlinePlayers = new ArrayList<>(mc.player.connection.getOnlinePlayers().stream()
             .map(playerInfo -> playerInfo.getProfile().name()).toList());
 
         List<String> kosPlayers = onlinePlayers.stream()

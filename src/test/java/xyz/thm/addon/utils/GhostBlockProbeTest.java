@@ -6,7 +6,6 @@
 
 package xyz.thm.addon.utils;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 import xyz.thm.addon.utils.GhostBlockProbe.Probe;
 import xyz.thm.addon.utils.GhostBlockProbe.Result;
@@ -15,6 +14,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -53,12 +53,12 @@ class GhostBlockProbeTest {
     void planUsesUpForLoneBlocks() {
         List<Probe> probes = GhostBlockProbe.plan(List.of(new BlockPos(0, 64, 0)));
         assertEquals(1, probes.size());
-        assertEquals(net.minecraft.util.math.Direction.UP, probes.getFirst().side());
+        assertEquals(net.minecraft.core.Direction.UP, probes.getFirst().side());
     }
 
     @Test
     void planIgnoresDuplicatesAndMutablePositions() {
-        BlockPos.Mutable m = new BlockPos.Mutable(1, 2, 3);
+        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos(1, 2, 3);
         List<Probe> probes = GhostBlockProbe.plan(List.of(m, new BlockPos(1, 2, 3)));
         assertEquals(1, probes.size());
         m.set(9, 9, 9);

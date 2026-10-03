@@ -21,7 +21,7 @@ import meteordevelopment.meteorclient.utils.network.PacketUtils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.network.packet.Packet;
+import net.minecraft.network.protocol.Packet;
 import xyz.thm.addon.THMAddon;
 
 import java.util.Set;

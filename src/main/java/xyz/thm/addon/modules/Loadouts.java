@@ -16,15 +16,15 @@ import com.google.gson.Gson;
 import com.mojang.logging.LogUtils;
 import oshi.util.tuples.Pair;
 import java.lang.reflect.Type;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.Identifier;
-import net.minecraft.registry.Registries;
 import com.google.common.reflect.TypeToken;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.PlayerScreenHandler;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.BoolSetting;
@@ -128,7 +128,7 @@ public class Loadouts extends Module {
             for (Map.Entry<String, HashMap<Integer, String>> entry : loaded.entrySet()) {
                 HashMap<Integer, Item> itemMap = new HashMap<>();
                 for (Map.Entry<Integer, String> itemId : entry.getValue().entrySet()) {
-                    itemMap.put(itemId.getKey(), Registries.ITEM.get(Identifier.of(itemId.getValue())));
+                    itemMap.put(itemId.getKey(), BuiltInRegistries.ITEM.getValue(Identifier.parse(itemId.getValue())));
                 }
                 loadouts.put(entry.getKey(), itemMap);
                 LogUtils.getLogger().info("Successfully loaded loadouts from file..!", this.name);
@@ -147,7 +147,7 @@ public class Loadouts extends Module {
             for (Map.Entry<String, HashMap<Integer, Item>> entry : loadouts.entrySet()) {
                 HashMap<Integer, String> nameMap = new HashMap<>();
                 for (Map.Entry<Integer, Item> itemEntry : entry.getValue().entrySet()) {
-                    nameMap.put(itemEntry.getKey(), Registries.ITEM.getId(itemEntry.getValue()).toString());
+                    nameMap.put(itemEntry.getKey(), BuiltInRegistries.ITEM.getKey(itemEntry.getValue()).toString());
                 }
                 itemNameMap.put(entry.getKey(), nameMap);
             }
@@ -161,22 +161,22 @@ public class Loadouts extends Module {
         if (loadouts.isEmpty()) return true;
         if (mc.player == null) return true;
         if (!loadouts.containsKey(loadoutKey)) return true;
-        if (!(mc.player.currentScreenHandler instanceof PlayerScreenHandler handler)) return true;
+        if (!(mc.player.containerMenu instanceof InventoryMenu handler)) return true;
         HashMap<Integer, Item> loadout = loadouts.get(loadoutKey);
-        for (int n = PlayerScreenHandler.EQUIPMENT_START; n < handler.slots.size(); n++) {
+        for (int n = InventoryMenu.ARMOR_SLOT_START; n < handler.slots.size(); n++) {
             if (!loadout.containsKey(n)) continue;
-            ItemStack stack = handler.getSlot(n).getStack();
-            if (!stack.isOf(loadout.get(n))) return false;
+            ItemStack stack = handler.getSlot(n).getItem();
+            if (!stack.is(loadout.get(n))) return false;
         }
         return true;
     }
     public void saveLoadout(String name) {
         if (mc.player == null) return;
-        if (!(mc.player.currentScreenHandler instanceof PlayerScreenHandler handler)) return;
+        if (!(mc.player.containerMenu instanceof InventoryMenu handler)) return;
         HashMap<Integer, Item> loadout = new HashMap<>();
-        for (int n = PlayerScreenHandler.EQUIPMENT_START; n < handler.slots.size(); n++) {
-            ItemStack stack = handler.getSlot(n).getStack();
-            if (!stack.isEmpty() && !stack.isOf(Items.AIR)) {
+        for (int n = InventoryMenu.ARMOR_SLOT_START; n < handler.slots.size(); n++) {
+            ItemStack stack = handler.getSlot(n).getItem();
+            if (!stack.isEmpty() && !stack.is(Items.AIR)) {
                 loadout.put(n, stack.getItem());
             }
         }
@@ -188,7 +188,7 @@ public class Loadouts extends Module {
     }
     public void loadLoadout(String name) {
         if (mc.player == null) return;
-        if (!(mc.player.currentScreenHandler instanceof PlayerScreenHandler handler)) return;
+        if (!(mc.player.containerMenu instanceof InventoryMenu handler)) return;
         if (loadouts.isEmpty() || !loadouts.containsKey(name) || loadouts.get(name).isEmpty()) {
             info("§oNo loadout \"§3§o" + name + "§7§o\" saved§c§o..!", this.name);
             return;
@@ -198,31 +198,31 @@ public class Loadouts extends Module {
         ArrayList<Integer> sorted = new ArrayList<>();
         HashMap<Integer, Item> loadout = loadouts.get(name);
         HashMap<Integer, ItemStack> changedSlots = new HashMap<>();
-        for (int to = PlayerScreenHandler.EQUIPMENT_START; to < handler.slots.size(); to++) {
+        for (int to = InventoryMenu.ARMOR_SLOT_START; to < handler.slots.size(); to++) {
             Item assigned = loadout.get(to);
             if (assigned == null) continue;
-            ItemStack current = handler.getSlot(to).getStack();
+            ItemStack current = handler.getSlot(to).getItem();
             if (debug.get()) {
-                LogUtils.getLogger().info("Assigned: {} | Current: {}", assigned.getName().getString(), current.getName().getString(), this.name);
+                LogUtils.getLogger().info("Assigned: {} | Current: {}", assigned.getName().getString(), current.getHoverName().getString(), this.name);
             }
-            if (current.isOf(assigned)) {
+            if (current.is(assigned)) {
                 if (debug.get()) LogUtils.getLogger().info("Slot already sorted..!", this.name);
                 sorted.add(to);
                 continue;
             }
-            for (int from = PlayerScreenHandler.EQUIPMENT_START; from < handler.slots.size(); from++) {
+            for (int from = InventoryMenu.ARMOR_SLOT_START; from < handler.slots.size(); from++) {
                 if (to == from || sorted.contains(from)) continue;
                 ItemStack occupiedBy;
                 if (changedSlots.containsKey(from)) {
                     occupiedBy = changedSlots.get(from);
                 } else {
-                    occupiedBy = handler.getSlot(from).getStack();
+                    occupiedBy = handler.getSlot(from).getItem();
                 }
                 if (debug.get()) {
-                    LogUtils.getLogger().info("Looking for: {} | found: {}", assigned.getName().getString(), occupiedBy.getName().getString(), this.name);
+                    LogUtils.getLogger().info("Looking for: {} | found: {}", assigned.getName().getString(), occupiedBy.getHoverName().getString(), this.name);
                 }
-                if (occupiedBy.isOf(assigned)) {
-                    if (loadout.get(from) != null && occupiedBy.isOf(loadout.get(from))) {
+                if (occupiedBy.is(assigned)) {
+                    if (loadout.get(from) != null && occupiedBy.is(loadout.get(from))) {
                         sorted.add(from);
                         continue;
                     }
@@ -237,7 +237,7 @@ public class Loadouts extends Module {
                         jobs.addLast(new Pair<>(from, to));
                     }
                     if (debug.get()) {
-                        LogUtils.getLogger().info("Moving stack: {} from slot {} to slot {}..!", occupiedBy.getName().getString(), from, to, this.name);
+                        LogUtils.getLogger().info("Moving stack: {} from slot {} to slot {}..!", occupiedBy.getHoverName().getString(), from, to, this.name);
                     }
                     break;
                 }
@@ -251,10 +251,10 @@ public class Loadouts extends Module {
             cooldown--;
             return;
         }
-        ScreenHandler handler = mc.player.currentScreenHandler;
+        AbstractContainerMenu handler = mc.player.containerMenu;
         // hands off while the player is dragging something around - our clicks would fight theirs
-        if (!handler.getCursorStack().isEmpty()) return;
-        if (handler instanceof PlayerScreenHandler) tickLoad();
+        if (!handler.getCarried().isEmpty()) return;
+        if (handler instanceof InventoryMenu) tickLoad();
         else if (regear.get()) tickRegear(handler);
     }
     private void tickLoad() {
@@ -282,8 +282,8 @@ public class Loadouts extends Module {
             info("§oInventory sorted according to the loadout \"§a§o" + activeLoadoutKey + "\"§e§o..!", this.name);
         }
     }
-    private void tickRegear(ScreenHandler handler) {
-        if (handler.syncId == regearedSyncId) return;
+    private void tickRegear(AbstractContainerMenu handler) {
+        if (handler.containerId == regearedSyncId) return;
         HashMap<Integer, Item> loadout = loadouts.get(activeLoadoutKey);
         if (loadout == null || loadout.isEmpty()) return;
         int size = handler.slots.size() - 36;
@@ -294,13 +294,13 @@ public class Loadouts extends Module {
             if (budget <= 0) break;
             int to = toContainerId(entry.getKey(), size);
             if (to < 0) continue;
-            ItemStack current = handler.getSlot(to).getStack();
+            ItemStack current = handler.getSlot(to).getItem();
             // empty slot -> take it, right item but not a full stack -> top it up, anything else -> leave alone
-            if (!current.isEmpty() && (!current.isOf(entry.getValue()) || current.getCount() >= current.getMaxCount())) continue;
+            if (!current.isEmpty() && (!current.is(entry.getValue()) || current.getCount() >= current.getMaxStackSize())) continue;
             int from = -1;
             for (int i = 0; i < size; i++) {
                 if (taken.contains(i)) continue;
-                if (handler.getSlot(i).getStack().isOf(entry.getValue())) {
+                if (handler.getSlot(i).getItem().is(entry.getValue())) {
                     from = i;
                     break;
                 }
@@ -313,7 +313,7 @@ public class Loadouts extends Module {
         }
         if (budget < actionsPerTick.get()) cooldown = syncDelay.get();
         // nothing left to pull: done with this container, re-arms when the next one is opened
-        else regearedSyncId = handler.syncId;
+        else regearedSyncId = handler.containerId;
     }
     /** PlayerScreenHandler slot -> the same inventory slot in an open container handler, -1 if it has none. */
     private static int toContainerId(int playerSlot, int containerSize) {

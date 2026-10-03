@@ -6,29 +6,29 @@
 
 package xyz.thm.addon.mixin;
 
-import net.minecraft.client.network.ClientPlayerLikeEntity;
-import net.minecraft.client.render.entity.EntityRendererFactory;
-import net.minecraft.client.render.entity.LivingEntityRenderer;
-import net.minecraft.client.render.entity.PlayerEntityRenderer;
-import net.minecraft.client.render.entity.model.PlayerEntityModel;
-import net.minecraft.client.render.entity.state.PlayerEntityRenderState;
-import net.minecraft.entity.PlayerLikeEntity;
+import net.minecraft.client.entity.ClientAvatarEntity;
+import net.minecraft.client.model.player.PlayerModel;
+import net.minecraft.client.renderer.entity.EntityRendererProvider;
+import net.minecraft.client.renderer.entity.LivingEntityRenderer;
+import net.minecraft.client.renderer.entity.player.AvatarRenderer;
+import net.minecraft.client.renderer.entity.state.AvatarRenderState;
+import net.minecraft.world.entity.Avatar;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import xyz.thm.addon.waveycapes.WaveyCapeRenderLayer;
 
-@Mixin(PlayerEntityRenderer.class)
-public abstract class WaveyCapesPlayerRendererMixin<T extends PlayerLikeEntity & ClientPlayerLikeEntity>
-        extends LivingEntityRenderer<T, PlayerEntityRenderState, PlayerEntityModel> {
+@Mixin(AvatarRenderer.class)
+public abstract class WaveyCapesPlayerRendererMixin<T extends Avatar & ClientAvatarEntity>
+        extends LivingEntityRenderer<T, AvatarRenderState, PlayerModel> {
 
-    public WaveyCapesPlayerRendererMixin(EntityRendererFactory.Context ctx, PlayerEntityModel model, float shadowRadius) {
+    public WaveyCapesPlayerRendererMixin(EntityRendererProvider.Context ctx, PlayerModel model, float shadowRadius) {
         super(ctx, model, shadowRadius);
     }
 
     @Inject(method = "<init>", at = @At("RETURN"))
     private void thm$addWaveyCapeLayer(CallbackInfo ci) {
-        addFeature(new WaveyCapeRenderLayer(this));
+        addLayer(new WaveyCapeRenderLayer(this));
     }
 }

@@ -7,8 +7,6 @@
 package xyz.thm.addon.mixin;
 
 import com.mojang.serialization.Codec;
-import net.minecraft.client.option.InactivityFpsLimit;
-import net.minecraft.util.StringIdentifiable;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Mutable;
@@ -19,6 +17,8 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.Arrays;
+import net.minecraft.client.InactivityFpsLimit;
+import net.minecraft.util.StringRepresentable;
 
 /**
  * Adds a third value, "Never", to vanilla's "Reduce FPS when" option — the one Sodium re-exposes on
@@ -35,7 +35,7 @@ import java.util.Arrays;
  */
 @Mixin(InactivityFpsLimit.class)
 public class InactivityFpsLimitMixin {
-    @Shadow @Final @Mutable private static InactivityFpsLimit[] field_52749;
+    @Shadow @Final @Mutable private static InactivityFpsLimit[] $VALUES;
     @Shadow @Final @Mutable public static Codec<InactivityFpsLimit> CODEC;
 
     @Invoker("<init>")
@@ -47,10 +47,10 @@ public class InactivityFpsLimitMixin {
     private static void thm$addNever(CallbackInfo ci) {
         InactivityFpsLimit never = thm$create("NEVER", 0, "never", "options.inactivityFpsLimit.never");
 
-        InactivityFpsLimit[] values = Arrays.copyOf(field_52749, field_52749.length + 1);
+        InactivityFpsLimit[] values = Arrays.copyOf($VALUES, $VALUES.length + 1);
         values[values.length - 1] = never;
-        field_52749 = values;
+        $VALUES = values;
 
-        CODEC = StringIdentifiable.createCodec(InactivityFpsLimit::values);
+        CODEC = StringRepresentable.fromEnum(InactivityFpsLimit::values);
     }
 }

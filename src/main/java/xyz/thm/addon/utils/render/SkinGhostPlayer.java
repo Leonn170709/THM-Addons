@@ -7,24 +7,24 @@
 package xyz.thm.addon.utils.render;
 
 import com.mojang.authlib.GameProfile;
-import net.minecraft.client.network.OtherClientPlayerEntity;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.entity.player.SkinTextures;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.RemotePlayer;
+import net.minecraft.world.entity.player.PlayerSkin;
 import xyz.thm.addon.interfaces.GhostPose;
 import xyz.thm.addon.mixin.accessor.PlayerModelPartsAccessor;
 
 /** Ghost player that keeps a skin snapshot, since a logged out player has no player list entry left. */
-public class SkinGhostPlayer extends OtherClientPlayerEntity implements GhostPose {
-    private final SkinTextures skin;
+public class SkinGhostPlayer extends RemotePlayer implements GhostPose {
+    private final PlayerSkin skin;
     private float limbPos, limbAmplitude;
 
-    public SkinGhostPlayer(ClientWorld world, GameProfile profile, SkinTextures skin) {
+    public SkinGhostPlayer(ClientLevel world, GameProfile profile, PlayerSkin skin) {
         super(world, profile);
         this.skin = skin;
     }
 
     public void setModelParts(byte modelParts) {
-        getDataTracker().set(PlayerModelPartsAccessor.thm$getModelParts(), modelParts);
+        getEntityData().set(PlayerModelPartsAccessor.thm$getModelParts(), modelParts);
     }
 
     public void setLimbs(float pos, float amplitude) {
@@ -43,7 +43,7 @@ public class SkinGhostPlayer extends OtherClientPlayerEntity implements GhostPos
     }
 
     @Override
-    public SkinTextures getSkin() {
+    public PlayerSkin getSkin() {
         return skin != null ? skin : super.getSkin();
     }
 }

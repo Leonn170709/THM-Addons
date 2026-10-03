@@ -24,21 +24,21 @@ import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.decoration.EndCrystalEntity;
-import net.minecraft.entity.effect.StatusEffects;
-import net.minecraft.entity.mob.HostileEntity;
-import net.minecraft.entity.passive.AnimalEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.protocol.game.ServerboundInteractPacket;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.animal.Animal;
+import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
+import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.mixin.accessor.PlayerInteractEntityC2SPacketAccessor;
 import xyz.thm.addon.system.THMSystem;
@@ -352,12 +352,12 @@ public class CrystalAuraTHM extends Module {
         // The crystal we were guessing at has arrived, so the normal explode path will take it this tick.
         // Dropping the guesses here is what keeps the server from logging an invalid-entity attack for
         // every id we never needed to try.
-        if (event.entity instanceof EndCrystalEntity) pendingPredicts.clear();
+        if (event.entity instanceof EndCrystal) pendingPredicts.clear();
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
         ticksEnabled++;
         if (explodeTimer > 0) explodeTimer--;
@@ -387,23 +387,23 @@ public class CrystalAuraTHM extends Module {
         ignoreThmMembers = system != null && system.ignoreThmMembers.get();
         double rangeSq = targetRange.get() * targetRange.get();
 
-        for (var entity : mc.world.getEntities()) {
+        for (var entity : mc.level.entitiesForRendering()) {
             if (!(entity instanceof LivingEntity living) || living == mc.player || !living.isAlive()) continue;
 
-            if (living instanceof PlayerEntity player) {
+            if (living instanceof Player player) {
                 if (!players.get()) continue;
                 if (player.isSpectator() || player.getAbilities().invulnerable) continue;
                 if (Friends.get().isFriend(player)) continue;
                 if (ignoreThmMembers && ThmMembers.isThmMember(player)) continue;
-            } else if (living instanceof HostileEntity) {
+            } else if (living instanceof Monster) {
                 if (!mobs.get()) continue;
-            } else if (living instanceof AnimalEntity) {
+            } else if (living instanceof Animal) {
                 if (!animals.get()) continue;
             } else {
                 continue;
             }
 
-            if (mc.player.squaredDistanceTo(living) > rangeSq) continue;
+            if (mc.player.distanceToSqr(living) > rangeSq) continue;
             targets.add(living);
         }
     }
@@ -411,35 +411,35 @@ public class CrystalAuraTHM extends Module {
     // Explode
 
     private boolean tryExplode() {
-        List<EndCrystalEntity> crystals = new ArrayList<>();
-        for (var entity : mc.world.getEntities()) {
-            if (entity instanceof EndCrystalEntity crystal) crystals.add(crystal);
+        List<EndCrystal> crystals = new ArrayList<>();
+        for (var entity : mc.level.entitiesForRendering()) {
+            if (entity instanceof EndCrystal crystal) crystals.add(crystal);
         }
-        crystals.sort((a, b) -> Double.compare(mc.player.squaredDistanceTo(a), mc.player.squaredDistanceTo(b)));
+        crystals.sort((a, b) -> Double.compare(mc.player.distanceToSqr(a), mc.player.distanceToSqr(b)));
 
         int hits = 0;
-        for (EndCrystalEntity crystal : crystals) {
+        for (EndCrystal crystal : crystals) {
             if (hits >= explodeCPT.get()) break;
             if (mc.player.distanceTo(crystal) > explodeRange.get()) continue;
 
-            BlockPos obsidianPos = crystal.getBlockPos().down();
-            DamageResult result = computeDamage(crystal.getEntityPos(), obsidianPos);
+            BlockPos obsidianPos = crystal.blockPosition().below();
+            DamageResult result = computeDamage(crystal.position(), obsidianPos);
             if (!isSafe(result)) continue;
 
-            if (antiWeakness.get() && mc.player.hasStatusEffect(StatusEffects.WEAKNESS)) {
+            if (antiWeakness.get() && mc.player.hasEffect(MobEffects.WEAKNESS)) {
                 if (!switchToWeaponFor(crystal)) continue;
             }
 
-            if (!performRotation(crystal.getEntityPos().add(0, 0.5, 0), true)) continue;
+            if (!performRotation(crystal.position().add(0, 0.5, 0), true)) continue;
 
-            mc.interactionManager.attackEntity(mc.player, crystal);
-            mc.player.swingHand(Hand.MAIN_HAND);
+            mc.gameMode.attack(mc.player, crystal);
+            mc.player.swing(InteractionHand.MAIN_HAND);
 
             finishRotation();
 
-            recentlyUsed.remove(obsidianPos.up());
-            renderAction(obsidianPos.up(), breakSideColor.get(), breakLineColor.get());
-            addDamageLabel(obsidianPos.up(), result);
+            recentlyUsed.remove(obsidianPos.above());
+            renderAction(obsidianPos.above(), breakSideColor.get(), breakLineColor.get());
+            addDamageLabel(obsidianPos.above(), result);
 
             lastTarget = result.enemyEntity;
             lastTargetTimer = 20;
@@ -451,8 +451,8 @@ public class CrystalAuraTHM extends Module {
         return hits > 0;
     }
 
-    private boolean switchToWeaponFor(EndCrystalEntity crystal) {
-        if (DamageUtils.getAttackDamage(mc.player, crystal, mc.player.getMainHandStack()) > 0) return true;
+    private boolean switchToWeaponFor(EndCrystal crystal) {
+        if (DamageUtils.getAttackDamage(mc.player, crystal, mc.player.getMainHandItem()) > 0) return true;
 
         FindItemResult weapon = InvUtils.findInHotbar(stack -> DamageUtils.getAttackDamage(mc.player, crystal, stack) > 0);
         if (!weapon.found()) return false;
@@ -464,18 +464,18 @@ public class CrystalAuraTHM extends Module {
 
     private void tryPlace() {
         FindItemResult hotbarCrystal = InvUtils.findInHotbar(Items.END_CRYSTAL);
-        boolean mainHand = mc.player.getMainHandStack().getItem() == Items.END_CRYSTAL;
-        boolean offHand = mc.player.getOffHandStack().getItem() == Items.END_CRYSTAL;
+        boolean mainHand = mc.player.getMainHandItem().getItem() == Items.END_CRYSTAL;
+        boolean offHand = mc.player.getOffhandItem().getItem() == Items.END_CRYSTAL;
         if (!mainHand && !offHand && !(autoSwitch.get() && hotbarCrystal.found())) return;
 
         if (!sameTick.get() && hasExplodableCrystal()) return;
 
         int r = (int) Math.ceil(placeRange.get());
-        BlockPos base = BlockPos.ofFloored(mc.player.getEyePos());
+        BlockPos base = BlockPos.containing(mc.player.getEyePosition());
 
         BlockPos bestFloor = null;
         Direction bestDir = null;
-        Vec3d bestHitVec = null;
+        Vec3 bestHitVec = null;
         DamageResult bestResult = null;
         double bestDamage = 0;
 
@@ -489,36 +489,36 @@ public class CrystalAuraTHM extends Module {
         for (int x = -r; x <= r; x++) {
             for (int y = -r; y <= r; y++) {
                 for (int z = -r; z <= r; z++) {
-                    BlockPos floor = base.add(x, y, z);
-                    if (floor.getSquaredDistance(base) > (double) r * r) continue;
-                    if (floor.getY() < mc.world.getBottomY() || floor.getY() >= mc.world.getTopYInclusive()) continue;
+                    BlockPos floor = base.offset(x, y, z);
+                    if (floor.distSqr(base) > (double) r * r) continue;
+                    if (floor.getY() < mc.level.getMinY() || floor.getY() >= mc.level.getMaxY()) continue;
 
-                    var floorBlock = mc.world.getBlockState(floor).getBlock();
+                    var floorBlock = mc.level.getBlockState(floor).getBlock();
                     boolean needsSupport = floorBlock != Blocks.OBSIDIAN && floorBlock != Blocks.BEDROCK;
                     // A support candidate is scored as if the obsidian were already there — the crystal
                     // itself lands next tick, once the base exists.
                     if (needsSupport && !(supportItem != null && supportItem.found() && BlockUtils.canPlace(floor))) continue;
 
-                    BlockPos above = floor.up();
-                    if (!mc.world.getBlockState(above).isAir()) continue;
-                    if (oldPlacement.get() && !mc.world.getBlockState(above.up()).isAir()) continue;
+                    BlockPos above = floor.above();
+                    if (!mc.level.getBlockState(above).isAir()) continue;
+                    if (oldPlacement.get() && !mc.level.getBlockState(above.above()).isAir()) continue;
                     if (recentlyUsed.containsKey(above)) continue;
 
-                    Vec3d crystalPos = new Vec3d(above.getX() + 0.5, above.getY(), above.getZ() + 0.5);
-                    if (crystalPos.distanceTo(mc.player.getEyePos()) > placeRange.get() + 0.6) continue;
+                    Vec3 crystalPos = new Vec3(above.getX() + 0.5, above.getY(), above.getZ() + 0.5);
+                    if (crystalPos.distanceTo(mc.player.getEyePosition()) > placeRange.get() + 0.6) continue;
 
                     Direction dir = null;
-                    Vec3d hitVec = null;
+                    Vec3 hitVec = null;
                     if (needsSupport) {
                         // The base isn't there yet, so there is no face to click for the crystal.
                         // PlacementUtils picks the support block's own click face when we get there.
                         if (PlacementUtils.getPlaceSide(floor) == null) continue;
-                        if (raytrace.get() && !RotationUtils.canSeePosition(mc.player.getEyePos(), Vec3d.ofCenter(floor))) continue;
+                        if (raytrace.get() && !RotationUtils.canSeePosition(mc.player.getEyePosition(), Vec3.atCenterOf(floor))) continue;
                     } else {
                         for (Direction d : Direction.values()) {
-                            Vec3d face = Vec3d.ofCenter(floor).add(d.getOffsetX() * 0.5, d.getOffsetY() * 0.5, d.getOffsetZ() * 0.5);
-                            if (face.distanceTo(mc.player.getEyePos()) > placeRange.get()) continue;
-                            if (raytrace.get() && !RotationUtils.canSeePosition(mc.player.getEyePos(), face)) continue;
+                            Vec3 face = Vec3.atCenterOf(floor).add(d.getStepX() * 0.5, d.getStepY() * 0.5, d.getStepZ() * 0.5);
+                            if (face.distanceTo(mc.player.getEyePosition()) > placeRange.get()) continue;
+                            if (raytrace.get() && !RotationUtils.canSeePosition(mc.player.getEyePosition(), face)) continue;
                             dir = d;
                             hitVec = face;
                             break;
@@ -526,9 +526,9 @@ public class CrystalAuraTHM extends Module {
                         if (dir == null) continue;
                     }
 
-                    Box occupied = new Box(floor.getX(), floor.getY() + 1, floor.getZ(),
+                    AABB occupied = new AABB(floor.getX(), floor.getY() + 1, floor.getZ(),
                         floor.getX() + 1, floor.getY() + 1 + (oldPlacement.get() ? 2 : 1), floor.getZ() + 1);
-                    if (EntityUtils.intersectsWithEntity(occupied, e -> !(e instanceof PlayerEntity p && p.isSpectator()))) continue;
+                    if (EntityUtils.intersectsWithEntity(occupied, e -> !(e instanceof Player p && p.isSpectator()))) continue;
 
                     DamageResult result = computeDamage(crystalPos, floor);
                     if (!isSafe(result)) continue;
@@ -554,7 +554,7 @@ public class CrystalAuraTHM extends Module {
         // lets support outbid a weak real spot.
         if (bestSupportFloor != null && bestSupportDamage >= bestDamage + supportMinGain.get()) {
             if (PlacementUtils.placeOnSolidSide(bestSupportFloor, supportItem, rotate.get(), rotationPriority.get(), silentSwitch.get())) {
-                recentlyUsed.put(bestSupportFloor.up(), ticksEnabled);
+                recentlyUsed.put(bestSupportFloor.above(), ticksEnabled);
                 renderAction(bestSupportFloor, placeSideColor.get(), placeLineColor.get());
                 // The crystal needs the server to confirm the base first, and without this the next tick
                 // just picks another airy spot and stacks a second support block.
@@ -568,39 +568,39 @@ public class CrystalAuraTHM extends Module {
     }
 
     private boolean hasExplodableCrystal() {
-        for (var entity : mc.world.getEntities()) {
-            if (!(entity instanceof EndCrystalEntity crystal)) continue;
+        for (var entity : mc.level.entitiesForRendering()) {
+            if (!(entity instanceof EndCrystal crystal)) continue;
             if (mc.player.distanceTo(crystal) > explodeRange.get()) continue;
-            if (isSafe(computeDamage(crystal.getEntityPos(), crystal.getBlockPos().down()))) return true;
+            if (isSafe(computeDamage(crystal.position(), crystal.blockPosition().below()))) return true;
         }
         return false;
     }
 
-    private void placeCrystal(BlockPos floor, Direction dir, Vec3d hitVec, FindItemResult hotbarCrystal,
+    private void placeCrystal(BlockPos floor, Direction dir, Vec3 hitVec, FindItemResult hotbarCrystal,
                                boolean mainHand, boolean offHand, DamageResult result) {
         // Checked before the swap: bailing out after it would leave the wrong item selected.
         if (!performRotation(hitVec, false)) return;
 
         boolean switched = false;
-        Hand hand;
+        InteractionHand hand;
 
         if (mainHand) {
-            hand = Hand.MAIN_HAND;
+            hand = InteractionHand.MAIN_HAND;
         } else if (offHand) {
-            hand = Hand.OFF_HAND;
+            hand = InteractionHand.OFF_HAND;
         } else {
             if (!InvUtils.swap(hotbarCrystal.slot(), silentSwitch.get())) return;
             switched = true;
-            hand = Hand.MAIN_HAND;
+            hand = InteractionHand.MAIN_HAND;
         }
 
-        mc.interactionManager.interactBlock(mc.player, hand, new BlockHitResult(hitVec, dir, floor, false));
-        mc.player.swingHand(hand);
+        mc.gameMode.useItemOn(mc.player, hand, new BlockHitResult(hitVec, dir, floor, false));
+        mc.player.swing(hand);
 
         finishRotation();
         if (switched && silentSwitch.get()) InvUtils.swapBack();
 
-        BlockPos above = floor.up();
+        BlockPos above = floor.above();
         recentlyUsed.put(above, ticksEnabled);
         renderAction(above, placeSideColor.get(), placeLineColor.get());
         addDamageLabel(above, result);
@@ -618,7 +618,7 @@ public class CrystalAuraTHM extends Module {
      * Returns false when the action must wait — Normal mode steps the yaw toward the target and defers,
      * the way Meteor's own aura does, rather than firing while still pointing the wrong way.
      */
-    private boolean performRotation(Vec3d target, boolean breaking) {
+    private boolean performRotation(Vec3 target, boolean breaking) {
         if (!rotate.get() || !rotateOn.get().covers(breaking)) return true;
 
         if (rotationMode.get() == RotationMode.Normal) {
@@ -630,7 +630,7 @@ public class CrystalAuraTHM extends Module {
             return true;
         }
 
-        float[] rot = RotationUtils.getRotationsTo(mc.player.getEyePos(), target);
+        float[] rot = RotationUtils.getRotationsTo(mc.player.getEyePosition(), target);
         float yaw = stepYaw(RotationUtils.getInstance().getServerYaw(), rot[0], yawStepLimit.get().floatValue());
 
         if (rotationMode.get() == RotationMode.Client) {
@@ -760,17 +760,17 @@ public class CrystalAuraTHM extends Module {
     private void sendPredictedAttack(int entityId) {
         if (mc.player == null) return;
 
-        PlayerInteractEntityC2SPacket packet = PlayerInteractEntityC2SPacket.attack(mc.player, mc.player.isSneaking());
+        ServerboundInteractPacket packet = ServerboundInteractPacket.createAttackPacket(mc.player, mc.player.isShiftKeyDown());
         ((PlayerInteractEntityC2SPacketAccessor) packet).setEntityId(entityId);
-        mc.getNetworkHandler().sendPacket(packet);
-        mc.player.swingHand(Hand.MAIN_HAND);
+        mc.getConnection().send(packet);
+        mc.player.swing(InteractionHand.MAIN_HAND);
     }
 
     private record PendingPredict(int entityId, int fireAtTick) {}
 
     // Damage / safety
 
-    private DamageResult computeDamage(Vec3d crystalPos, BlockPos obsidianPos) {
+    private DamageResult computeDamage(Vec3 crystalPos, BlockPos obsidianPos) {
         boolean predict = predictMovement.get();
         float self = DamageUtils.crystalDamage(mc.player, crystalPos, predict, obsidianPos);
 
@@ -787,7 +787,7 @@ public class CrystalAuraTHM extends Module {
         }
 
         float bestFriend = 0;
-        for (PlayerEntity player : mc.world.getPlayers()) {
+        for (Player player : mc.level.players()) {
             if (player == mc.player) continue;
             boolean protect = Friends.get().isFriend(player) || (ignoreThmMembers && ThmMembers.isThmMember(player));
             if (!protect) continue;

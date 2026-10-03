@@ -10,8 +10,6 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import net.minecraft.client.MinecraftClient;
-
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -22,6 +20,7 @@ import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import net.minecraft.client.Minecraft;
 
 /**
  * Friend lists of other clients, for {@link xyz.thm.addon.modules.FriendsSyncModule}.
@@ -305,7 +304,7 @@ public final class FriendClients {
     }
 
     private static Path gameDir(String folder, String file) {
-        return MinecraftClient.getInstance().runDirectory.toPath().resolve(folder).resolve(file);
+        return Minecraft.getInstance().gameDirectory.toPath().resolve(folder).resolve(file);
     }
 
     private static Path homeDir(String folder, String file) {

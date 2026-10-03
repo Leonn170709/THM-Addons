@@ -13,7 +13,7 @@ import meteordevelopment.meteorclient.gui.themes.meteor.widgets.WMeteorWindow;
 import meteordevelopment.meteorclient.gui.utils.BaseWidget;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.utils.render.color.Color;
-import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.Minecraft;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -50,7 +50,7 @@ public abstract class ThmMeteorWindowMixin {
         if (strength <= 0) return;
 
         WWidget self = (WWidget) (Object) this;
-        double sf = MinecraftClient.getInstance().getWindow().getScaleFactor();
+        double sf = Minecraft.getInstance().getWindow().getGuiScale();
         int x1 = (int) Math.round(self.x / sf);
         int y1 = (int) Math.round(self.y / sf);
         int x2 = (int) Math.round((self.x + self.width) / sf);

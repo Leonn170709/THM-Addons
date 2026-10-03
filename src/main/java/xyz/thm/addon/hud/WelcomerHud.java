@@ -13,7 +13,7 @@ import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.RainbowColor;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
-import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.Minecraft;
 import xyz.thm.addon.THMAddon;
 
 import java.time.LocalTime;
@@ -120,7 +120,7 @@ public class WelcomerHud extends HudElement {
     }
 
     private String getFormattedText() {
-        MinecraftClient mc = MinecraftClient.getInstance();
+        Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return "Loading...";
 
         String text = format.get();
@@ -133,14 +133,14 @@ public class WelcomerHud extends HudElement {
 
         if (text.contains("{server}")) {
             String serverName = "Singleplayer";
-            if (mc.getCurrentServerEntry() != null) {
-                serverName = mc.getCurrentServerEntry().address;
+            if (mc.getCurrentServer() != null) {
+                serverName = mc.getCurrentServer().ip;
             }
             text = text.replace("{server}", serverName);
         }
 
         if (text.contains("{fps}")) {
-            text = text.replace("{fps}", String.valueOf(mc.getCurrentFps()));
+            text = text.replace("{fps}", String.valueOf(mc.getFps()));
         }
 
 
@@ -152,8 +152,8 @@ public class WelcomerHud extends HudElement {
         if (text.contains("{ping}")) {
             int ping = 0;
 
-            if (mc.getNetworkHandler() != null && mc.getNetworkHandler().getPlayerListEntry(mc.player.getUuid()) != null) {
-                ping = mc.getNetworkHandler().getPlayerListEntry(mc.player.getUuid()).getLatency();
+            if (mc.getConnection() != null && mc.getConnection().getPlayerInfo(mc.player.getUUID()) != null) {
+                ping = mc.getConnection().getPlayerInfo(mc.player.getUUID()).getLatency();
             }
             text = text.replace("{ping}", String.valueOf(ping));
         }

@@ -12,11 +12,11 @@ import meteordevelopment.meteorclient.mixin.WorldRendererAccessor;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.entity.player.BlockBreakingInfo;
-import net.minecraft.item.Items;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.BlockDestructionProgress;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.Vec3;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.PearlPhaser;
 import xyz.thm.addon.utils.PlacementUtils;
@@ -93,7 +93,7 @@ public class AntiMine extends Module {
 
     @Override
     public void onDeactivate() {
-        if (mc.player != null) mc.player.noClip = false;
+        if (mc.player != null) mc.player.noPhysics = false;
         lastPearlTarget = null;
         triggered = false;
         alignTicks = 0;
@@ -101,15 +101,15 @@ public class AntiMine extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
         if (mode.get() == Mode.Pearl) {
             // Only while the hitbox is genuinely inside a block. A permanent noClip drops you straight
             // through the floor, so you're never in a surround and nothing ever triggers.
-            mc.player.noClip = PlacementUtils.isPhasing();
+            mc.player.noPhysics = PlacementUtils.isPhasing();
             tickPearl();
         } else {
-            mc.player.noClip = false;
+            mc.player.noPhysics = false;
             tickClip();
         }
     }
@@ -142,14 +142,14 @@ public class AntiMine extends Module {
      * the wall instead of straddling it. Aiming at the boundary at floor level lands you on the seam at
      * standing height whatever your sub-block offset is, which is the whole point of the phase.
      */
-    private Vec3d pearlAim(BlockPos target) {
-        BlockPos feet = mc.player.getBlockPos();
+    private Vec3 pearlAim(BlockPos target) {
+        BlockPos feet = mc.player.blockPosition();
         int dx = target.getX() - feet.getX();
         int dz = target.getZ() - feet.getZ();
 
         double x = dx == 0 ? mc.player.getX() : (dx > 0 ? target.getX() : feet.getX());
         double z = dz == 0 ? mc.player.getZ() : (dz > 0 ? target.getZ() : feet.getZ());
-        return new Vec3d(x, feet.getY(), z);
+        return new Vec3(x, feet.getY(), z);
     }
 
     /** Aligns once the pearl has actually landed us inside a block, or gives up. */
@@ -165,14 +165,14 @@ public class AntiMine extends Module {
 
     /** Any block being broken that touches our own column at feet or head level. */
     private BlockPos findBreakingNeighbor() {
-        Int2ObjectMap<BlockBreakingInfo> infos = breakingInfos();
+        Int2ObjectMap<BlockDestructionProgress> infos = breakingInfos();
         if (infos.isEmpty()) return null;
 
-        BlockPos feet = mc.player.getBlockPos();
-        for (BlockBreakingInfo info : infos.values()) {
-            if (!selfMine.get() && info.getActorId() == mc.player.getId()) continue;
+        BlockPos feet = mc.player.blockPosition();
+        for (BlockDestructionProgress info : infos.values()) {
+            if (!selfMine.get() && info.getId() == mc.player.getId()) continue;
 
-            if (info.getStage() < breakStage.get()) continue;
+            if (info.getProgress() < breakStage.get()) continue;
 
             BlockPos pos = info.getPos();
             int dy = pos.getY() - feet.getY();
@@ -182,33 +182,33 @@ public class AntiMine extends Module {
         return null;
     }
 
-    private Int2ObjectMap<BlockBreakingInfo> breakingInfos() {
-        return ((WorldRendererAccessor) mc.worldRenderer).meteor$getBlockBreakingInfos();
+    private Int2ObjectMap<BlockDestructionProgress> breakingInfos() {
+        return ((WorldRendererAccessor) mc.levelRenderer).meteor$getBlockBreakingInfos();
     }
 
     /** One line a second while debug is on, so a silent phase says which gate stopped it. */
     private void debug(BlockPos target) {
-        if (!debug.get() || mc.world.getTime() - lastDebug < 20) return;
-        lastDebug = mc.world.getTime();
+        if (!debug.get() || mc.level.getGameTime() - lastDebug < 20) return;
+        lastDebug = mc.level.getGameTime();
 
         StringBuilder seen = new StringBuilder();
-        for (BlockBreakingInfo info : breakingInfos().values()) {
+        for (BlockDestructionProgress info : breakingInfos().values()) {
             seen.append(' ').append(info.getPos().toShortString())
-                .append("/by").append(info.getActorId())
-                .append("/st").append(info.getStage());
+                .append("/by").append(info.getId())
+                .append("/st").append(info.getProgress());
         }
         info("feet=%s breaking=[%s] target=%s pearl=%s cooldown=%s",
-            mc.player.getBlockPos().toShortString(),
+            mc.player.blockPosition().toShortString(),
             seen.toString().trim(),
             target,
             PlacementUtils.getEnderPearlSlot(),
-            mc.player.getItemCooldownManager().isCoolingDown(Items.ENDER_PEARL.getDefaultStack()));
+            mc.player.getCooldowns().isOnCooldown(Items.ENDER_PEARL.getDefaultInstance()));
     }
 
     // ── Clip ──────────────────────────────────────────────────────────────────
 
     private void tickClip() {
-        BlockPos feet = mc.player.getBlockPos();
+        BlockPos feet = mc.player.blockPosition();
         // Re-arms only once the surround is whole again, so this is one clip per break, not one per tick
         if (!surroundBroken(feet)) {
             triggered = false;
@@ -225,16 +225,16 @@ public class AntiMine extends Module {
      * single neighbour is open, so both blocks are denied.
      */
     private void align() {
-        BlockPos feet = mc.player.getBlockPos();
+        BlockPos feet = mc.player.blockPosition();
 
         BlockPos corner = bestOpenCorner(feet);
         if (corner != null) {
-            mc.player.setPosition(corner.getX(), mc.player.getY(), corner.getZ());
+            mc.player.setPos(corner.getX(), mc.player.getY(), corner.getZ());
             return;
         }
 
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos n = feet.offset(dir);
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            BlockPos n = feet.relative(dir);
             if (open(n.getX(), n.getZ(), feet.getY())) {
                 straddleInto(n);
                 return;
@@ -245,8 +245,8 @@ public class AntiMine extends Module {
     /** Some of the surround is gone but not all of it — i.e. we're in a hole, not standing in the open. */
     private boolean surroundBroken(BlockPos feet) {
         int holes = 0;
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos n = feet.offset(dir);
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            BlockPos n = feet.relative(dir);
             if (open(n.getX(), n.getZ(), feet.getY())) holes++;
         }
         return holes > 0 && holes < 4;
@@ -266,7 +266,7 @@ public class AntiMine extends Module {
                 if (!open(cx - 1, cz - 1, feet.getY()) || !open(cx, cz - 1, feet.getY())
                     || !open(cx - 1, cz, feet.getY()) || !open(cx, cz, feet.getY())) continue;
 
-                double dist = mc.player.squaredDistanceTo(cx, mc.player.getY(), cz);
+                double dist = mc.player.distanceToSqr(cx, mc.player.getY(), cz);
                 if (dist < bestDist) {
                     bestDist = dist;
                     best = new BlockPos(cx, feet.getY(), cz);
@@ -280,14 +280,14 @@ public class AntiMine extends Module {
     private boolean open(int x, int z, int y) {
         for (int dy = 0; dy < 2; dy++) {
             BlockPos pos = new BlockPos(x, y + dy, z);
-            if (!mc.world.getBlockState(pos).getCollisionShape(mc.world, pos).isEmpty()) return false;
+            if (!mc.level.getBlockState(pos).getCollisionShape(mc.level, pos).isEmpty()) return false;
         }
         return true;
     }
 
     /** Sits on the boundary between our block and {@code target}, so the hitbox covers both. */
     private void straddleInto(BlockPos target) {
-        BlockPos feet = mc.player.getBlockPos();
+        BlockPos feet = mc.player.blockPosition();
         double x = mc.player.getX();
         double z = mc.player.getZ();
 
@@ -296,7 +296,7 @@ public class AntiMine extends Module {
         if (dx != 0) x = target.getX() + (dx > 0 ? 0.0 : 1.0);
         if (dz != 0) z = target.getZ() + (dz > 0 ? 0.0 : 1.0);
 
-        mc.player.setPosition(x, mc.player.getY(), z);
+        mc.player.setPos(x, mc.player.getY(), z);
     }
 
     @Override

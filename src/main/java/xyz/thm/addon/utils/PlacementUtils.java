@@ -10,20 +10,19 @@ import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.item.ItemStack;
-import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.protocol.game.ServerboundSwingPacket;
+import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 import java.util.Arrays;
 import java.util.List;
 
@@ -53,31 +52,31 @@ public class PlacementUtils {
         if (!block.found() || !canPlace(pos, strictDirection)) return false;
         Direction side = getPlaceSide(pos);
         if (side == null) return false;
-        BlockPos neighbor = pos.offset(side);
+        BlockPos neighbor = pos.relative(side);
         Direction opposite = side.getOpposite();
-        Vec3d hitPos = Vec3d.ofCenter(neighbor).add(Vec3d.of(opposite.getVector()).multiply(0.5));
+        Vec3 hitPos = Vec3.atCenterOf(neighbor).add(Vec3.atLowerCornerOf(opposite.getUnitVec3i()).scale(0.5));
         if (rotate) {
             Rotations.rotate(Rotations.getYaw(hitPos), Rotations.getPitch(hitPos));
         }
         if (block.getHand() == null && !InvUtils.swap(block.slot(), false)) return false;
         BlockHitResult hitResult = new BlockHitResult(hitPos, opposite, neighbor, false);
-        Hand hand = block.getHand() != null ? block.getHand() : Hand.MAIN_HAND;
-        mc.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(hand, hitResult, 0));
+        InteractionHand hand = block.getHand() != null ? block.getHand() : InteractionHand.MAIN_HAND;
+        mc.getConnection().send(new ServerboundUseItemOnPacket(hand, hitResult, 0));
         if (swing) {
-            if (hand == Hand.MAIN_HAND) {
-                mc.player.swingHand(Hand.MAIN_HAND);
+            if (hand == InteractionHand.MAIN_HAND) {
+                mc.player.swing(InteractionHand.MAIN_HAND);
             } else {
-                mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(hand));
+                mc.getConnection().send(new ServerboundSwingPacket(hand));
             }
         }
         return true;
     }
     public static boolean canPlace(BlockPos pos, boolean strictDirection) {
-        if (!mc.world.getBlockState(pos).isReplaceable()) return false;
-        if (!mc.world.canPlace(Blocks.OBSIDIAN.getDefaultState(), pos, net.minecraft.block.ShapeContext.absent())) return false;
-        Box checkBox = Box.from(Vec3d.ofCenter(pos));
-        List<net.minecraft.entity.Entity> entities = mc.world.getOtherEntities(null, checkBox);
-        for (net.minecraft.entity.Entity entity : entities) {
+        if (!mc.level.getBlockState(pos).canBeReplaced()) return false;
+        if (!mc.level.isUnobstructed(Blocks.OBSIDIAN.defaultBlockState(), pos, net.minecraft.world.phys.shapes.CollisionContext.empty())) return false;
+        AABB checkBox = AABB.unitCubeFromLowerCorner(Vec3.atCenterOf(pos));
+        List<net.minecraft.world.entity.Entity> entities = mc.level.getEntities(null, checkBox);
+        for (net.minecraft.world.entity.Entity entity : entities) {
             if (!entity.isSpectator() && entity.isAlive()) {
                 return false;
             }
@@ -94,17 +93,17 @@ public class PlacementUtils {
      * and fluids, both replaceable) and skips blocks whose right-click opens a GUI.
      */
     public static Direction getPlaceSide(BlockPos pos) {
-        if (isSolidFace(pos.down())) return Direction.DOWN;
-        for (Direction side : Direction.Type.HORIZONTAL) {
-            if (isSolidFace(pos.offset(side))) return side;
+        if (isSolidFace(pos.below())) return Direction.DOWN;
+        for (Direction side : Direction.Plane.HORIZONTAL) {
+            if (isSolidFace(pos.relative(side))) return side;
         }
-        if (isSolidFace(pos.up())) return Direction.UP;
+        if (isSolidFace(pos.above())) return Direction.UP;
         return null;
     }
 
     private static boolean isSolidFace(BlockPos pos) {
-        BlockState state = mc.world.getBlockState(pos);
-        return !state.isReplaceable() && !BlockUtils.isClickable(state.getBlock());
+        BlockState state = mc.level.getBlockState(pos);
+        return !state.canBeReplaced() && !BlockUtils.isClickable(state.getBlock());
     }
 
     /**
@@ -117,15 +116,15 @@ public class PlacementUtils {
         Direction side = getPlaceSide(pos);
         if (side == null) return false;
 
-        Hand hand = item.isOffhand() ? Hand.OFF_HAND : Hand.MAIN_HAND;
-        if (hand == Hand.MAIN_HAND && !item.isHotbar()) return false;
+        InteractionHand hand = item.isOffhand() ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
+        if (hand == InteractionHand.MAIN_HAND && !item.isHotbar()) return false;
 
-        Vec3d hitPos = Vec3d.ofCenter(pos)
-            .add(side.getOffsetX() * 0.5, side.getOffsetY() * 0.5, side.getOffsetZ() * 0.5);
-        BlockHitResult hit = new BlockHitResult(hitPos, side.getOpposite(), pos.offset(side), false);
+        Vec3 hitPos = Vec3.atCenterOf(pos)
+            .add(side.getStepX() * 0.5, side.getStepY() * 0.5, side.getStepZ() * 0.5);
+        BlockHitResult hit = new BlockHitResult(hitPos, side.getOpposite(), pos.relative(side), false);
 
         Runnable place = () -> {
-            boolean swap = hand == Hand.MAIN_HAND;
+            boolean swap = hand == InteractionHand.MAIN_HAND;
             if (swap) InvUtils.swap(item.slot(), swapBack);
             BlockUtils.interact(hit, hand, true);
             if (swap && swapBack) InvUtils.swapBack();
@@ -150,19 +149,19 @@ public class PlacementUtils {
     }
     public static boolean isPhasing() {
         if (mc.player == null) return false;
-        Box bb = mc.player.getBoundingBox();
-        int minX = net.minecraft.util.math.MathHelper.floor(bb.minX);
-        int maxX = net.minecraft.util.math.MathHelper.floor(bb.maxX) + 1;
-        int minY = net.minecraft.util.math.MathHelper.floor(bb.minY);
-        int maxY = net.minecraft.util.math.MathHelper.floor(bb.maxY) + 1;
-        int minZ = net.minecraft.util.math.MathHelper.floor(bb.minZ);
-        int maxZ = net.minecraft.util.math.MathHelper.floor(bb.maxZ) + 1;
+        AABB bb = mc.player.getBoundingBox();
+        int minX = net.minecraft.util.Mth.floor(bb.minX);
+        int maxX = net.minecraft.util.Mth.floor(bb.maxX) + 1;
+        int minY = net.minecraft.util.Mth.floor(bb.minY);
+        int maxY = net.minecraft.util.Mth.floor(bb.maxY) + 1;
+        int minZ = net.minecraft.util.Mth.floor(bb.minZ);
+        int maxZ = net.minecraft.util.Mth.floor(bb.maxZ) + 1;
         for (int x = minX; x < maxX; x++) {
             for (int y = minY; y < maxY; y++) {
                 for (int z = minZ; z < maxZ; z++) {
                     BlockPos pos = new BlockPos(x, y, z);
-                    if (!mc.world.getBlockState(pos).getCollisionShape(mc.world, pos).isEmpty()) {
-                        Box blockBox = new Box(x, y, z, x + 1.0, y + 1.0, z + 1.0);
+                    if (!mc.level.getBlockState(pos).getCollisionShape(mc.level, pos).isEmpty()) {
+                        AABB blockBox = new AABB(x, y, z, x + 1.0, y + 1.0, z + 1.0);
                         if (bb.intersects(blockBox)) {
                             return true;
                         }
@@ -175,34 +174,34 @@ public class PlacementUtils {
     public static int getEnderPearlSlot() {
         if (mc.player == null) return -1;
         for (int i = 0; i < 45; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
-            if (stack.getItem() == net.minecraft.item.Items.ENDER_PEARL) {
+            ItemStack stack = mc.player.getInventory().getItem(i);
+            if (stack.getItem() == net.minecraft.world.item.Items.ENDER_PEARL) {
                 return i;
             }
         }
         return -1;
     }
-    public static void clickSlot(int slot, net.minecraft.screen.slot.SlotActionType actionType) {
-        if (mc.interactionManager != null && mc.player != null) {
-            mc.interactionManager.clickSlot(0, slot, 0, actionType, mc.player);
+    public static void clickSlot(int slot, net.minecraft.world.inventory.ClickType actionType) {
+        if (mc.gameMode != null && mc.player != null) {
+            mc.gameMode.handleInventoryMouseClick(0, slot, 0, actionType, mc.player);
         }
     }
     public static boolean isPhased() {
         return isPhasing();
     }
     public static boolean isDoublePhased() {
-        if (mc.player == null || mc.world == null) return false;
-        Box playerBox = mc.player.getBoundingBox();
+        if (mc.player == null || mc.level == null) return false;
+        AABB playerBox = mc.player.getBoundingBox();
         boolean feetBlocked = false;
         boolean headBlocked = false;
         for (int x = (int) Math.floor(playerBox.minX); x <= Math.floor(playerBox.maxX); x++) {
             for (int z = (int) Math.floor(playerBox.minZ); z <= Math.floor(playerBox.maxZ); z++) {
                 BlockPos feetPos = new BlockPos(x, (int) Math.floor(playerBox.minY), z);
-                if (!mc.world.getBlockState(feetPos).getCollisionShape(mc.world, feetPos).isEmpty()) {
+                if (!mc.level.getBlockState(feetPos).getCollisionShape(mc.level, feetPos).isEmpty()) {
                     feetBlocked = true;
                 }
                 BlockPos headPos = new BlockPos(x, (int) Math.floor(playerBox.maxY), z);
-                if (!mc.world.getBlockState(headPos).getCollisionShape(mc.world, headPos).isEmpty()) {
+                if (!mc.level.getBlockState(headPos).getCollisionShape(mc.level, headPos).isEmpty()) {
                     headBlocked = true;
                 }
                 if (feetBlocked && headBlocked) {
@@ -214,19 +213,19 @@ public class PlacementUtils {
     }
 
     public static boolean placeBlockPacket(BlockPos pos, int hotbarSlot, boolean offhand, boolean rotate, int rotateTicks) {
-        if (!BlockUtils.canPlace(pos) || !mc.world.getWorldBorder().contains(pos)) return false;
+        if (!BlockUtils.canPlace(pos) || !mc.level.getWorldBorder().isWithinBounds(pos)) return false;
         if (!offhand && (hotbarSlot < 0 || hotbarSlot > 8)) return false;
 
         Direction side = getPlaceSide(pos);
-        BlockPos neighbour = side == null ? pos : pos.offset(side);
+        BlockPos neighbour = side == null ? pos : pos.relative(side);
         Direction hitSide = side == null ? Direction.UP : side.getOpposite();
-        Vec3d hitPos = Vec3d.ofCenter(pos);
+        Vec3 hitPos = Vec3.atCenterOf(pos);
         if (side != null) {
-            hitPos = hitPos.add(side.getOffsetX() * 0.5, side.getOffsetY() * 0.5, side.getOffsetZ() * 0.5);
+            hitPos = hitPos.add(side.getStepX() * 0.5, side.getStepY() * 0.5, side.getStepZ() * 0.5);
         }
 
-        Hand hand = offhand ? Hand.OFF_HAND : Hand.MAIN_HAND;
-        Vec3d finalHitPos = hitPos;
+        InteractionHand hand = offhand ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
+        Vec3 finalHitPos = hitPos;
         Direction finalHitSide = hitSide;
         BlockPos finalNeighbour = neighbour;
 
@@ -237,10 +236,10 @@ public class PlacementUtils {
                 swapped = true;
             }
 
-            MinecraftClient.getInstance().player.networkHandler.sendPacket(
-                new PlayerInteractBlockC2SPacket(hand, new BlockHitResult(finalHitPos, finalHitSide, finalNeighbour, false), 0)
+            Minecraft.getInstance().player.connection.send(
+                new ServerboundUseItemOnPacket(hand, new BlockHitResult(finalHitPos, finalHitSide, finalNeighbour, false), 0)
             );
-            MinecraftClient.getInstance().player.networkHandler.sendPacket(new HandSwingC2SPacket(hand));
+            Minecraft.getInstance().player.connection.send(new ServerboundSwingPacket(hand));
 
             if (swapped) InvUtils.swapBack();
         };
@@ -268,19 +267,19 @@ public class PlacementUtils {
      *                 Use true (default) for PvP modules that need the hand restored after each place.
      */
     public static boolean placeBlockPacket(BlockPos pos, FindItemResult item, boolean rotate, int rotateTicks, boolean airPlace, boolean swapBack) {
-        if (!BlockUtils.canPlace(pos) || !mc.world.getWorldBorder().contains(pos)) return false;
+        if (!BlockUtils.canPlace(pos) || !mc.level.getWorldBorder().isWithinBounds(pos)) return false;
 
         Direction side = getPlaceSide(pos);
         if (side == null && !airPlace) return false;
-        BlockPos neighbour = side == null ? pos : pos.offset(side);
+        BlockPos neighbour = side == null ? pos : pos.relative(side);
         Direction hitSide = side == null ? Direction.UP : side.getOpposite();
-        Vec3d hitPos = Vec3d.ofCenter(pos);
+        Vec3 hitPos = Vec3.atCenterOf(pos);
         if (side != null) {
-            hitPos = hitPos.add(side.getOffsetX() * 0.5, side.getOffsetY() * 0.5, side.getOffsetZ() * 0.5);
+            hitPos = hitPos.add(side.getStepX() * 0.5, side.getStepY() * 0.5, side.getStepZ() * 0.5);
         }
 
-        Hand hand = item.isOffhand() ? Hand.OFF_HAND : Hand.MAIN_HAND;
-        Vec3d finalHitPos = hitPos;
+        InteractionHand hand = item.isOffhand() ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
+        Vec3 finalHitPos = hitPos;
         Direction finalHitSide = hitSide;
         BlockPos finalNeighbour = neighbour;
 
@@ -290,15 +289,15 @@ public class PlacementUtils {
                 if (swapBack) {
                     InvUtils.swap(item.slot(), true);
                     swapped = true;
-                } else if (MinecraftClient.getInstance().player.getInventory().getSelectedSlot() != item.slot()) {
+                } else if (Minecraft.getInstance().player.getInventory().getSelectedSlot() != item.slot()) {
                     InvUtils.swap(item.slot(), false);
                 }
             }
 
-            MinecraftClient.getInstance().player.networkHandler.sendPacket(
-                new PlayerInteractBlockC2SPacket(hand, new BlockHitResult(finalHitPos, finalHitSide, finalNeighbour, false), 0)
+            Minecraft.getInstance().player.connection.send(
+                new ServerboundUseItemOnPacket(hand, new BlockHitResult(finalHitPos, finalHitSide, finalNeighbour, false), 0)
             );
-            MinecraftClient.getInstance().player.networkHandler.sendPacket(new HandSwingC2SPacket(hand));
+            Minecraft.getInstance().player.connection.send(new ServerboundSwingPacket(hand));
 
             if (swapped) InvUtils.swapBack();
         };

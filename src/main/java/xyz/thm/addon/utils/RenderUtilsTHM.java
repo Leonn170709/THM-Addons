@@ -15,19 +15,25 @@ import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.systems.modules.render.blockesp.ESPBlockData;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.world.Dir;
-import net.minecraft.block.BlockState;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.render.VertexConsumerProvider;
-import net.minecraft.client.util.BufferAllocator;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.entity.Entity;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.util.Mth;
 import net.minecraft.util.math.*;
-import net.minecraft.util.shape.VoxelShape;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.function.Predicate;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
+
+import com.mojang.blaze3d.vertex.ByteBufferBuilder;
+import com.mojang.blaze3d.vertex.PoseStack;
 
 /**
  * Preferred render utility for all THM addon rendering.
@@ -37,8 +43,8 @@ public class RenderUtilsTHM {
     // Direction.values() hands out a fresh array on every call.
     private static final Direction[] DIRECTIONS = Direction.values();
 
-    private static final VertexConsumerProvider.Immediate vertex =
-        VertexConsumerProvider.immediate(new BufferAllocator(2048));
+    private static final MultiBufferSource.BufferSource vertex =
+        MultiBufferSource.immediate(new ByteBufferBuilder(2048));
 
     private RenderUtilsTHM() {}
 
@@ -56,16 +62,16 @@ public class RenderUtilsTHM {
         var iter = set.longIterator();
         while (iter.hasNext()) {
             long encoded = iter.nextLong();
-            int x = BlockPos.unpackLongX(encoded);
-            int y = BlockPos.unpackLongY(encoded);
-            int z = BlockPos.unpackLongZ(encoded);
+            int x = BlockPos.getX(encoded);
+            int y = BlockPos.getY(encoded);
+            int z = BlockPos.getZ(encoded);
 
             int excludeDir = 0;
             for (Direction side : DIRECTIONS) {
                 if (set.contains(BlockPos.asLong(
-                        x + side.getOffsetX(),
-                        y + side.getOffsetY(),
-                        z + side.getOffsetZ()))) {
+                        x + side.getStepX(),
+                        y + side.getStepY(),
+                        z + side.getStepZ()))) {
                     excludeDir |= Dir.get(side);
                 }
             }
@@ -77,7 +83,7 @@ public class RenderUtilsTHM {
     private static final LongOpenHashSet SCRATCH_SET = new LongOpenHashSet();
     private static final Color SCRATCH_SIDE = new Color();
     private static final Color SCRATCH_LINE = new Color();
-    private static final BlockPos.Mutable SCRATCH_POS = new BlockPos.Mutable();
+    private static final BlockPos.MutableBlockPos SCRATCH_POS = new BlockPos.MutableBlockPos();
 
     /** Renders block positions as one hull with the shared inner faces skipped. Prefer this over a box-per-position loop. */
     public static void renderBlocks(Render3DEvent event, Iterable<BlockPos> positions,
@@ -153,13 +159,13 @@ public class RenderUtilsTHM {
     /** Like {@link #renderBlockShape}, but each shape box is scaled toward its own center by {@code scale} (1.0 = full size, 0.0 = a point). Useful for mining-progress shrink effects on non-cube blocks. */
     public static void renderBlockShapeScaled(Render3DEvent event, BlockPos pos, BlockState state, double scale,
                                               Color sideColor, Color lineColor, ShapeMode shapeMode) {
-        VoxelShape shape = state.getOutlineShape(mc.world, pos);
+        VoxelShape shape = state.getShape(mc.level, pos);
         if (shape.isEmpty()) {
             renderScaledBox(event, pos, 0, 0, 0, 1, 1, 1, scale, sideColor, lineColor, shapeMode);
             return;
         }
 
-        shape.forEachBox((minX, minY, minZ, maxX, maxY, maxZ) ->
+        shape.forAllBoxes((minX, minY, minZ, maxX, maxY, maxZ) ->
             renderScaledBox(event, pos, minX, minY, minZ, maxX, maxY, maxZ, scale, sideColor, lineColor, shapeMode));
     }
 
@@ -189,7 +195,7 @@ public class RenderUtilsTHM {
         event.renderer.box(x1, y1, z1, x2, y2, z2, sideColor, lineColor, shapeMode, 0);
     }
 
-    public static void renderBox(Render3DEvent event, Box box,
+    public static void renderBox(Render3DEvent event, AABB box,
                                  Color sideColor, Color lineColor, ShapeMode shapeMode) {
         event.renderer.box(box, sideColor, lineColor, shapeMode, 0);
     }
@@ -206,14 +212,14 @@ public class RenderUtilsTHM {
     public static void renderEntity(Render3DEvent event, Entity entity,
                                     Color sideColor, Color lineColor, ShapeMode shapeMode,
                                     RenderMode mode, long lastInteractMs, int durationMs) {
-        double dx = MathHelper.lerp(event.tickDelta, entity.lastX, entity.getX()) - entity.getX();
-        double dy = MathHelper.lerp(event.tickDelta, entity.lastY, entity.getY()) - entity.getY();
-        double dz = MathHelper.lerp(event.tickDelta, entity.lastZ, entity.getZ()) - entity.getZ();
-        Box box = entity.getBoundingBox();
+        double dx = Mth.lerp(event.tickDelta, entity.xo, entity.getX()) - entity.getX();
+        double dy = Mth.lerp(event.tickDelta, entity.yo, entity.getY()) - entity.getY();
+        double dz = Mth.lerp(event.tickDelta, entity.zo, entity.getZ()) - entity.getZ();
+        AABB box = entity.getBoundingBox();
 
         double grow = 0;
         if (mode == RenderMode.Shrink) {
-            grow = 0.1 * (1.0 - MathHelper.clamp(
+            grow = 0.1 * (1.0 - Mth.clamp(
                 (System.currentTimeMillis() - lastInteractMs) / (double) durationMs, 0.0, 1.0));
         }
 
@@ -237,13 +243,13 @@ public class RenderUtilsTHM {
 
     /** Tracer from screen centre to the centre of a block. */
     public static void renderTracerTo(Render3DEvent event, @NotNull BlockPos pos, Color color) {
-        Vec3d src = meteordevelopment.meteorclient.utils.render.RenderUtils.center;
+        Vec3 src = meteordevelopment.meteorclient.utils.render.RenderUtils.center;
         event.renderer.line(src.x, src.y, src.z, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, color);
     }
 
     /** Tracer from screen centre to an arbitrary world position. */
-    public static void renderTracerToVec(Render3DEvent event, Vec3d target, Color color) {
-        Vec3d src = meteordevelopment.meteorclient.utils.render.RenderUtils.center;
+    public static void renderTracerToVec(Render3DEvent event, Vec3 target, Color color) {
+        Vec3 src = meteordevelopment.meteorclient.utils.render.RenderUtils.center;
         event.renderer.line(src.x, src.y, src.z, target.x, target.y, target.z, color);
     }
 
@@ -289,7 +295,7 @@ public class RenderUtilsTHM {
         return switch (mode) {
             case Solid, Shrink -> base;
             case Fade -> {
-                float t = 1f - MathHelper.clamp(
+                float t = 1f - Mth.clamp(
                     (System.currentTimeMillis() - lastInteractMs) / (float) durationMs, 0f, 1f);
                 yield dst.set(base.r, base.g, base.b, Math.max(0, (int) (base.a * t)));
             }
@@ -308,10 +314,10 @@ public class RenderUtilsTHM {
     /** Linearly interpolates between two colors component-wise. */
     public static Color lerp(Color a, Color b, float t) {
         return new Color(
-            (int) MathHelper.lerp(t, a.r, b.r),
-            (int) MathHelper.lerp(t, a.g, b.g),
-            (int) MathHelper.lerp(t, a.b, b.b),
-            (int) MathHelper.lerp(t, a.a, b.a)
+            (int) Mth.lerpInt(t, a.r, b.r),
+            (int) Mth.lerpInt(t, a.g, b.g),
+            (int) Mth.lerpInt(t, a.b, b.b),
+            (int) Mth.lerpInt(t, a.a, b.a)
         );
     }
 
@@ -319,11 +325,11 @@ public class RenderUtilsTHM {
     // 2D text (drawn into 3D world via matrix stack)
     // =========================================================
 
-    public static void text(String text, MatrixStack stack, float x, float y, int color) {
-        mc.textRenderer.draw(text, x, y, color, false,
-            stack.peek().getPositionMatrix(), vertex,
-            TextRenderer.TextLayerType.NORMAL, 0, 15728880);
-        vertex.draw();
+    public static void text(String text, PoseStack stack, float x, float y, int color) {
+        mc.font.drawInBatch(text, x, y, color, false,
+            stack.last().pose(), vertex,
+            Font.DisplayMode.NORMAL, 0, 15728880);
+        vertex.endBatch();
     }
 
     // =========================================================
@@ -337,12 +343,12 @@ public class RenderUtilsTHM {
      */
     public static void renderAndPruneBlockSet(Render3DEvent event, LongOpenHashSet set,
                                               Color sideColor, Color lineColor, ShapeMode shapeMode) {
-        if (set.isEmpty() || mc.world == null) return;
+        if (set.isEmpty() || mc.level == null) return;
         LongIterator iter = set.longIterator();
         while (iter.hasNext()) {
             long key = iter.nextLong();
-            SCRATCH_POS.set(BlockPos.unpackLongX(key), BlockPos.unpackLongY(key), BlockPos.unpackLongZ(key));
-            if (!mc.world.getBlockState(SCRATCH_POS).isReplaceable()) iter.remove();
+            SCRATCH_POS.set(BlockPos.getX(key), BlockPos.getY(key), BlockPos.getZ(key));
+            if (!mc.level.getBlockState(SCRATCH_POS).canBeReplaced()) iter.remove();
         }
         renderBlockSet(event, set, sideColor, lineColor, shapeMode);
     }
@@ -407,7 +413,7 @@ public class RenderUtilsTHM {
 
             if (keySet.isEmpty()) return;
 
-            float fade = MathHelper.clamp((minExpiry - now) / (float) durationMs, 0f, 1f);
+            float fade = Mth.clamp((minExpiry - now) / (float) durationMs, 0f, 1f);
             renderBlockSet(event, keySet,
                 SCRATCH_SIDE.set(sideColor.r, sideColor.g, sideColor.b, Math.max(1, (int) (sideColor.a * fade))),
                 SCRATCH_LINE.set(lineColor.r, lineColor.g, lineColor.b, Math.max(1, (int) (lineColor.a * fade))),

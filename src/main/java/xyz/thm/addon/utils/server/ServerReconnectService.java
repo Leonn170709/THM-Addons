@@ -18,7 +18,7 @@ import meteordevelopment.meteorclient.systems.modules.misc.AutoReconnect;
 import meteordevelopment.meteorclient.systems.modules.movement.speed.Speed;
 import meteordevelopment.meteorclient.systems.modules.world.Timer;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.text.Text;
+import net.minecraft.network.chat.Component;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.system.THMSystem;
 import xyz.thm.addon.utils.server.ServerStatusHandler.ServerState;
@@ -524,8 +524,8 @@ public final class ServerReconnectService {
                     crackedLoginMissingPasswordSinceMs = 0L;
 
                     if (!crackedLoginSentThisStage) {
-                        if (mc != null && mc.getNetworkHandler() != null) {
-                            mc.getNetworkHandler().sendChatCommand("login " + crackedPassword);
+                        if (mc != null && mc.getConnection() != null) {
+                            mc.getConnection().sendCommand("login " + crackedPassword);
                             crackedLoginSentThisStage = true;
                             debugInfo("Reconnect service sent cracked login command.");
                         }
@@ -646,9 +646,9 @@ public final class ServerReconnectService {
         boolean autoReconnectDisabled = isAutoReconnectDisabledLocked();
         clearArmedStateLocked("missing-cracked-password", false, true);
 
-        if (mc != null && mc.getNetworkHandler() != null && mc.getNetworkHandler().getConnection() != null) {
+        if (mc != null && mc.getConnection() != null && mc.getConnection().getConnection() != null) {
             String message = autoReconnectDisabled ? reason : reason + " (Failed to disable AutoReconnect cleanly.)";
-            mc.getNetworkHandler().getConnection().disconnect(Text.literal(message));
+            mc.getConnection().getConnection().disconnect(Component.literal(message));
         }
 
         return dispatch;
@@ -751,9 +751,9 @@ public final class ServerReconnectService {
     }
 
     private boolean canToggleTimerSpeedNowLocked() {
-        if (mc == null || mc.player == null || mc.world == null) return false;
-        if (mc.getNetworkHandler() == null || mc.getNetworkHandler().getConnection() == null) return false;
-        return mc.getNetworkHandler().getConnection().isOpen();
+        if (mc == null || mc.player == null || mc.level == null) return false;
+        if (mc.getConnection() == null || mc.getConnection().getConnection() == null) return false;
+        return mc.getConnection().getConnection().isConnected();
     }
 
     private void moveActiveSnapshotToDeferredRestoreLocked(PendingRestoreGate target, String reason) {
@@ -1164,9 +1164,9 @@ public final class ServerReconnectService {
     }
 
     private boolean isSuccessfullyConnectedToServer() {
-        if (mc == null || mc.getNetworkHandler() == null || mc.getNetworkHandler().getConnection() == null) return false;
-        if (!mc.getNetworkHandler().getConnection().isOpen()) return false;
-        return mc.player != null && mc.world != null;
+        if (mc == null || mc.getConnection() == null || mc.getConnection().getConnection() == null) return false;
+        if (!mc.getConnection().getConnection().isConnected()) return false;
+        return mc.player != null && mc.level != null;
     }
 
     private void disarmInternal(String reason, boolean disableAutoReconnect, boolean cancelBaritonePath) {

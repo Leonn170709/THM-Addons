@@ -18,9 +18,9 @@ import com.google.gson.stream.JsonToken;
 import com.mojang.serialization.JsonOps;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.settings.SettingGroup;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtElement;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtOps;
+import net.minecraft.nbt.Tag;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.modules.HighwayBuilderTHM;
 
@@ -47,10 +47,10 @@ public final class HighwayPresetManager {
     private static final int MAX_JSON_STRING_LENGTH = 16_384;
     private static final int MAX_PRESETS = 256;
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final Map<String, NbtCompound> PRESETS = new LinkedHashMap<>();
+    private static final Map<String, CompoundTag> PRESETS = new LinkedHashMap<>();
     private static HighwayBuilderTHM module;
 
-    private record DecodedPreset(NbtCompound settings, boolean migrated) {}
+    private record DecodedPreset(CompoundTag settings, boolean migrated) {}
 
     private HighwayPresetManager() {}
 
@@ -65,10 +65,10 @@ public final class HighwayPresetManager {
 
     public static boolean apply(String name) {
         if (module == null) return false;
-        NbtCompound settings = PRESETS.get(name);
+        CompoundTag settings = PRESETS.get(name);
         if (settings == null) return false;
 
-        NbtCompound previous = module.settings.toTag().copy();
+        CompoundTag previous = module.settings.toTag().copy();
         try {
             module.settings.fromTag(settings.copy());
             module.normalizeAfterThmProfileLoad();
@@ -88,7 +88,7 @@ public final class HighwayPresetManager {
 
         Files.createDirectories(directory());
         Path target = directory().resolve(name + ".json");
-        NbtCompound settings = module.settings.toTag().copy();
+        CompoundTag settings = module.settings.toTag().copy();
         writePreset(target, settings);
 
         PRESETS.put(name, settings);
@@ -110,14 +110,14 @@ public final class HighwayPresetManager {
         return name.equals(".") || name.equals("..") ? "" : name;
     }
 
-    static String encode(NbtCompound settings) {
+    static String encode(CompoundTag settings) {
         JsonObject root = new JsonObject();
         root.addProperty("version", 1);
         root.add("settings", NbtOps.INSTANCE.convertTo(JsonOps.INSTANCE, settings));
         return GSON.toJson(root);
     }
 
-    static NbtCompound decode(String json) throws IOException {
+    static CompoundTag decode(String json) throws IOException {
         return decodePreset(json, false).settings();
     }
 
@@ -128,8 +128,8 @@ public final class HighwayPresetManager {
             boolean migrated = moveLegacySetting(settingsJson, "mine-lookahead", "Digging");
             migrated |= moveLegacySetting(settingsJson, "predictive-echest-replace", "Ender Chests");
             if (validateModuleSettings) validateModuleSettings(settingsJson);
-            NbtElement settings = JsonOps.INSTANCE.convertTo(NbtOps.INSTANCE, settingsJson);
-            if (!(settings instanceof NbtCompound compound)) throw new IOException("Settings must be an object.");
+            Tag settings = JsonOps.INSTANCE.convertTo(NbtOps.INSTANCE, settingsJson);
+            if (!(settings instanceof CompoundTag compound)) throw new IOException("Settings must be an object.");
             return new DecodedPreset(compound, migrated);
         } catch (IOException e) {
             throw e;
@@ -171,7 +171,7 @@ public final class HighwayPresetManager {
         return false;
     }
 
-    private static void writePreset(Path target, NbtCompound settings) throws IOException {
+    private static void writePreset(Path target, CompoundTag settings) throws IOException {
         Path temporary = Files.createTempFile(target.getParent(), "." + target.getFileName() + "-", ".tmp");
         try {
             Files.writeString(temporary, encode(settings), StandardCharsets.UTF_8);
@@ -185,7 +185,7 @@ public final class HighwayPresetManager {
         }
     }
 
-    static void persistMigratedPreset(Path path, NbtCompound settings) throws IOException {
+    static void persistMigratedPreset(Path path, CompoundTag settings) throws IOException {
         Path backup = path.resolveSibling(path.getFileName() + ".pre-migration.bak");
         if (!Files.exists(backup, LinkOption.NOFOLLOW_LINKS)) Files.copy(path, backup);
         writePreset(path, settings);
@@ -349,10 +349,10 @@ public final class HighwayPresetManager {
     }
 
     private static void sortPresets() {
-        List<Map.Entry<String, NbtCompound>> entries = new ArrayList<>(PRESETS.entrySet());
+        List<Map.Entry<String, CompoundTag>> entries = new ArrayList<>(PRESETS.entrySet());
         entries.sort(Map.Entry.comparingByKey(String.CASE_INSENSITIVE_ORDER));
         PRESETS.clear();
-        for (Map.Entry<String, NbtCompound> entry : entries) PRESETS.put(entry.getKey(), entry.getValue());
+        for (Map.Entry<String, CompoundTag> entry : entries) PRESETS.put(entry.getKey(), entry.getValue());
     }
 
     private static Path directory() {

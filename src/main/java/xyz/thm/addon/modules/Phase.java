@@ -21,7 +21,7 @@ public class Phase extends Module {
 
     @Override
     public void onActivate() {
-        if (mc.player == null || mc.world == null) {
+        if (mc.player == null || mc.level == null) {
             toggle();
             return;
         }

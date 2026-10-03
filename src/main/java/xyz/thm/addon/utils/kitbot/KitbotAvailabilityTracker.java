@@ -10,7 +10,7 @@ import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.network.PlayerListEntry;
+import net.minecraft.client.multiplayer.PlayerInfo;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.server.ServerStatusHandler;
 import xyz.thm.addon.utils.server.ServerStatusHandler.ServerState;
@@ -109,10 +109,10 @@ public final class KitbotAvailabilityTracker {
 
     private Boolean sampleKitbotOnline() {
         try {
-            Collection<PlayerListEntry> playerList = MeteorClient.mc.getNetworkHandler().getPlayerList();
+            Collection<PlayerInfo> playerList = MeteorClient.mc.getConnection().getOnlinePlayers();
             if (playerList == null) return null;
 
-            for (PlayerListEntry entry : playerList) {
+            for (PlayerInfo entry : playerList) {
                 if (entry == null || entry.getProfile() == null) continue;
                 String name = entry.getProfile().name();
                 if (KITBOT_NAME.equalsIgnoreCase(name)) return true;
@@ -128,8 +128,8 @@ public final class KitbotAvailabilityTracker {
     private boolean isMainServerContext() {
         return MeteorClient.mc != null
             && MeteorClient.mc.player != null
-            && MeteorClient.mc.world != null
-            && MeteorClient.mc.getNetworkHandler() != null
+            && MeteorClient.mc.level != null
+            && MeteorClient.mc.getConnection() != null
             && ServerStatusHandler.getInstance().getCommittedState() == ServerState.MAIN_SERVER;
     }
 

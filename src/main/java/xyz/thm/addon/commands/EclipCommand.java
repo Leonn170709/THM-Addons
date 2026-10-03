@@ -15,13 +15,13 @@ import meteordevelopment.meteorclient.utils.misc.Names;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.command.CommandSource;
-import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import xyz.thm.addon.utils.THMUtils;
 
 public class EclipCommand extends Command {
@@ -29,9 +29,9 @@ public class EclipCommand extends Command {
         super("eclip", "Elyta clip need elytra bypass most anticheats");
     }
 
-    public void build(LiteralArgumentBuilder<CommandSource> builder) {
+    public void build(LiteralArgumentBuilder<SharedSuggestionProvider> builder) {
         builder.then(argument("blocks", DoubleArgumentType.doubleArg()).executes(context -> {
-            ClientPlayerEntity player = mc.player;
+            LocalPlayer player = mc.player;
             assert player != null;
             double blocks2 = context.getArgument("blocks", Double.class);
             if (work()) {
@@ -67,7 +67,7 @@ public class EclipCommand extends Command {
     }
 
     private boolean work() {
-        ClientPlayerEntity player = mc.player;
+        LocalPlayer player = mc.player;
         assert player != null;
         FindItemResult elytra = InvUtils.find(Items.ELYTRA);
         if (elytra.found()) {
@@ -80,26 +80,26 @@ public class EclipCommand extends Command {
     }
 
     private Block getBlock(BlockPos pos) {
-        return mc.world.getBlockState(pos).getBlock();
+        return mc.level.getBlockState(pos).getBlock();
     }
 
     private double findBlock(boolean up, int maximum) {
         if (up) {
-            BlockPos pos = mc.player.getBlockPos();
+            BlockPos pos = mc.player.blockPosition();
             for (int i = maximum; i >= 1; i--) {
-                if (getBlock(pos.add(0, i, 0)) == Blocks.AIR
-                    && getBlock(pos.add(0, i + 1, 0)) == Blocks.AIR
-                    && getBlock(pos.add(0, i - 1, 0)) != Blocks.AIR
+                if (getBlock(pos.offset(0, i, 0)) == Blocks.AIR
+                    && getBlock(pos.offset(0, i + 1, 0)) == Blocks.AIR
+                    && getBlock(pos.offset(0, i - 1, 0)) != Blocks.AIR
                 ) {
                     return i;
                 }
             }
         } else {
-            BlockPos pos = mc.player.getBlockPos();
+            BlockPos pos = mc.player.blockPosition();
             for (int i = -2; i >= -maximum; i--) {
-                if (getBlock(pos.add(0, i, 0)) != Blocks.AIR
-                    && getBlock(pos.add(0, i + 1, 0)) == Blocks.AIR
-                    && getBlock(pos.add(0, i + 2, 0)) == Blocks.AIR
+                if (getBlock(pos.offset(0, i, 0)) != Blocks.AIR
+                    && getBlock(pos.offset(0, i + 1, 0)) == Blocks.AIR
+                    && getBlock(pos.offset(0, i + 2, 0)) == Blocks.AIR
                 ) {
                     return i + 1; // negativer Offset zum Zielblock
                 }
@@ -119,7 +119,7 @@ public class EclipCommand extends Command {
 
     private void clip(double blocks) {
         if (blocks != 0) {
-            ClientPlayerEntity player = mc.player;
+            LocalPlayer player = mc.player;
             assert player != null;
             switch (ticks) {
                 case 0: {
@@ -130,12 +130,12 @@ public class EclipCommand extends Command {
                     break;
                 }
                 case 1: {
-                    mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.OnGroundOnly(false, mc.player.horizontalCollision));
+                    mc.player.connection.send(new ServerboundMovePlayerPacket.StatusOnly(false, mc.player.horizontalCollision));
                     ticks++;
                     break;
                 }
                 case 2: {
-                    mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.OnGroundOnly(false, mc.player.horizontalCollision));
+                    mc.player.connection.send(new ServerboundMovePlayerPacket.StatusOnly(false, mc.player.horizontalCollision));
                     ticks++;
                     break;
                 }
@@ -146,8 +146,8 @@ public class EclipCommand extends Command {
                 }
                 case 4: {
                     double targetY = player.getY() + blocks;
-                    player.setPosition(player.getX(), targetY, player.getZ());
-                    mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
+                    player.setPos(player.getX(), targetY, player.getZ());
+                    mc.player.connection.send(new ServerboundMovePlayerPacket.Pos(
                         player.getX(), targetY, player.getZ(),
                         false, mc.player.horizontalCollision
                     ));

@@ -19,9 +19,9 @@ import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.Items;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Items;
 import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
 
@@ -99,9 +99,9 @@ public class AntiPhase extends Module {
         .build()
     );
 
-    private final BlockPos.Mutable renderPos = new BlockPos.Mutable();
+    private final BlockPos.MutableBlockPos renderPos = new BlockPos.MutableBlockPos();
     private boolean rendering;
-    private PlayerEntity target;
+    private Player target;
 
     public AntiPhase() {
         super(THMAddon.PVP, "anti-phase", "Places scaffolding inside players so their pearls land instead of phasing them.");
@@ -122,14 +122,14 @@ public class AntiPhase extends Module {
             if (TargetUtils.isBadTarget(target, targetRange.get())) return;
         }
 
-        if (ignoreNaked.get() && target.getArmor() == 0) return;
+        if (ignoreNaked.get() && target.getArmorValue() == 0) return;
 
         FindItemResult scaffolding = InvUtils.findInHotbar(Items.SCAFFOLDING);
         if (!scaffolding.found()) return;
 
-        BlockPos feet = target.getBlockPos();
-        if (!mc.world.getBlockState(feet).isReplaceable()) return;
-        if (!PlayerUtils.isWithin(feet.toCenterPos(), reach.get())) return;
+        BlockPos feet = target.blockPosition();
+        if (!mc.level.getBlockState(feet).canBeReplaced()) return;
+        if (!PlayerUtils.isWithin(feet.getCenter(), reach.get())) return;
 
         // checkEntities off: scaffolding reports a solid shape to an absent context, so the client
         // check would reject placing inside the target — the server accepts it.

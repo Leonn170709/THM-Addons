@@ -14,11 +14,11 @@ import meteordevelopment.meteorclient.systems.modules.misc.AutoReconnect;
 import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.meteorclient.utils.world.Dimension;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.network.packet.s2c.common.DisconnectS2CPacket;
-import net.minecraft.text.Text;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.common.ClientboundDisconnectPacket;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.THMUtils;
 
@@ -191,7 +191,7 @@ public class AfkLogout extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null) return;
+        if (mc.player == null || mc.level == null || mc.getConnection() == null) return;
 
         updateMovementSpeedWindow();
 
@@ -323,14 +323,14 @@ public class AfkLogout extends Module {
             Modules.get().get(AutoReconnect.class).toggle();
         }
         if (autoToggle.get()) toggle();
-        mc.player.networkHandler.onDisconnect(new DisconnectS2CPacket(Text.literal("[AfkLogout] " + reason)));
+        mc.player.connection.handleDisconnect(new ClientboundDisconnectPacket(Component.literal("[AfkLogout] " + reason)));
     }
 
     private int countUsableElytras() {
         if (mc.player == null) return 0;
         int count = 0;
-        for (int i = 0; i < mc.player.getInventory().size(); i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+        for (int i = 0; i < mc.player.getInventory().getContainerSize(); i++) {
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (isUsableElytra(stack)) count++;
         }
         return count;
@@ -451,20 +451,20 @@ public class AfkLogout extends Module {
     // ── Player range check ────────────────────────────────────────────────────
 
     private boolean isPlayerInRange() {
-        if (mc.world == null || mc.player == null) return false;
+        if (mc.level == null || mc.player == null) return false;
         int r = playerRangeRadius.get();
         if (r == 0) {
-            for (PlayerEntity player : mc.world.getPlayers()) {
-                if (player.getUuid().equals(mc.player.getUuid())) continue;
+            for (Player player : mc.level.players()) {
+                if (player.getUUID().equals(mc.player.getUUID())) continue;
                 lastPlayerInRangeName = player.getGameProfile().name();
                 return true;
             }
             return false;
         }
         double radiusSq = (double) r * (double) r;
-        for (PlayerEntity player : mc.world.getPlayers()) {
-            if (player.getUuid().equals(mc.player.getUuid())) continue;
-            if (mc.player.squaredDistanceTo(player) <= radiusSq) {
+        for (Player player : mc.level.players()) {
+            if (player.getUUID().equals(mc.player.getUUID())) continue;
+            if (mc.player.distanceToSqr(player) <= radiusSq) {
                 lastPlayerInRangeName = player.getGameProfile().name();
                 return true;
             }

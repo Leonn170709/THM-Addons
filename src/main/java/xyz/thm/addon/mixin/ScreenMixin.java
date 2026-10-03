@@ -6,11 +6,11 @@
 
 package xyz.thm.addon.mixin;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.DeathScreen;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.input.KeyInput;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.DeathScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -25,7 +25,7 @@ import xyz.thm.addon.shaders.ShaderBackground;
 @Mixin(Screen.class)
 public abstract class ScreenMixin {
 
-    @Shadow @Final protected MinecraftClient client;
+    @Shadow @Final protected Minecraft minecraft;
 
     // Mouse particle trail on every screen shown before a world is loaded (title, singleplayer/
     // multiplayer/realms/create-world selection, ...). Injected into Screen's own base render() (not
@@ -33,8 +33,8 @@ public abstract class ScreenMixin {
     // directly (e.g. MultiplayerScreen) and for TitleScreen via its super.render() call -
     // TitleScreenMenuMixin no longer ticks/renders particles itself, to avoid double-drawing.
     @Inject(method = "render", at = @At("TAIL"))
-    private void thm$renderMenuParticles(DrawContext context, int mouseX, int mouseY, float deltaTicks, CallbackInfo ci) {
-        if (this.client.world != null) return;
+    private void thm$renderMenuParticles(GuiGraphics context, int mouseX, int mouseY, float deltaTicks, CallbackInfo ci) {
+        if (this.minecraft.level != null) return;
 
         MainMenuFx.tick(mouseX, mouseY);
         MainMenuFx.renderParticles(context);
@@ -49,8 +49,8 @@ public abstract class ScreenMixin {
     // draws that same frame (the "Minecraft <version>" text, at minimum) not rendering - root cause
     // not fully pinned down. Contrast against the shader is handled by MainMenuFx's window/button
     // fills being mostly opaque instead.
-    @Inject(method = "renderPanoramaBackground", at = @At("HEAD"), cancellable = true)
-    private void thm$renderShaderBackground(DrawContext context, float deltaTicks, CallbackInfo ci) {
+    @Inject(method = "renderPanorama", at = @At("HEAD"), cancellable = true)
+    private void thm$renderShaderBackground(GuiGraphics context, float deltaTicks, CallbackInfo ci) {
         if (ShaderBackground.render()) ci.cancel();
     }
 
@@ -58,12 +58,12 @@ public abstract class ScreenMixin {
     // accepts chat from a dead player. DeathScreen doesn't override keyPressed, so this targets
     // Screen's and filters on the instance.
     @Inject(method = "keyPressed", at = @At("HEAD"), cancellable = true)
-    private void thm$chatOnDeathScreen(KeyInput input, CallbackInfoReturnable<Boolean> cir) {
+    private void thm$chatOnDeathScreen(KeyEvent input, CallbackInfoReturnable<Boolean> cir) {
         if (!((Object) this instanceof DeathScreen)) return;
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        boolean command = mc.options.commandKey.matchesKey(input);
-        if (!command && !mc.options.chatKey.matchesKey(input)) return;
+        Minecraft mc = Minecraft.getInstance();
+        boolean command = mc.options.keyCommand.matches(input);
+        if (!command && !mc.options.keyChat.matches(input)) return;
 
         mc.setScreen(new DeathChatScreen((Screen) (Object) this, command ? "/" : ""));
         cir.setReturnValue(true);

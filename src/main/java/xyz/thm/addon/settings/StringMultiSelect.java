@@ -10,10 +10,9 @@ import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.WidgetScreen;
 import meteordevelopment.meteorclient.settings.GenericSetting;
 import meteordevelopment.meteorclient.settings.IGeneric;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtList;
-import net.minecraft.nbt.NbtString;
-
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.StringTag;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -66,16 +65,16 @@ public class StringMultiSelect implements IGeneric<StringMultiSelect> {
     }
 
     @Override
-    public NbtCompound toTag() {
-        NbtCompound tag = new NbtCompound();
-        NbtList list = new NbtList();
-        for (String s : selected) list.add(NbtString.of(s));
+    public CompoundTag toTag() {
+        CompoundTag tag = new CompoundTag();
+        ListTag list = new ListTag();
+        for (String s : selected) list.add(StringTag.valueOf(s));
         tag.put("selected", list);
         return tag;
     }
 
     @Override
-    public StringMultiSelect fromTag(NbtCompound tag) {
+    public StringMultiSelect fromTag(CompoundTag tag) {
         selected.clear();
         tag.getListOrEmpty("selected").forEach(el -> selected.add(el.asString().orElse("")));
         return this;

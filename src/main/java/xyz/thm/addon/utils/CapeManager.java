@@ -7,12 +7,11 @@
 package xyz.thm.addon.utils;
 
 import meteordevelopment.meteorclient.MeteorClient;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.texture.NativeImage;
-import net.minecraft.client.texture.NativeImageBackedTexture;
-import net.minecraft.util.Identifier;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.texture.DynamicTexture;
+import net.minecraft.resources.Identifier;
 import xyz.thm.addon.THMAddon;
-
+import com.mojang.blaze3d.platform.NativeImage;
 import java.io.File;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -35,7 +34,7 @@ public final class CapeManager {
     // Rendered (e.g. on the KitBot NPC via its assigned cape) but hidden from the self-cape picker.
     private static final Set<String> HIDDEN_CAPE_IDS = Set.of("kitbot");
     private static final Map<String, Identifier> textureCache = new HashMap<>();
-    private static final Identifier MISSING = Identifier.of("thm-addon", "cape/missing");
+    private static final Identifier MISSING = Identifier.fromNamespaceAndPath("thm-addon", "cape/missing");
 
     private CapeManager() {
     }
@@ -129,9 +128,9 @@ public final class CapeManager {
         try {
             byte[] bytes = Files.readAllBytes(file.toPath());
             NativeImage image = NativeImage.read(bytes);
-            Identifier textureId = Identifier.of("thm-addon", "cape/" + id);
-            MinecraftClient.getInstance().getTextureManager().registerTexture(
-                textureId, new NativeImageBackedTexture(() -> "thm-cape/" + id, image)
+            Identifier textureId = Identifier.fromNamespaceAndPath("thm-addon", "cape/" + id);
+            Minecraft.getInstance().getTextureManager().register(
+                textureId, new DynamicTexture(() -> "thm-cape/" + id, image)
             );
             return textureId;
         } catch (Exception e) {

@@ -15,18 +15,18 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.movement.NoSlow;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.CobwebBlock;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
+import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
+import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.WebBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -119,21 +119,21 @@ public abstract class NoSlowMixin implements NoSlowAntiClimb {
     @EventHandler
     @Inject(method = "onPreTick", at = @At("HEAD"), cancellable = true, require = 0)
     private void bephax$onPreTick(TickEvent.Pre event, CallbackInfo ci) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
         NoSlow noSlow = (NoSlow) (Object) this;
         if (!noSlow.isActive()) return;
-        if (bephax$disableOnElytra.get() && mc.player.isGliding()) return;
-        if (bephax$grimBypass.get() && mc.player.isUsingItem() && !mc.player.isSneaking()) {
-            if (mc.player.getActiveHand() == Hand.OFF_HAND && bephax$checkStack(mc.player.getMainHandStack())) {
-                mc.getNetworkHandler().sendPacket(new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, bephax$sequenceId++, mc.player.getYaw(), mc.player.getPitch()));
-            } else if (bephax$checkStack(mc.player.getOffHandStack())) {
-                mc.getNetworkHandler().sendPacket(new PlayerInteractItemC2SPacket(Hand.OFF_HAND, bephax$sequenceId++, mc.player.getYaw(), mc.player.getPitch()));
+        if (bephax$disableOnElytra.get() && mc.player.isFallFlying()) return;
+        if (bephax$grimBypass.get() && mc.player.isUsingItem() && !mc.player.isShiftKeyDown()) {
+            if (mc.player.getUsedItemHand() == InteractionHand.OFF_HAND && bephax$checkStack(mc.player.getMainHandItem())) {
+                mc.getConnection().send(new ServerboundUseItemPacket(InteractionHand.MAIN_HAND, bephax$sequenceId++, mc.player.getYRot(), mc.player.getXRot()));
+            } else if (bephax$checkStack(mc.player.getOffhandItem())) {
+                mc.getConnection().send(new ServerboundUseItemPacket(InteractionHand.OFF_HAND, bephax$sequenceId++, mc.player.getYRot(), mc.player.getXRot()));
             }
         }
         if ((bephax$grimBypass.get() || bephax$grimV3Bypass.get()) && bephax$grimWebBypass.get()) {
-            Box bb = bephax$grimBypass.get() ? mc.player.getBoundingBox().expand(1.0) : mc.player.getBoundingBox();
+            AABB bb = bephax$grimBypass.get() ? mc.player.getBoundingBox().inflate(1.0) : mc.player.getBoundingBox();
             for (BlockPos pos : bephax$getIntersectingWebs(bb)) {
-                mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, Direction.DOWN));
+                mc.getConnection().send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, pos, Direction.DOWN));
             }
         }
     }
@@ -144,7 +144,7 @@ public abstract class NoSlowMixin implements NoSlowAntiClimb {
 
     @Unique
     private boolean bephax$checkStack(ItemStack stack) {
-        return !stack.getComponents().contains(DataComponentTypes.FOOD)
+        return !stack.getComponents().has(DataComponents.FOOD)
             && stack.getItem() != Items.BOW
             && stack.getItem() != Items.CROSSBOW
             && stack.getItem() != Items.SHIELD;
@@ -155,22 +155,22 @@ public abstract class NoSlowMixin implements NoSlowAntiClimb {
         if (bephax$grimV3Bypass.get() && !bephax$checkGrimNew()) {
             return false;
         }
-        return !mc.player.isRiding()
-            && !mc.player.isSneaking()
+        return !mc.player.isHandsBusy()
+            && !mc.player.isShiftKeyDown()
             && (mc.player.isUsingItem() || (mc.player.isBlocking() && !bephax$grimV3Bypass.get() && !bephax$grimBypass.get()));
     }
     @Unique
     private boolean bephax$checkGrimNew() {
         if (mc.player == null) return true;
-        return !mc.player.isSneaking()
-            && !mc.player.isCrawling()
-            && !mc.player.isRiding()
-            && (mc.player.getItemUseTimeLeft() < 5 || ((mc.player.getItemUseTime() > 1) && mc.player.getItemUseTime() % 2 != 0));
+        return !mc.player.isShiftKeyDown()
+            && !mc.player.isVisuallyCrawling()
+            && !mc.player.isHandsBusy()
+            && (mc.player.getUseItemRemainingTicks() < 5 || ((mc.player.getTicksUsingItem() > 1) && mc.player.getTicksUsingItem() % 2 != 0));
     }
     @Unique
-    private List<BlockPos> bephax$getIntersectingWebs(Box boundingBox) {
+    private List<BlockPos> bephax$getIntersectingWebs(AABB boundingBox) {
         List<BlockPos> blocks = new ArrayList<>();
-        if (mc.world == null) return blocks;
+        if (mc.level == null) return blocks;
         int minX = (int) Math.floor(boundingBox.minX);
         int minY = (int) Math.floor(boundingBox.minY);
         int minZ = (int) Math.floor(boundingBox.minZ);
@@ -181,8 +181,8 @@ public abstract class NoSlowMixin implements NoSlowAntiClimb {
             for (int y = minY; y < maxY; y++) {
                 for (int z = minZ; z < maxZ; z++) {
                     BlockPos pos = new BlockPos(x, y, z);
-                    BlockState state = mc.world.getBlockState(pos);
-                    if (state.getBlock() instanceof CobwebBlock) {
+                    BlockState state = mc.level.getBlockState(pos);
+                    if (state.getBlock() instanceof WebBlock) {
                         blocks.add(pos);
                     }
                 }
@@ -193,12 +193,12 @@ public abstract class NoSlowMixin implements NoSlowAntiClimb {
     @Unique
     @EventHandler
     private void onPacketSend(PacketEvent.Send event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
         NoSlow noSlow = (NoSlow) (Object) this;
         if (!noSlow.isActive()) return;
-        if (bephax$disableOnElytra.get() && mc.player.isGliding()) return;
-        if (bephax$strictMode.get() && event.packet instanceof PlayerMoveC2SPacket packet) {
-            if (!packet.changesPosition()) return;
+        if (bephax$disableOnElytra.get() && mc.player.isFallFlying()) return;
+        if (bephax$strictMode.get() && event.packet instanceof ServerboundMovePlayerPacket packet) {
+            if (!packet.hasPosition()) return;
             if (!bephax$checkSlowed()) return;
             InventoryManager.getInstance().setSlotForced(((PlayerInventoryAccessor) mc.player.getInventory()).getSelectedSlot());
         }

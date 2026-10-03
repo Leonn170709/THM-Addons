@@ -11,14 +11,14 @@ import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
-import net.minecraft.block.ShulkerBoxBlock;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.ContainerComponent;
-import net.minecraft.item.BlockItem;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
 import xyz.thm.addon.THMAddon;
 
 import java.util.List;
@@ -68,16 +68,16 @@ public class ItemCounterHud extends HudElement {
         if (mc.player == null) return 0;
         int total = 0;
 
-        for (int i = 0; i < mc.player.getInventory().size(); i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+        for (int i = 0; i < mc.player.getInventory().getContainerSize(); i++) {
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (stack.isEmpty()) continue;
 
             if (stack.getItem() == target) total += stack.getCount();
 
             if (scanShulkers.get() && isShulkerBox(stack)) {
-                ContainerComponent container = stack.get(DataComponentTypes.CONTAINER);
+                ItemContainerContents container = stack.get(DataComponents.CONTAINER);
                 if (container != null) {
-                    for (ItemStack inner : container.iterateNonEmpty()) {
+                    for (ItemStack inner : container.nonEmptyItems()) {
                         if (inner.getItem() == target) total += inner.getCount();
                     }
                 }
@@ -92,7 +92,7 @@ public class ItemCounterHud extends HudElement {
     }
 
     private String itemLabel(Item item) {
-        String path = Registries.ITEM.getId(item).getPath();
+        String path = BuiltInRegistries.ITEM.getKey(item).getPath();
         String[] parts = path.split("_");
         StringBuilder sb = new StringBuilder();
         for (String part : parts) {

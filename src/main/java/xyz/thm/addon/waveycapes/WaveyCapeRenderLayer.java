@@ -6,21 +6,6 @@
 
 package xyz.thm.addon.waveycapes;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.render.RenderLayer;
-import net.minecraft.client.render.RenderLayers;
-import net.minecraft.client.render.VertexConsumer;
-import net.minecraft.client.render.command.OrderedRenderCommandQueue;
-import net.minecraft.client.render.entity.feature.FeatureRenderer;
-import net.minecraft.client.render.entity.feature.FeatureRendererContext;
-import net.minecraft.client.render.entity.model.BipedEntityModel;
-import net.minecraft.client.render.entity.model.PlayerEntityModel;
-import net.minecraft.client.render.entity.state.PlayerEntityRenderState;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.entity.player.SkinTextures;
-import net.minecraft.util.AssetInfo;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.RotationAxis;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
 
@@ -29,10 +14,24 @@ import xyz.thm.addon.waveycapes.util.CapePoint;
 import xyz.thm.addon.waveycapes.util.Mth;
 import xyz.thm.addon.waveycapes.util.Vector3;
 import xyz.thm.addon.waveycapes.util.Vector4;
-
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.math.Axis;
 import java.util.List;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.model.HumanoidModel;
+import net.minecraft.client.model.player.PlayerModel;
+import net.minecraft.client.renderer.SubmitNodeCollector;
+import net.minecraft.client.renderer.entity.RenderLayerParent;
+import net.minecraft.client.renderer.entity.layers.RenderLayer;
+import net.minecraft.client.renderer.entity.state.AvatarRenderState;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
+import net.minecraft.core.ClientAsset;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.entity.player.PlayerSkin;
 
-public class WaveyCapeRenderLayer extends FeatureRenderer<PlayerEntityRenderState, PlayerEntityModel> {
+public class WaveyCapeRenderLayer extends RenderLayer<AvatarRenderState, PlayerModel> {
 
     private static final int PART_COUNT = 16;
 
@@ -40,42 +39,42 @@ public class WaveyCapeRenderLayer extends FeatureRenderer<PlayerEntityRenderStat
     private static final float CAPE_HEIGHT = 1F;
     private static final float CAPE_DEPTH = 1F / 16F;
 
-    public WaveyCapeRenderLayer(FeatureRendererContext<PlayerEntityRenderState, PlayerEntityModel> ctx) {
+    public WaveyCapeRenderLayer(RenderLayerParent<AvatarRenderState, PlayerModel> ctx) {
         super(ctx);
     }
 
     @Override
-    public void render(MatrixStack matrices, OrderedRenderCommandQueue queue, int light,
-                       PlayerEntityRenderState state, float yaw, float pitch) {
+    public void render(PoseStack matrices, SubmitNodeCollector queue, int light,
+                       AvatarRenderState state, float yaw, float pitch) {
         if (!WaveyCapesConfig.enabled) return;
 
-        if (state.invisible || !state.capeVisible) return;
+        if (state.isInvisible || !state.showCape) return;
 
-        SkinTextures skins = state.skinTextures;
+        PlayerSkin skins = state.skin;
         if (skins == null) return;
-        AssetInfo.TextureAsset capeAsset = skins.cape();
+        ClientAsset.Texture capeAsset = skins.cape();
         if (capeAsset == null) return;
         Identifier capeId = capeAsset.texturePath();
 
-        float delta = MinecraftClient.getInstance().getRenderTickCounter().getTickProgress(false);
+        float delta = Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaPartialTick(false);
 
-        matrices.push();
-        getContextModel().getRootPart().applyTransform(matrices);
-        ((BipedEntityModel<?>) getContextModel()).body.applyTransform(matrices);
+        matrices.pushPose();
+        getParentModel().root().translateAndRotate(matrices);
+        ((HumanoidModel<?>) getParentModel()).body.translateAndRotate(matrices);
 
-        if (state.equippedChestStack != null && !state.equippedChestStack.isEmpty()) {
+        if (state.chestEquipment != null && !state.chestEquipment.isEmpty()) {
             matrices.translate(0.0f, -0.053125f, 0.06875f);
         }
 
         renderSimulationCape(matrices, queue, light, state, capeId, delta);
 
-        matrices.pop();
+        matrices.popPose();
     }
 
-    private void renderSimulationCape(MatrixStack matrices, OrderedRenderCommandQueue queue,
-                                      int light, PlayerEntityRenderState state,
+    private void renderSimulationCape(PoseStack matrices, SubmitNodeCollector queue,
+                                      int light, AvatarRenderState state,
                                       Identifier capeId, float delta) {
-        net.minecraft.client.network.AbstractClientPlayerEntity player = findPlayerForState(state);
+        net.minecraft.client.player.AbstractClientPlayer player = findPlayerForState(state);
         if (player == null) return;
 
         CapeHolder holder = (CapeHolder) player;
@@ -83,26 +82,26 @@ public class WaveyCapeRenderLayer extends FeatureRenderer<PlayerEntityRenderStat
         if (simulation == null || simulation.empty()) return;
 
         if (WaveyCapesConfig.computeGravityVector && holder.canUpdateGravityVector()) {
-            simulation.setGravityDirection(modelDownDirection(matrices, state.bodyYaw));
+            simulation.setGravityDirection(modelDownDirection(matrices, state.bodyRot));
             holder.setGravityVectorRequest(false);
         }
 
-        RenderLayer layer = RenderLayers.entityTranslucent(capeId);
+        RenderType layer = RenderTypes.entityTranslucent(capeId);
         if (WaveyCapesConfig.capeStyle == CapeStyle.SMOOTH) {
-            queue.submitCustom(matrices, layer, (entry, consumer) -> {
-                MatrixStack shared = new MatrixStack();
-                shared.peek().copy(entry);
-                renderSmoothCapeSimulation(shared, consumer, simulation, player.isSubmergedInWater(), delta, light);
+            queue.submitCustomGeometry(matrices, layer, (entry, consumer) -> {
+                PoseStack shared = new PoseStack();
+                shared.last().set(entry);
+                renderSmoothCapeSimulation(shared, consumer, simulation, player.isUnderWater(), delta, light);
             });
         } else {
-            queue.submitCustom(matrices, layer, (entry, consumer) -> {
-                MatrixStack shared = new MatrixStack();
-                shared.peek().copy(entry);
+            queue.submitCustomGeometry(matrices, layer, (entry, consumer) -> {
+                PoseStack shared = new PoseStack();
+                shared.last().set(entry);
                 Matrix4f[] pm = new Matrix4f[PART_COUNT];
                 for (int part = 0; part < PART_COUNT; part++) {
-                    modifyPoseStackSimulation(shared, simulation, player.isSubmergedInWater(), delta, part);
-                    pm[part] = new Matrix4f(shared.peek().getPositionMatrix());
-                    shared.pop();
+                    modifyPoseStackSimulation(shared, simulation, player.isUnderWater(), delta, part);
+                    pm[part] = new Matrix4f(shared.last().pose());
+                    shared.popPose();
                 }
                 emitBlockyVertices(consumer, pm, light);
             });
@@ -113,8 +112,8 @@ public class WaveyCapeRenderLayer extends FeatureRenderer<PlayerEntityRenderStat
      * The model's real "up" in body space: where the cape hangs from vs. one block above it, with the
      * body yaw taken back out. Beats the swim-pose approximation for any pose that tilts the model.
      */
-    private Vector3 modelDownDirection(MatrixStack matrices, float bodyYaw) {
-        Matrix4f pose = matrices.peek().getPositionMatrix();
+    private Vector3 modelDownDirection(PoseStack matrices, float bodyYaw) {
+        Matrix4f pose = matrices.last().pose();
         org.joml.Vector3f body = pose.transformPosition(new org.joml.Vector3f());
         org.joml.Vector3f up = pose.transformPosition(new org.joml.Vector3f(0, 1, 0)).sub(body).normalize();
 
@@ -125,15 +124,15 @@ public class WaveyCapeRenderLayer extends FeatureRenderer<PlayerEntityRenderStat
             up.x * Mth.sin(rot) + up.z * Mth.cos(rot));
     }
 
-    private net.minecraft.client.network.AbstractClientPlayerEntity findPlayerForState(PlayerEntityRenderState state) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || state.skinTextures == null) return null;
-        AssetInfo.TextureAsset stateBody = state.skinTextures.body();
+    private net.minecraft.client.player.AbstractClientPlayer findPlayerForState(AvatarRenderState state) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || state.skin == null) return null;
+        ClientAsset.Texture stateBody = state.skin.body();
         if (stateBody == null) return null;
         Identifier stateBodyPath = stateBody.texturePath();
-        for (net.minecraft.entity.player.PlayerEntity player : mc.world.getPlayers()) {
-            if (player instanceof net.minecraft.client.network.AbstractClientPlayerEntity acp) {
-                AssetInfo.TextureAsset body = acp.getSkin().body();
+        for (net.minecraft.world.entity.player.Player player : mc.level.players()) {
+            if (player instanceof net.minecraft.client.player.AbstractClientPlayer acp) {
+                ClientAsset.Texture body = acp.getSkin().body();
                 if (body != null && body.texturePath().equals(stateBodyPath)) return acp;
             }
         }
@@ -142,9 +141,9 @@ public class WaveyCapeRenderLayer extends FeatureRenderer<PlayerEntityRenderStat
 
     // ---- Simulation pose stack ----
 
-    private void modifyPoseStackSimulation(MatrixStack matrices, BasicSimulation simulation,
+    private void modifyPoseStackSimulation(PoseStack matrices, BasicSimulation simulation,
                                             boolean underwater, float delta, int part) {
-        matrices.push();
+        matrices.pushPose();
         matrices.translate(0.0, 0.0, 0.125);
 
         float x = simulation.getPoints().get(part).getLerpX(delta) - simulation.getPoints().get(0).getLerpX(delta);
@@ -155,20 +154,20 @@ public class WaveyCapeRenderLayer extends FeatureRenderer<PlayerEntityRenderStat
         float partRotation = getPartRotation(delta, part, simulation);
         float naturalWindSwing = getNaturalWindSwing(part, underwater);
 
-        matrices.multiply(RotationAxis.POSITIVE_X.rotationDegrees(6.0f + naturalWindSwing));
-        matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(0));
-        matrices.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(180.0f));
+        matrices.mulPose(Axis.XP.rotationDegrees(6.0f + naturalWindSwing));
+        matrices.mulPose(Axis.ZP.rotationDegrees(0));
+        matrices.mulPose(Axis.YP.rotationDegrees(180.0f));
         matrices.translate(-z / PART_COUNT, y / PART_COUNT, x / PART_COUNT);
         matrices.translate(0, (0.48 / 16), -(0.48 / 16));
         matrices.translate(0, part * 1f / PART_COUNT, 0);
-        matrices.multiply(RotationAxis.POSITIVE_X.rotationDegrees(-partRotation));
+        matrices.mulPose(Axis.XP.rotationDegrees(-partRotation));
         matrices.translate(0, -part * 1f / PART_COUNT, 0);
         matrices.translate(0, -(0.48 / 16), (0.48 / 16));
     }
 
     // ---- Smooth simulation rendering ----
 
-    private void renderSmoothCapeSimulation(MatrixStack matrices, VertexConsumer consumer,
+    private void renderSmoothCapeSimulation(PoseStack matrices, VertexConsumer consumer,
                                              BasicSimulation simulation, boolean underwater,
                                              float delta, int light) {
         Matrix4f[] positionMatrices = new Matrix4f[PART_COUNT];
@@ -177,7 +176,7 @@ public class WaveyCapeRenderLayer extends FeatureRenderer<PlayerEntityRenderStat
 
         for (int part = 0; part < PART_COUNT; part++) {
             modifyPoseStackSimulation(matrices, simulation, underwater, delta, part);
-            positionMatrices[part] = new Matrix4f(matrices.peek().getPositionMatrix());
+            positionMatrices[part] = new Matrix4f(matrices.last().pose());
             frontNormals[part] = getNormalVec(
                 positionMatrices[Math.max(part - 1, 0)], positionMatrices[Math.max(part - 1, 0)], positionMatrices[part],
                 new Vector3(CAPE_WIDTH / 2F, part * (CAPE_HEIGHT / PART_COUNT), -CAPE_DEPTH),
@@ -188,7 +187,7 @@ public class WaveyCapeRenderLayer extends FeatureRenderer<PlayerEntityRenderStat
                 new Vector3(CAPE_WIDTH / 2F, (part + 1) * (CAPE_HEIGHT / PART_COUNT), 0),
                 new Vector3(-CAPE_WIDTH / 2F, (part + 1) * (CAPE_HEIGHT / PART_COUNT), 0),
                 new Vector3(CAPE_WIDTH / 2F, part * (CAPE_HEIGHT / PART_COUNT), 0), light == 15728880);
-            matrices.pop();
+            matrices.popPose();
         }
 
         emitSmoothVertices(consumer, positionMatrices, frontNormals, backNormals, light, 1.0f);
@@ -310,12 +309,12 @@ public class WaveyCapeRenderLayer extends FeatureRenderer<PlayerEntityRenderStat
 
     private void addVertex(VertexConsumer consumer, Matrix4f matrix, float x, float y, float z,
                             float u, float v, int light, Vector3 normal, float alpha) {
-        consumer.vertex(matrix, x, y, z)
-            .color(1f, 1f, 1f, alpha)
-            .texture(u, v)
-            .overlay(net.minecraft.client.render.OverlayTexture.DEFAULT_UV)
-            .light(light)
-            .normal(normal.x, normal.y, normal.z);
+        consumer.addVertex(matrix, x, y, z)
+            .setColor(1f, 1f, 1f, alpha)
+            .setUv(u, v)
+            .setOverlay(net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY)
+            .setLight(light)
+            .setNormal(normal.x, normal.y, normal.z);
     }
 
     private float getPartRotation(float delta, int part, BasicSimulation simulation) {

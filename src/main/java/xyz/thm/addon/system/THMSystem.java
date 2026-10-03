@@ -11,8 +11,8 @@ import meteordevelopment.meteorclient.systems.System;
 import meteordevelopment.meteorclient.systems.Systems;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.nbt.NbtCompound;
+import net.minecraft.client.Minecraft;
+import net.minecraft.nbt.CompoundTag;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.modules.HighwayBuilderTHM;
 import xyz.thm.addon.settings.StringMultiSelect;
@@ -176,7 +176,7 @@ public class THMSystem extends System<THMSystem> {
         .supplier(CapeManager::availableCapeIds)
         .onChanged(id -> {
             if (FabricLoader.getInstance().isDevelopmentEnvironment()) return;
-            MinecraftClient mc = MinecraftClient.getInstance();
+            Minecraft mc = Minecraft.getInstance();
             if (mc == null || mc.player == null) return;
             if (!ThmMembers.isThmMember(mc.player)) return;
             if (!hasApiToken()) return;
@@ -354,7 +354,7 @@ public class THMSystem extends System<THMSystem> {
         .build()
     );
 
-    private final EnumMap<Mode, NbtCompound> highwayProfileSnapshots = new EnumMap<>(Mode.class);
+    private final EnumMap<Mode, CompoundTag> highwayProfileSnapshots = new EnumMap<>(Mode.class);
     private Mode activeHighwayProfile = Mode.None;
 
     public THMSystem() {
@@ -426,10 +426,10 @@ public class THMSystem extends System<THMSystem> {
     }
 
     @Override
-    public NbtCompound toTag() {
+    public CompoundTag toTag() {
         captureActiveHighwayProfileSnapshotIfPossible();
 
-        NbtCompound tag = new NbtCompound();
+        CompoundTag tag = new CompoundTag();
         tag.putString("version", THMAddon.VERSION);
         tag.put("settings", settings.toTag());
         tag.put("wavyCapesSettings", wavyCapesSettings.toTag());
@@ -440,23 +440,23 @@ public class THMSystem extends System<THMSystem> {
     }
 
     @Override
-    public THMSystem fromTag(NbtCompound tag) {
+    public THMSystem fromTag(CompoundTag tag) {
         if (tag.contains("settings")) {
-            settings.fromTag(tag.getCompound("settings").orElse(new NbtCompound()));
+            settings.fromTag(tag.getCompound("settings").orElse(new CompoundTag()));
         }
         if (tag.contains("wavyCapesSettings")) {
-            wavyCapesSettings.fromTag(tag.getCompound("wavyCapesSettings").orElse(new NbtCompound()));
+            wavyCapesSettings.fromTag(tag.getCompound("wavyCapesSettings").orElse(new CompoundTag()));
         }
         if (tag.contains("mainMenuSettings")) {
-            mainMenuSettings.fromTag(tag.getCompound("mainMenuSettings").orElse(new NbtCompound()));
+            mainMenuSettings.fromTag(tag.getCompound("mainMenuSettings").orElse(new CompoundTag()));
         }
         activeHighwayProfile = readHighwayProfileMode(tag, ACTIVE_HIGHWAY_PROFILE_TAG, Mode.None);
         highwayProfileSnapshots.clear();
         if (tag.contains(HIGHWAY_PROFILE_SNAPSHOTS_TAG)) {
-            NbtCompound profilesTag = tag.getCompound(HIGHWAY_PROFILE_SNAPSHOTS_TAG).orElse(new NbtCompound());
+            CompoundTag profilesTag = tag.getCompound(HIGHWAY_PROFILE_SNAPSHOTS_TAG).orElse(new CompoundTag());
             for (Mode profile : Mode.values()) {
                 if (profilesTag.contains(profile.name())) {
-                    highwayProfileSnapshots.put(profile, copyTag(profilesTag.getCompound(profile.name()).orElse(new NbtCompound())));
+                    highwayProfileSnapshots.put(profile, copyTag(profilesTag.getCompound(profile.name()).orElse(new CompoundTag())));
                 }
             }
         }
@@ -482,7 +482,7 @@ public class THMSystem extends System<THMSystem> {
 
     private void loadHighwayProfileSnapshot(HighwayBuilderTHM hwBuilder, Mode profile) {
         if (hwBuilder == null || profile == null) return;
-        NbtCompound snapshot = highwayProfileSnapshots.get(profile);
+        CompoundTag snapshot = highwayProfileSnapshots.get(profile);
         if (snapshot == null) {
             hwBuilder.applyThmProfileSeed(profile);
             saveHighwayProfileSnapshot(hwBuilder, profile);
@@ -493,18 +493,18 @@ public class THMSystem extends System<THMSystem> {
         hwBuilder.normalizeAfterThmProfileLoad();
     }
 
-    private NbtCompound highwayProfileSnapshotsToTag() {
-        NbtCompound tag = new NbtCompound();
+    private CompoundTag highwayProfileSnapshotsToTag() {
+        CompoundTag tag = new CompoundTag();
         for (Mode profile : Mode.values()) {
-            NbtCompound snapshot = highwayProfileSnapshots.get(profile);
+            CompoundTag snapshot = highwayProfileSnapshots.get(profile);
             if (snapshot != null) tag.put(profile.name(), copyTag(snapshot));
         }
         return tag;
     }
 
-    private static Mode readHighwayProfileMode(NbtCompound tag, String key, Mode fallback) {
+    private static Mode readHighwayProfileMode(CompoundTag tag, String key, Mode fallback) {
         if (tag == null || !tag.contains(key)) return fallback;
-        return parseMode(tag.getString(key, fallback.name()), fallback);
+        return parseMode(tag.getStringOr(key, fallback.name()), fallback);
     }
 
     private static Mode parseMode(String value, Mode fallback) {
@@ -516,8 +516,8 @@ public class THMSystem extends System<THMSystem> {
         }
     }
 
-    private static NbtCompound copyTag(NbtCompound tag) {
-        return tag == null ? new NbtCompound() : tag.copy();
+    private static CompoundTag copyTag(CompoundTag tag) {
+        return tag == null ? new CompoundTag() : tag.copy();
     }
 
     public enum Mode {

@@ -14,8 +14,8 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import xyz.thm.addon.THMAddon;
 
 import java.util.Random;
@@ -72,7 +72,7 @@ public class HoleJitter extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
         if (onlyInHole.get() && !inHole()) return;
         if (timer-- > 0) return;
 
@@ -81,13 +81,13 @@ public class HoleJitter extends Module {
     }
 
     private void jitter() {
-        BlockPos feet = mc.player.getBlockPos();
+        BlockPos feet = mc.player.blockPosition();
         // One of the 8 compass directions; the diagonals come out at 0.707 * distance per axis, so
         // they stay inside the block just like the straight ones.
         double angle = random.nextInt(8) * (Math.PI / 4);
         double offset = distance.get();
 
-        mc.player.setPosition(
+        mc.player.setPos(
             feet.getX() + 0.5 + Math.cos(angle) * offset,
             mc.player.getY(),
             feet.getZ() + 0.5 + Math.sin(angle) * offset
@@ -95,10 +95,10 @@ public class HoleJitter extends Module {
     }
 
     private boolean inHole() {
-        BlockPos feet = mc.player.getBlockPos();
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos side = feet.offset(dir);
-            if (mc.world.getBlockState(side).getCollisionShape(mc.world, side).isEmpty()) return false;
+        BlockPos feet = mc.player.blockPosition();
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            BlockPos side = feet.relative(dir);
+            if (mc.level.getBlockState(side).getCollisionShape(mc.level, side).isEmpty()) return false;
         }
         return true;
     }

@@ -1,5 +1,5 @@
 {
-  "description": "Highway automation for anarchy servers: a THM-standard highway builder with drift recovery and live stats, plus travel, tunnel and stash tooling, PvP modules (crystal aura, surround, anti-concrete, phase), inventory and packet utilities, 13 HUD widgets and 7 GUI themes. Baritone modules load only if Baritone is present.",
+  "description": "Highway automation for anarchy servers: a THM-standard highway builder with drift recovery and live stats, plus travel, tunnel and stash tooling, PvP modules (crystal aura, surround, anti-concrete, phase), inventory and packet utilities, 13 HUD widgets and 7 GUI themes. Requires Baritone.",
   "tags": [
     "Automation",
     "Building",

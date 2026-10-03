@@ -15,23 +15,23 @@ import meteordevelopment.meteorclient.utils.misc.HorizontalDirection;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.SlotUtils;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
+import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.EndPortalBlock;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.NetherPortalBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
 import meteordevelopment.meteorclient.mixininterface.IVec3d;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.EndPortalBlock;
-import net.minecraft.block.FluidBlock;
-import net.minecraft.block.NetherPortalBlock;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.effect.StatusEffects;
-import net.minecraft.item.ItemStack;
-import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
-import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
-import net.minecraft.registry.tag.BlockTags;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.THMUtils;
 
@@ -292,7 +292,7 @@ public class HighwayTraveler extends Module {
     private final Deque<BlockPos> path = new ArrayDeque<>();
 
     private int     backupTicks       = 0;
-    private Vec3d   prevPos           = Vec3d.ZERO;
+    private Vec3   prevPos           = Vec3.ZERO;
     private int     noMoveTicks       = 0;
     private int     obstacleWaitTicks = 0;
     private int     repairCheckTicks  = 0;
@@ -323,8 +323,8 @@ public class HighwayTraveler extends Module {
         bounceRubberbanded = false;
         bounceRestartTicks = bounceRestartDelay.get();
         stashedElytraSlot  = -1;
-        bouncePrevFov      = mc.options.getFovEffectScale().getValue();
-        prevPos     = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
+        bouncePrevFov      = mc.options.fovEffectScale().get();
+        prevPos     = new Vec3(mc.player.getX(), mc.player.getY(), mc.player.getZ());
 
         if (autoBounce.get()) bounceRecast(mc.player);
 
@@ -334,15 +334,15 @@ public class HighwayTraveler extends Module {
     @Override
     public void onDeactivate() {
         releaseAll();
-        mc.options.jumpKey.setPressed(false);
+        mc.options.keyJump.setDown(false);
         bounceRubberbanded = false;
         handoffTicks = -1;
         // If the module gets toggled off mid unequip-recast, don't leave the elytra sitting
         // unworn in the player's inventory - put it straight back on.
         if (stashedElytraSlot != -1) reequipElytra();
         if (mc.player != null) {
-            mc.player.setPitch(0);
-            if (bouncePrevFov != 0 && !sprintSetting.get()) mc.options.getFovEffectScale().setValue(bouncePrevFov);
+            mc.player.setXRot(0);
+            if (bouncePrevFov != 0 && !sprintSetting.get()) mc.options.fovEffectScale().set(bouncePrevFov);
         }
     }
 
@@ -353,8 +353,8 @@ public class HighwayTraveler extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.world == null) return;
-        ClientPlayerEntity p = mc.player;
+        if (mc.player == null || mc.level == null) return;
+        LocalPlayer p = mc.player;
 
         if (handoffTicks >= 0) {
             tickAwaitingHandoff(p);
@@ -370,11 +370,11 @@ public class HighwayTraveler extends Module {
         }
 
         if (travelState != TravelState.PATH_FOLLOW) {
-            p.setYaw(hwYaw);
+            p.setYRot(hwYaw);
         }
 
-        Vec3d pos = new Vec3d(p.getX(), p.getY(), p.getZ());
-        noMoveTicks = pos.subtract(prevPos).lengthSquared() < 1e-4 ? noMoveTicks + 1 : 0;
+        Vec3 pos = new Vec3(p.getX(), p.getY(), p.getZ());
+        noMoveTicks = pos.subtract(prevPos).lengthSqr() < 1e-4 ? noMoveTicks + 1 : 0;
         prevPos     = pos;
 
         if (noMoveTicks > 25 && travelState != TravelState.BACKUP && travelState != TravelState.STOPPED) {
@@ -394,7 +394,7 @@ public class HighwayTraveler extends Module {
         }
 
         // Bounce owns pitch (needs to dive to build speed) while it's active; otherwise keep it level.
-        if (!autoBounce.get()) p.setPitch(0);
+        if (!autoBounce.get()) p.setXRot(0);
     }
 
     /**
@@ -406,22 +406,22 @@ public class HighwayTraveler extends Module {
     @EventHandler
     private void onBouncePostTick(TickEvent.Post event) {
         if (!autoBounce.get() || mc.player == null || handoffTicks >= 0) return;
-        ClientPlayerEntity p = mc.player;
+        LocalPlayer p = mc.player;
 
-        if (mc.options.jumpKey.isPressed() && !p.isGliding() && !bounceManualTakeoff.get()) {
-            mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(p, ClientCommandC2SPacket.Mode.START_FALL_FLYING));
+        if (mc.options.keyJump.isDown() && !p.isFallFlying() && !bounceManualTakeoff.get()) {
+            mc.getConnection().send(new ServerboundPlayerCommandPacket(p, ServerboundPlayerCommandPacket.Action.START_FALL_FLYING));
         }
 
         if (!bounceConditionsMet(p)) return;
 
         if (!bounceRubberbanded) {
-            if (bouncePrevFov != 0 && !sprintSetting.get()) mc.options.getFovEffectScale().setValue(0.0);
-            if (bounceAutoJump.get()) mc.options.jumpKey.setPressed(true);
-            if (bounceLockPitch.get()) p.setPitch(bouncePitch.get().floatValue());
+            if (bouncePrevFov != 0 && !sprintSetting.get()) mc.options.fovEffectScale().set(0.0);
+            if (bounceAutoJump.get()) mc.options.keyJump.setDown(true);
+            if (bounceLockPitch.get()) p.setXRot(bouncePitch.get().floatValue());
         }
 
         if (!sprintSetting.get()) {
-            if (p.isGliding()) p.setSprinting(p.isOnGround());
+            if (p.isFallFlying()) p.setSprinting(p.onGround());
             else p.setSprinting(true);
         }
 
@@ -430,7 +430,7 @@ public class HighwayTraveler extends Module {
                 bounceRestartTicks--;
             } else {
                 reequipElytra();
-                mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(p, ClientCommandC2SPacket.Mode.START_FALL_FLYING));
+                mc.getConnection().send(new ServerboundPlayerCommandPacket(p, ServerboundPlayerCommandPacket.Action.START_FALL_FLYING));
                 bounceRubberbanded = false;
                 bounceRestartTicks = bounceRestartDelay.get();
             }
@@ -446,9 +446,9 @@ public class HighwayTraveler extends Module {
     @EventHandler
     private void onBouncePacketReceive(PacketEvent.Receive event) {
         if (!autoBounce.get() || mc.player == null || handoffTicks >= 0) return;
-        if (event.packet instanceof PlayerPositionLookS2CPacket) {
+        if (event.packet instanceof ClientboundPlayerPositionPacket) {
             bounceRubberbanded = true;
-            mc.player.stopGliding();
+            mc.player.stopFallFlying();
             // A plain stopGliding() call is client-side only and sometimes doesn't actually clear
             // the server's flying state, leaving the bounce stuck mid-air unable to restart.
             // Physically unequipping the elytra forces a real stop; re-equipping (see
@@ -460,7 +460,7 @@ public class HighwayTraveler extends Module {
     @EventHandler
     private void onBouncePacketSend(PacketEvent.Send event) {
         if (!autoBounce.get() || mc.player == null || handoffTicks >= 0 || sprintSetting.get()) return;
-        if (event.packet instanceof ClientCommandC2SPacket cmd && cmd.getMode() == ClientCommandC2SPacket.Mode.START_FALL_FLYING) {
+        if (event.packet instanceof ServerboundPlayerCommandPacket cmd && cmd.getAction() == ServerboundPlayerCommandPacket.Action.START_FALL_FLYING) {
             mc.player.setSprinting(true);
         }
     }
@@ -472,10 +472,10 @@ public class HighwayTraveler extends Module {
      */
     @EventHandler
     private void onPlayerMove(PlayerMoveEvent event) {
-        if (mc.player == null || methodSetting.get() != TravelMethod.WASP || !mc.player.isGliding()) return;
+        if (mc.player == null || methodSetting.get() != TravelMethod.WASP || !mc.player.isFallFlying()) return;
         if (travelState == TravelState.STOPPED || travelState == TravelState.BACKUP || handoffTicks >= 0) return;
 
-        float yaw = travelState == TravelState.PATH_FOLLOW ? mc.player.getYaw() : hwYaw;
+        float yaw = travelState == TravelState.PATH_FOLLOW ? mc.player.getYRot() : hwYaw;
 
         double cos = Math.cos(Math.toRadians(yaw + 90));
         double sin = Math.sin(Math.toRadians(yaw + 90));
@@ -488,25 +488,25 @@ public class HighwayTraveler extends Module {
         ((IVec3d) event.movement).meteor$set(x, y, z);
     }
 
-    private boolean bounceConditionsMet(ClientPlayerEntity p) {
-        BlockState blockState = p.getBlockStateAtPos();
-        boolean isClimbing = blockState.isIn(BlockTags.CLIMBABLE) && !blockState.isIn(BlockTags.CAN_GLIDE_THROUGH);
-        return !p.getAbilities().flying && !p.hasVehicle() && !isClimbing && !p.isTouchingWater() && !p.hasStatusEffect(StatusEffects.LEVITATION);
+    private boolean bounceConditionsMet(LocalPlayer p) {
+        BlockState blockState = p.getInBlockState();
+        boolean isClimbing = blockState.is(BlockTags.CLIMBABLE) && !blockState.is(BlockTags.CAN_GLIDE_THROUGH);
+        return !p.getAbilities().flying && !p.isPassenger() && !isClimbing && !p.isInWater() && !p.hasEffect(MobEffects.LEVITATION);
     }
 
-    private boolean bounceStartGliding(ClientPlayerEntity p) {
+    private boolean bounceStartGliding(LocalPlayer p) {
         for (EquipmentSlot slot : EquipmentSlot.VALUES) {
-            if (LivingEntity.canGlideWith(p.getEquippedStack(slot), slot)) {
-                mc.executeSync(p::startGliding);
+            if (LivingEntity.canGlideUsing(p.getItemBySlot(slot), slot)) {
+                mc.executeIfPossible(p::startFallFlying);
                 return true;
             }
         }
         return false;
     }
 
-    private void bounceRecast(ClientPlayerEntity p) {
+    private void bounceRecast(LocalPlayer p) {
         if (bounceConditionsMet(p) && bounceStartGliding(p)) {
-            mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(p, ClientCommandC2SPacket.Mode.START_FALL_FLYING));
+            mc.getConnection().send(new ServerboundPlayerCommandPacket(p, ServerboundPlayerCommandPacket.Action.START_FALL_FLYING));
         }
     }
 
@@ -519,8 +519,8 @@ public class HighwayTraveler extends Module {
     private boolean forceUnequipElytra() {
         if (mc.player == null || stashedElytraSlot != -1) return false;
 
-        ItemStack chest = mc.player.getEquippedStack(EquipmentSlot.CHEST);
-        if (chest.isEmpty() || !LivingEntity.canGlideWith(chest, EquipmentSlot.CHEST)) return false;
+        ItemStack chest = mc.player.getItemBySlot(EquipmentSlot.CHEST);
+        if (chest.isEmpty() || !LivingEntity.canGlideUsing(chest, EquipmentSlot.CHEST)) return false;
 
         // Bounded to hotbar+main (0-35) - InvUtils.findEmpty() searches the whole PlayerInventory,
         // which also covers armor/offhand (36-40), and an empty leg/foot/head/offhand slot won't
@@ -530,11 +530,11 @@ public class HighwayTraveler extends Module {
 
         THMUtils.fakeInventoryOpen(true);
         try {
-            int syncId = mc.player.currentScreenHandler.syncId;
+            int syncId = mc.player.containerMenu.containerId;
             int chestId = SlotUtils.indexToId(CHEST_SLOT_INDEX);
             int spareId = SlotUtils.indexToId(emptySlot);
-            mc.interactionManager.clickSlot(syncId, chestId, 0, SlotActionType.PICKUP, mc.player);
-            mc.interactionManager.clickSlot(syncId, spareId, 0, SlotActionType.PICKUP, mc.player);
+            mc.gameMode.handleInventoryMouseClick(syncId, chestId, 0, ClickType.PICKUP, mc.player);
+            mc.gameMode.handleInventoryMouseClick(syncId, spareId, 0, ClickType.PICKUP, mc.player);
         } finally {
             THMUtils.fakeInventoryOpen(false);
         }
@@ -548,11 +548,11 @@ public class HighwayTraveler extends Module {
 
         THMUtils.fakeInventoryOpen(true);
         try {
-            int syncId = mc.player.currentScreenHandler.syncId;
+            int syncId = mc.player.containerMenu.containerId;
             int spareId = SlotUtils.indexToId(stashedElytraSlot);
             int chestId = SlotUtils.indexToId(CHEST_SLOT_INDEX);
-            mc.interactionManager.clickSlot(syncId, spareId, 0, SlotActionType.PICKUP, mc.player);
-            mc.interactionManager.clickSlot(syncId, chestId, 0, SlotActionType.PICKUP, mc.player);
+            mc.gameMode.handleInventoryMouseClick(syncId, spareId, 0, ClickType.PICKUP, mc.player);
+            mc.gameMode.handleInventoryMouseClick(syncId, chestId, 0, ClickType.PICKUP, mc.player);
         } finally {
             THMUtils.fakeInventoryOpen(false);
         }
@@ -560,12 +560,12 @@ public class HighwayTraveler extends Module {
         stashedElytraSlot = -1;
     }
 
-    private void tickForward(ClientPlayerEntity p) {
+    private void tickForward(LocalPlayer p) {
         switch (detectObstacle(p)) {
             case CLEAR    -> pressFwd();
             case JUMPABLE -> {
                 pressFwd();
-                if (autoJumpSetting.get() && p.isOnGround()) p.jump();
+                if (autoJumpSetting.get() && p.onGround()) p.jumpFromGround();
             }
             case WALL -> {
                 if (!avoidSetting.get()) {
@@ -580,7 +580,7 @@ public class HighwayTraveler extends Module {
         }
     }
 
-    private void tickStopped(ClientPlayerEntity p) {
+    private void tickStopped(LocalPlayer p) {
         releaseAll();
         p.setSprinting(false);
 
@@ -600,8 +600,8 @@ public class HighwayTraveler extends Module {
 
     private static final int STEER_LOOKAHEAD = 3;
 
-    private void tickPathFollow(ClientPlayerEntity p) {
-        Vec3d pos = new Vec3d(p.getX(), p.getY(), p.getZ());
+    private void tickPathFollow(LocalPlayer p) {
+        Vec3 pos = new Vec3(p.getX(), p.getY(), p.getZ());
 
         while (!path.isEmpty()) {
             BlockPos wp = path.peek();
@@ -612,7 +612,7 @@ public class HighwayTraveler extends Module {
         }
 
         if (path.isEmpty()) {
-            p.setYaw(hwYaw);
+            p.setYRot(hwYaw);
             travelState = TravelState.FORWARD;
             return;
         }
@@ -627,10 +627,10 @@ public class HighwayTraveler extends Module {
 
         double dx = (aim.getX() + 0.5) - pos.x;
         double dz = (aim.getZ() + 0.5) - pos.z;
-        p.setYaw((float) Math.toDegrees(Math.atan2(-dx, dz)));
+        p.setYRot((float) Math.toDegrees(Math.atan2(-dx, dz)));
 
         BlockPos nextWp = path.peek();
-        if (nextWp.getY() > p.getBlockPos().getY() && p.isOnGround()) p.jump();
+        if (nextWp.getY() > p.blockPosition().getY() && p.onGround()) p.jumpFromGround();
 
         pressFwd();
     }
@@ -642,11 +642,11 @@ public class HighwayTraveler extends Module {
         noMoveTicks = 0;
     }
 
-    private void tickBackup(ClientPlayerEntity p) {
+    private void tickBackup(LocalPlayer p) {
         releaseAll();
-        mc.options.backKey.setPressed(true);
+        mc.options.keyDown.setDown(true);
         if (++backupTicks >= 30) {
-            mc.options.backKey.setPressed(false);
+            mc.options.keyDown.setDown(false);
             travelState = TravelState.FORWARD;
         }
     }
@@ -665,11 +665,11 @@ public class HighwayTraveler extends Module {
      * instead of handing off immediately, so the player actually lands on the highway before
      * Highway Builder starts placing at whatever mid-air/bounce height it was interrupted at.
      */
-    private void beginHandoffWait(ClientPlayerEntity p) {
+    private void beginHandoffWait(LocalPlayer p) {
         releaseAll();
-        mc.options.jumpKey.setPressed(false);
+        mc.options.keyJump.setDown(false);
         p.setSprinting(false);
-        p.setPitch(0);
+        p.setXRot(0);
         // Don't leave a mid-recast elytra stashed away for the whole landing-delay wait (the bounce
         // handlers that would normally resolve it are suppressed once handoffTicks >= 0) - put it
         // back on right away so the player isn't stuck bare-chested falling with no glide control.
@@ -677,9 +677,9 @@ public class HighwayTraveler extends Module {
         handoffTicks = (int) Math.round(handoffLandingDelay.get() * 20);
     }
 
-    private void tickAwaitingHandoff(ClientPlayerEntity p) {
+    private void tickAwaitingHandoff(LocalPlayer p) {
         releaseAll();
-        mc.options.jumpKey.setPressed(false);
+        mc.options.keyJump.setDown(false);
         p.setSprinting(false);
 
         if (--handoffTicks > 0) return;
@@ -695,8 +695,8 @@ public class HighwayTraveler extends Module {
         if (builder != null && !builder.isActive()) builder.toggle();
     }
 
-    private ObstacleKind detectObstacle(ClientPlayerEntity p) {
-        BlockPos feet  = p.getBlockPos();
+    private ObstacleKind detectObstacle(LocalPlayer p) {
+        BlockPos feet  = p.blockPosition();
         int      steps = lookAheadSetting.get();
 
         for (int step = 1; step <= steps; step++) {
@@ -714,8 +714,8 @@ public class HighwayTraveler extends Module {
 
             if (!blocked) continue;
 
-            boolean headBlocked  = solid(diag.up());
-            boolean aboveBlocked = solid(diag.up(2));
+            boolean headBlocked  = solid(diag.above());
+            boolean aboveBlocked = solid(diag.above(2));
 
             if (step == 1) {
                 if (!headBlocked && !aboveBlocked) return ObstacleKind.JUMPABLE;
@@ -728,10 +728,10 @@ public class HighwayTraveler extends Module {
 
     private static final int[][] DIRS4 = {{1,0},{-1,0},{0,1},{0,-1}};
 
-    private Deque<BlockPos> bfsRoute(ClientPlayerEntity p) {
-        int sx = p.getBlockPos().getX();
-        int sy = p.getBlockPos().getY();
-        int sz = p.getBlockPos().getZ();
+    private Deque<BlockPos> bfsRoute(LocalPlayer p) {
+        int sx = p.blockPosition().getX();
+        int sy = p.blockPosition().getY();
+        int sz = p.blockPosition().getZ();
         int W  = searchWidthSetting.get();
 
         Map<Long, Long>    cameFrom = new LinkedHashMap<>();
@@ -806,20 +806,20 @@ public class HighwayTraveler extends Module {
 
     private boolean canStand(int x, int y, int z) {
         BlockPos feet = new BlockPos(x, y, z);
-        return solid(feet.down()) && passable(feet) && passable(feet.up());
+        return solid(feet.below()) && passable(feet) && passable(feet.above());
     }
 
     private boolean solid(BlockPos pos) {
-        if (mc.world == null) return false;
-        var state = mc.world.getBlockState(pos);
+        if (mc.level == null) return false;
+        var state = mc.level.getBlockState(pos);
 
         if (state.isAir()) return false;
-        if (state.getBlock() instanceof FluidBlock) return false;
+        if (state.getBlock() instanceof LiquidBlock) return false;
         if (!state.getFluidState().isEmpty()) return false;
         if (state.getBlock() instanceof NetherPortalBlock) return false;
         if (state.getBlock() instanceof EndPortalBlock) return false;
 
-        return !state.getCollisionShape(mc.world, pos).isEmpty();
+        return !state.getCollisionShape(mc.level, pos).isEmpty();
     }
 
     private boolean passable(BlockPos pos) { return !solid(pos); }
@@ -832,23 +832,23 @@ public class HighwayTraveler extends Module {
     private static int decodeZ(long key) { return (int)(key & 0xFFFFFFFFL) - 30_000_000; }
 
     private void pressFwd() {
-        mc.options.forwardKey.setPressed(true);
-        mc.options.backKey.setPressed(false);
-        mc.options.leftKey.setPressed(false);
-        mc.options.rightKey.setPressed(false);
+        mc.options.keyUp.setDown(true);
+        mc.options.keyDown.setDown(false);
+        mc.options.keyLeft.setDown(false);
+        mc.options.keyRight.setDown(false);
     }
 
     private void releaseAll() {
-        mc.options.forwardKey.setPressed(false);
-        mc.options.backKey.setPressed(false);
-        mc.options.leftKey.setPressed(false);
-        mc.options.rightKey.setPressed(false);
+        mc.options.keyUp.setDown(false);
+        mc.options.keyDown.setDown(false);
+        mc.options.keyLeft.setDown(false);
+        mc.options.keyRight.setDown(false);
     }
 
     private void applyDirectionSetting() {
         TravelDirection d = dirSetting.get();
         if (d == TravelDirection.AUTO) {
-            d = snapYawToHighway(mc.player.getYaw());
+            d = snapYawToHighway(mc.player.getYRot());
         }
         activeDir = d;
         hwYaw     = yawOf(d);

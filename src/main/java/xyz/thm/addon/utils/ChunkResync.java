@@ -12,8 +12,8 @@ import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.network.packet.c2s.common.ClientOptionsC2SPacket;
-import net.minecraft.network.packet.c2s.common.SyncedClientOptions;
+import net.minecraft.network.protocol.common.ServerboundClientInformationPacket;
+import net.minecraft.server.level.ClientInformation;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 
@@ -26,8 +26,8 @@ public final class ChunkResync {
     private static final ChunkResync INSTANCE = new ChunkResync();
 
     private int ticks = -1;
-    private SyncedClientOptions lastSent;
-    private SyncedClientOptions saved;
+    private ClientInformation lastSent;
+    private ClientInformation saved;
     private boolean sendingOwn;
 
     private ChunkResync() {}
@@ -38,13 +38,13 @@ public final class ChunkResync {
 
     public static void trigger() {
         ChunkResync r = INSTANCE;
-        if (mc.player == null || mc.getNetworkHandler() == null || r.ticks >= 0) return;
+        if (mc.player == null || mc.getConnection() == null || r.ticks >= 0) return;
 
-        r.saved = r.lastSent != null ? r.lastSent : mc.options.getSyncedOptions();
-        SyncedClientOptions o = r.saved;
-        r.send(new SyncedClientOptions(
-            o.language(), 0, o.chatVisibility(), o.chatColorsEnabled(), o.playerModelParts(),
-            o.mainArm(), o.filtersText(), o.allowsServerListing(), o.particleStatus()
+        r.saved = r.lastSent != null ? r.lastSent : mc.options.buildPlayerInformation();
+        ClientInformation o = r.saved;
+        r.send(new ClientInformation(
+            o.language(), 0, o.chatVisibility(), o.chatColors(), o.modelCustomisation(),
+            o.mainHand(), o.textFilteringEnabled(), o.allowsListing(), o.particleStatus()
         ));
         r.ticks = 0;
         ChatUtils.info("Resyncing chunks (view distance %d -> 0 -> %d)...", o.viewDistance(), o.viewDistance());
@@ -52,7 +52,7 @@ public final class ChunkResync {
 
     @EventHandler
     private void onSend(PacketEvent.Send event) {
-        if (!sendingOwn && event.packet instanceof ClientOptionsC2SPacket p) lastSent = p.options();
+        if (!sendingOwn && event.packet instanceof ServerboundClientInformationPacket p) lastSent = p.information();
     }
 
     @EventHandler
@@ -75,13 +75,13 @@ public final class ChunkResync {
     }
 
     private void restore() {
-        if (mc.player != null && mc.getNetworkHandler() != null && saved != null) send(saved);
+        if (mc.player != null && mc.getConnection() != null && saved != null) send(saved);
     }
 
-    private void send(SyncedClientOptions options) {
+    private void send(ClientInformation options) {
         sendingOwn = true;
         try {
-            mc.getNetworkHandler().sendPacket(new ClientOptionsC2SPacket(options));
+            mc.getConnection().send(new ServerboundClientInformationPacket(options));
         } finally {
             sendingOwn = false;
         }

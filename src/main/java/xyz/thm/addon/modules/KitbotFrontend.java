@@ -15,7 +15,7 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.world.entity.player.Player;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.kitbot.KitbotAvailabilityTracker;
 import xyz.thm.addon.utils.kitbot.KitbotChatCommandParser;
@@ -119,7 +119,7 @@ public class KitbotFrontend extends Module {
 
     @Override
     public void onActivate() {
-        if (mc.player == null || mc.world == null) {
+        if (mc.player == null || mc.level == null) {
             warning("You must be in-game to use KitBot.");
             toggle();
             return;
@@ -486,7 +486,7 @@ public class KitbotFrontend extends Module {
 
         boolean submit(ManagedRequest request, RequestOrigin origin, boolean attachManualDisplay) {
             if (request == null) return false;
-            if (MeteorClient.mc == null || MeteorClient.mc.player == null || MeteorClient.mc.world == null) {
+            if (MeteorClient.mc == null || MeteorClient.mc.player == null || MeteorClient.mc.level == null) {
                 announceWarning("You must be in-game to use KitBot.");
                 return false;
             }
@@ -853,9 +853,9 @@ public class KitbotFrontend extends Module {
         }
 
         private boolean isKitbotNearbyNow() {
-            if (MeteorClient.mc == null || MeteorClient.mc.player == null || MeteorClient.mc.world == null) return false;
+            if (MeteorClient.mc == null || MeteorClient.mc.player == null || MeteorClient.mc.level == null) return false;
 
-            for (PlayerEntity player : MeteorClient.mc.world.getPlayers()) {
+            for (Player player : MeteorClient.mc.level.players()) {
                 if (player == null) continue;
                 if (!KITBOT_NAME.equals(player.getName().getString())) continue;
                 if (player == MeteorClient.mc.player) continue;
@@ -865,7 +865,7 @@ public class KitbotFrontend extends Module {
             return false;
         }
 
-        private boolean isWithinKitArrivalProofRange(PlayerEntity player) {
+        private boolean isWithinKitArrivalProofRange(Player player) {
             if (MeteorClient.mc == null || MeteorClient.mc.player == null) return false;
 
             double dx = player.getX() - MeteorClient.mc.player.getX();

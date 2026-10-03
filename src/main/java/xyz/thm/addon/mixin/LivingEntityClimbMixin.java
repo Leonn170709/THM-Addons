@@ -8,12 +8,12 @@ package xyz.thm.addon.mixin;
 
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.movement.NoSlow;
-import net.minecraft.block.BlockState;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.registry.tag.BlockTags;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.shape.VoxelShape;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -30,9 +30,9 @@ public abstract class LivingEntityClimbMixin {
     @Unique private static final int THM_GROUND_SEARCH = 3;
 
     /** NoSlow anti-climb: ladders, vines and scaffolding stop acting as climbable. Local player only. */
-    @Inject(method = "isClimbing", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "onClimbable", at = @At("HEAD"), cancellable = true)
     private void thm$antiClimb(CallbackInfoReturnable<Boolean> cir) {
-        if ((Object) this != mc.player || mc.world == null) return;
+        if ((Object) this != mc.player || mc.level == null) return;
         NoSlow noSlow = Modules.get() == null ? null : Modules.get().get(NoSlow.class);
         if (noSlow == null || !noSlow.isActive()) return;
 
@@ -43,8 +43,8 @@ public abstract class LivingEntityClimbMixin {
 
     @Unique
     private boolean thm$smartSuppress() {
-        boolean falling = !mc.player.isOnGround() && mc.player.getVelocity().y < 0;
-        return AntiClimb.suppress(falling, falling ? thm$dropToGround(mc.player.getBlockPos()) : 0);
+        boolean falling = !mc.player.onGround() && mc.player.getDeltaMovement().y < 0;
+        return AntiClimb.suppress(falling, falling ? thm$dropToGround(mc.player.blockPosition()) : 0);
     }
 
     /** Distance from the feet down to the first block you'd stand on; climbables don't count as ground. */
@@ -52,12 +52,12 @@ public abstract class LivingEntityClimbMixin {
     private double thm$dropToGround(BlockPos feet) {
         double feetY = mc.player.getY();
         for (int i = 0; i <= THM_GROUND_SEARCH; i++) {
-            BlockPos pos = feet.down(i);
-            BlockState state = mc.world.getBlockState(pos);
-            if (state.isIn(BlockTags.CLIMBABLE)) continue;
-            VoxelShape shape = state.getCollisionShape(mc.world, pos);
+            BlockPos pos = feet.below(i);
+            BlockState state = mc.level.getBlockState(pos);
+            if (state.is(BlockTags.CLIMBABLE)) continue;
+            VoxelShape shape = state.getCollisionShape(mc.level, pos);
             if (shape.isEmpty()) continue;
-            return feetY - (pos.getY() + shape.getMax(Direction.Axis.Y));
+            return feetY - (pos.getY() + shape.max(Direction.Axis.Y));
         }
         return Double.MAX_VALUE;
     }

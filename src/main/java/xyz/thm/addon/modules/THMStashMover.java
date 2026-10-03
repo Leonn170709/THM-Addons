@@ -36,36 +36,42 @@ import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.meteorclient.utils.world.TickRate;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.*;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.block.enums.ChestType;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.client.input.Input;
-import net.minecraft.client.network.ClientPlayNetworkHandler;
-import net.minecraft.client.network.PlayerListEntry;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.ContainerComponent;
-import net.minecraft.item.BlockItem;
-import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtElement;
-import net.minecraft.nbt.NbtList;
-import net.minecraft.network.packet.s2c.play.OpenScreenS2CPacket;
-import net.minecraft.registry.Registries;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.text.Text;
-import net.minecraft.util.ActionResult;
-import net.minecraft.util.Hand;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-import net.minecraft.world.chunk.ChunkStatus;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.client.player.ClientInput;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundOpenScreenPacket;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.BarrelBlock;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.world.level.block.EnderChestBlock;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.ChestType;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.server.ServerStatusHandler;
 import xyz.thm.addon.utils.THMStashMoverErrorLog;
@@ -250,7 +256,7 @@ public class THMStashMover extends Module {
     private int pendingInputHardBlockPairIndex = -1;
     private String pendingInputHardBlockReason = "";
 
-    private Input previousInput;
+    private ClientInput previousInput;
     private CustomPlayerInput navInput;
 
     public THMStashMover() {
@@ -315,7 +321,7 @@ public class THMStashMover extends Module {
         super.onDeactivate();
         releaseThmHwyMonitorReconnectOnDeactivate();
         stopNavigation();
-        if (mc.player != null && mc.currentScreen != null) mc.player.closeHandledScreen();
+        if (mc.player != null && mc.screen != null) mc.player.closeContainer();
         state = RunState.IDLE;
         purpose = OpenPurpose.NONE;
         currentTravelSide = TravelSide.UNKNOWN;
@@ -499,9 +505,9 @@ public class THMStashMover extends Module {
     }
 
     @Override
-    public NbtCompound toTag() {
+    public CompoundTag toTag() {
         List<SettingGroup> originalGroups = new ArrayList<>(settings.groups);
-        NbtCompound tag;
+        CompoundTag tag;
 
         try {
             settings.groups.removeAll(pairSettingGroups);
@@ -511,7 +517,7 @@ public class THMStashMover extends Module {
             settings.groups.addAll(originalGroups);
         }
 
-        NbtList pairTags = new NbtList();
+        ListTag pairTags = new ListTag();
         for (KitPair pair : pairs) pairTags.add(pair.toTag());
         tag.put("kitPairs", pairTags);
         tag.putString("selectedKitPair", selectedPairName);
@@ -519,11 +525,11 @@ public class THMStashMover extends Module {
         tag.putString("sharedInputHomeName", sharedInputHomeName);
         tag.putBoolean("sharedDepositHome", sharedDepositHome);
         tag.putString("sharedDepositHomeName", sharedDepositHomeName);
-        NbtList enderHomeTags = new NbtList();
+        ListTag enderHomeTags = new ListTag();
         for (Map.Entry<String, BlockPos> entry : enderChestApproachesByHome.entrySet()) {
             if (entry.getKey().isEmpty() || !isConfiguredPos(entry.getValue())) continue;
 
-            NbtCompound enderTag = new NbtCompound();
+            CompoundTag enderTag = new CompoundTag();
             enderTag.putString("home", entry.getKey());
             enderTag.putLong("approachPos", entry.getValue().asLong());
             enderHomeTags.add(enderTag);
@@ -533,29 +539,29 @@ public class THMStashMover extends Module {
     }
 
     @Override
-    public Module fromTag(NbtCompound tag) {
+    public Module fromTag(CompoundTag tag) {
         super.fromTag(tag);
         enderChestApproachesByHome.clear();
-        sharedInputHome = tag.getBoolean("sharedInputHome", false);
-        sharedInputHomeName = tag.getString("sharedInputHomeName", "");
-        sharedDepositHome = tag.getBoolean("sharedDepositHome", false);
-        sharedDepositHomeName = tag.getString("sharedDepositHomeName", "");
+        sharedInputHome = tag.getBooleanOr("sharedInputHome", false);
+        sharedInputHomeName = tag.getStringOr("sharedInputHomeName", "");
+        sharedDepositHome = tag.getBooleanOr("sharedDepositHome", false);
+        sharedDepositHomeName = tag.getStringOr("sharedDepositHomeName", "");
 
         pairs.clear();
 
-        for (NbtElement pairTag : tag.getListOrEmpty("kitPairs")) {
-            if (pairTag instanceof NbtCompound compound) pairs.add(KitPair.fromTag(compound));
+        for (Tag pairTag : tag.getListOrEmpty("kitPairs")) {
+            if (pairTag instanceof CompoundTag compound) pairs.add(KitPair.fromTag(compound));
         }
 
         ensureDefaultPair();
-        for (NbtElement enderTag : tag.getListOrEmpty("enderChestApproachesByHome")) {
-            if (!(enderTag instanceof NbtCompound compound)) continue;
+        for (Tag enderTag : tag.getListOrEmpty("enderChestApproachesByHome")) {
+            if (!(enderTag instanceof CompoundTag compound)) continue;
 
-            String home = normalizeHome(compound.getString("home", ""));
-            BlockPos approach = BlockPos.fromLong(compound.getLong("approachPos", BlockPos.ORIGIN.asLong()));
+            String home = normalizeHome(compound.getStringOr("home", ""));
+            BlockPos approach = BlockPos.of(compound.getLongOr("approachPos", BlockPos.ZERO.asLong()));
             if (!home.isEmpty() && isConfiguredPos(approach)) enderChestApproachesByHome.put(home, approach);
         }
-        String selected = tag.getString("selectedKitPair", tag.getString("activeKitPair", selectedPairName));
+        String selected = tag.getStringOr("selectedKitPair", tag.getStringOr("activeKitPair", selectedPairName));
         if (indexOfPair(selected) < 0) selected = pairs.get(0).name;
         selectedPairName = selected;
         deletePairSelection = "";
@@ -613,11 +619,11 @@ public class THMStashMover extends Module {
     private void onPacketReceive(PacketEvent.Receive event) {
         OpenAttemptDiagnostics diagnostics = openAttemptDiagnostics;
         if (diagnostics == null || state != RunState.WAITING_FOR_SCREEN) return;
-        if (!(event.packet instanceof OpenScreenS2CPacket packet)) return;
+        if (!(event.packet instanceof ClientboundOpenScreenPacket packet)) return;
 
         diagnostics.openPacketSeen = true;
         diagnostics.openPacketCancelled = event.isCancelled();
-        diagnostics.packetMenu = registryId(Registries.SCREEN_HANDLER.getId(packet.getScreenHandlerType()));
+        diagnostics.packetMenu = registryId(BuiltInRegistries.MENU.getKey(packet.getType()));
     }
 
     public String createPair(String rawName) {
@@ -743,7 +749,7 @@ public class THMStashMover extends Module {
 
     private String captureApproach(KitPair pair, boolean input) {
         if (mc.player == null) return "Player is not available.";
-        BlockPos pos = mc.player.getBlockPos();
+        BlockPos pos = mc.player.blockPosition();
         if (input) pair.inputApproachPos = pos;
         else pair.depositApproachPos = pos;
         rebuildPairSettings();
@@ -759,7 +765,7 @@ public class THMStashMover extends Module {
         String home = normalizeHome(input ? resolveInputHome(activePair()) : resolveDepositHome(activePair()));
         if (home.isEmpty()) return "Set the active pair's " + (input ? "input" : "deposit") + " home before capturing ender approach.";
 
-        BlockPos pos = mc.player.getBlockPos();
+        BlockPos pos = mc.player.blockPosition();
         setEnderChestApproachForHome(home, pos);
         settings.invalidate();
         return "Captured ender approach for " + home + ": " + pos.toShortString();
@@ -1069,8 +1075,8 @@ public class THMStashMover extends Module {
 
         double targetX = travelApproach.getX() + 0.5;
         double targetZ = travelApproach.getZ() + 0.5;
-        Vec3d yawTarget = new Vec3d(targetX, mc.player.getY(), targetZ);
-        mc.player.setYaw((float) Rotations.getYaw(yawTarget));
+        Vec3 yawTarget = new Vec3(targetX, mc.player.getY(), targetZ);
+        mc.player.setYRot((float) Rotations.getYaw(yawTarget));
         ensureNavigationInput();
         navInput.forward(true);
         navInput.sprint(false);
@@ -1116,7 +1122,7 @@ public class THMStashMover extends Module {
         tickTimer++;
         if (tickTimer < openDelay.get()) return;
 
-        if (!(mc.currentScreen instanceof HandledScreen<?> screen)) {
+        if (!(mc.screen instanceof AbstractContainerScreen<?> screen)) {
             recordOpenAttemptFailure("Container screen did not open.");
             retryOrBlock("Container screen did not open.");
             return;
@@ -1135,7 +1141,7 @@ public class THMStashMover extends Module {
     }
 
     private void tickScanDeposit() {
-        ScreenHandler menu = currentMenu();
+        AbstractContainerMenu menu = currentMenu();
         if (menu == null) {
             retryOrBlock("Deposit screen closed while scanning.");
             return;
@@ -1143,7 +1149,7 @@ public class THMStashMover extends Module {
 
         int containerSlots = getContainerSlots(menu);
         for (int i = 0; i < containerSlots; i++) {
-            if (menu.slots.get(i).getStack().isEmpty()) demandRemaining++;
+            if (menu.slots.get(i).getItem().isEmpty()) demandRemaining++;
         }
 
         closeScreen();
@@ -1153,7 +1159,7 @@ public class THMStashMover extends Module {
     }
 
     private void tickSnapshotBank() {
-        ScreenHandler menu = currentMenu();
+        AbstractContainerMenu menu = currentMenu();
         if (menu == null) {
             retryOrBlock("Ender chest closed while checking bank capacity.");
             return;
@@ -1169,7 +1175,7 @@ public class THMStashMover extends Module {
     private void tickWithdrawInput() {
         if (waitActionDelay()) return;
 
-        ScreenHandler menu = currentMenu();
+        AbstractContainerMenu menu = currentMenu();
         if (menu == null) {
             retryOrBlock("Input screen closed while withdrawing.");
             return;
@@ -1201,7 +1207,7 @@ public class THMStashMover extends Module {
         }
 
         while (slotIndex < containerSlots) {
-            ItemStack stack = menu.slots.get(slotIndex).getStack();
+            ItemStack stack = menu.slots.get(slotIndex).getItem();
             if (isFullShulker(stack)) {
                 setInputStatus(currentPair, "Has kits");
                 click(menu, slotIndex);
@@ -1232,7 +1238,7 @@ public class THMStashMover extends Module {
     private void tickBank() {
         if (waitActionDelay()) return;
 
-        ScreenHandler menu = currentMenu();
+        AbstractContainerMenu menu = currentMenu();
         if (menu == null) {
             retryOrBlock("Ender chest closed while banking.");
             return;
@@ -1282,7 +1288,7 @@ public class THMStashMover extends Module {
     private void tickDeposit() {
         if (waitActionDelay()) return;
 
-        ScreenHandler menu = currentMenu();
+        AbstractContainerMenu menu = currentMenu();
         if (menu == null) {
             retryOrBlock("Deposit screen closed while depositing.");
             return;
@@ -1319,7 +1325,7 @@ public class THMStashMover extends Module {
     private void tickUnbank() {
         if (waitActionDelay()) return;
 
-        ScreenHandler menu = currentMenu();
+        AbstractContainerMenu menu = currentMenu();
         if (menu == null) {
             retryOrBlock("Ender chest closed while unbanking.");
             return;
@@ -1461,7 +1467,7 @@ public class THMStashMover extends Module {
 
     private boolean openBlock(BlockPos target) {
         OpenAttemptDiagnostics diagnostics = beginOpenAttemptDiagnostics(target);
-        if (mc.world == null) {
+        if (mc.level == null) {
             diagnostics.preflight = "world_unavailable";
             return false;
         }
@@ -1469,7 +1475,7 @@ public class THMStashMover extends Module {
             diagnostics.preflight = "player_unavailable";
             return false;
         }
-        if (mc.interactionManager == null) {
+        if (mc.gameMode == null) {
             diagnostics.preflight = "game_mode_unavailable";
             return false;
         }
@@ -1478,26 +1484,26 @@ public class THMStashMover extends Module {
             return false;
         }
 
-        BlockEntity blockEntity = mc.world.getBlockEntity(target);
-        if (blockEntity == null && !(mc.world.getBlockState(target).getBlock() instanceof EnderChestBlock)) {
+        BlockEntity blockEntity = mc.level.getBlockEntity(target);
+        if (blockEntity == null && !(mc.level.getBlockState(target).getBlock() instanceof EnderChestBlock)) {
             diagnostics.preflight = "supported_block_entity_missing";
             return false;
         }
 
-        Vec3d hitVec = Vec3d.ofCenter(target);
+        Vec3 hitVec = Vec3.atCenterOf(target);
         BlockHitResult hit = new BlockHitResult(hitVec, Direction.UP, target, false);
         diagnostics.preflight = "rotation_queued";
         Rotations.rotate(Rotations.getYaw(hitVec), Rotations.getPitch(hitVec), () -> {
-            if (mc.interactionManager == null || mc.player == null) {
+            if (mc.gameMode == null || mc.player == null) {
                 diagnostics.interactionResult = "callback_context_unavailable";
                 if (diagnostics.failureLogged) logLateOpenInteraction(diagnostics);
                 return;
             }
 
-            ActionResult result = mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hit);
+            InteractionResult result = mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hit);
             diagnostics.interactionDispatched = true;
             diagnostics.interactionResult = interactionResultName(result);
-            diagnostics.consumesAction = result != null && result.isAccepted();
+            diagnostics.consumesAction = result != null && result.consumesAction();
             if (diagnostics.failureLogged) logLateOpenInteraction(diagnostics);
         });
         return true;
@@ -1548,28 +1554,28 @@ public class THMStashMover extends Module {
 
     private List<BlockPos> buildStorageRegion(BlockPos corner1, BlockPos corner2) {
         List<BlockPos> list = new ArrayList<>();
-        if (mc.world == null) return list;
+        if (mc.level == null) return list;
         Set<Long> seenDoubleChests = new HashSet<>();
 
         BlockPos min = new BlockPos(Math.min(corner1.getX(), corner2.getX()), Math.min(corner1.getY(), corner2.getY()), Math.min(corner1.getZ(), corner2.getZ()));
         BlockPos max = new BlockPos(Math.max(corner1.getX(), corner2.getX()), Math.max(corner1.getY(), corner2.getY()), Math.max(corner1.getZ(), corner2.getZ()));
 
-        for (BlockPos pos : BlockPos.iterate(min, max)) {
-            BlockState state = mc.world.getBlockState(pos);
+        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            BlockState state = mc.level.getBlockState(pos);
             Block block = state.getBlock();
             if (block instanceof ChestBlock) {
-                ChestType type = state.get(ChestBlock.CHEST_TYPE);
+                ChestType type = state.getValue(ChestBlock.TYPE);
                 if (type == ChestType.SINGLE) {
-                    list.add(pos.toImmutable());
+                    list.add(pos.immutable());
                 } else {
-                    Direction facing = state.get(ChestBlock.FACING);
-                    Direction connectedDirection = type == ChestType.LEFT ? facing.rotateYClockwise() : facing.rotateYCounterclockwise();
-                    BlockPos connected = pos.offset(connectedDirection);
+                    Direction facing = state.getValue(ChestBlock.FACING);
+                    Direction connectedDirection = type == ChestType.LEFT ? facing.getClockWise() : facing.getCounterClockWise();
+                    BlockPos connected = pos.relative(connectedDirection);
                     long key = Math.min(pos.asLong(), connected.asLong());
-                    if (seenDoubleChests.add(key)) list.add(pos.toImmutable());
+                    if (seenDoubleChests.add(key)) list.add(pos.immutable());
                 }
             } else if (block instanceof BarrelBlock || block instanceof ShulkerBoxBlock) {
-                list.add(pos.toImmutable());
+                list.add(pos.immutable());
             }
         }
 
@@ -1577,38 +1583,38 @@ public class THMStashMover extends Module {
     }
 
     private BlockPos findNearestEnderChest(BlockPos approach) {
-        if (mc.world == null || mc.player == null) return null;
+        if (mc.level == null || mc.player == null) return null;
 
-        BlockPos center = isConfiguredPos(approach) ? approach : mc.player.getBlockPos();
+        BlockPos center = isConfiguredPos(approach) ? approach : mc.player.blockPosition();
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
         int radius = 5;
 
-        for (BlockPos pos : BlockPos.iterate(center.add(-radius, -radius, -radius), center.add(radius, radius, radius))) {
-            if (!(mc.world.getBlockState(pos).getBlock() instanceof EnderChestBlock)) continue;
+        for (BlockPos pos : BlockPos.betweenClosed(center.offset(-radius, -radius, -radius), center.offset(radius, radius, radius))) {
+            if (!(mc.level.getBlockState(pos).getBlock() instanceof EnderChestBlock)) continue;
 
-            double distance = mc.player.squaredDistanceTo(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
+            double distance = mc.player.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
             if (distance < bestDistance) {
                 bestDistance = distance;
-                best = pos.toImmutable();
+                best = pos.immutable();
             }
         }
 
         return best;
     }
 
-    private int getContainerSlots(ScreenHandler menu) {
+    private int getContainerSlots(AbstractContainerMenu menu) {
         return Math.max(0, menu.slots.size() - PLAYER_MENU_SLOTS);
     }
 
-    private ScreenHandler currentMenu() {
-        if (mc.currentScreen instanceof HandledScreen<?> screen) return screen.getScreenHandler();
+    private AbstractContainerMenu currentMenu() {
+        if (mc.screen instanceof AbstractContainerScreen<?> screen) return screen.getMenu();
         return null;
     }
 
-    private void click(ScreenHandler menu, int slot) {
-        if (mc.interactionManager != null && mc.player != null) {
-            mc.interactionManager.clickSlot(menu.syncId, slot, 0, SlotActionType.QUICK_MOVE, mc.player);
+    private void click(AbstractContainerMenu menu, int slot) {
+        if (mc.gameMode != null && mc.player != null) {
+            mc.gameMode.handleInventoryMouseClick(menu.containerId, slot, 0, ClickType.QUICK_MOVE, mc.player);
         }
     }
 
@@ -1623,17 +1629,17 @@ public class THMStashMover extends Module {
         if (stack.isEmpty()) return false;
         if (!(stack.getItem() instanceof BlockItem blockItem) || !(blockItem.getBlock() instanceof ShulkerBoxBlock)) return false;
 
-        ContainerComponent contents = stack.get(DataComponentTypes.CONTAINER);
+        ItemContainerContents contents = stack.get(DataComponents.CONTAINER);
         if (contents == null) return false;
 
         int nonEmpty = 0;
-        for (ItemStack item : contents.iterateNonEmpty()) nonEmpty++;
+        for (ItemStack item : contents.nonEmptyItems()) nonEmpty++;
         return nonEmpty >= 27;
     }
 
-    private int findEmptyContainerSlot(ScreenHandler menu, int containerSlots) {
+    private int findEmptyContainerSlot(AbstractContainerMenu menu, int containerSlots) {
         for (int i = 0; i < containerSlots; i++) {
-            if (menu.slots.get(i).getStack().isEmpty()) return i;
+            if (menu.slots.get(i).getItem().isEmpty()) return i;
         }
         return -1;
     }
@@ -1642,27 +1648,27 @@ public class THMStashMover extends Module {
         reservedInventorySlots.clear();
         if (mc.player == null) return;
 
-        for (int i = 0; i < Math.min(PLAYER_MENU_SLOTS, mc.player.getInventory().size()); i++) {
-            if (!mc.player.getInventory().getStack(i).isEmpty()) reservedInventorySlots.add(i);
+        for (int i = 0; i < Math.min(PLAYER_MENU_SLOTS, mc.player.getInventory().getContainerSize()); i++) {
+            if (!mc.player.getInventory().getItem(i).isEmpty()) reservedInventorySlots.add(i);
         }
     }
 
-    private void refreshActiveInventorySlots(ScreenHandler menu, int containerSlots) {
+    private void refreshActiveInventorySlots(AbstractContainerMenu menu, int containerSlots) {
         activeInventorySlots.removeIf(index -> {
-            ItemStack stack = index < mc.player.getInventory().size() ? mc.player.getInventory().getStack(index) : ItemStack.EMPTY;
+            ItemStack stack = index < mc.player.getInventory().getContainerSize() ? mc.player.getInventory().getItem(index) : ItemStack.EMPTY;
             return stack.isEmpty();
         });
 
         for (int i = containerSlots; i < menu.slots.size(); i++) {
             Slot slot = menu.slots.get(i);
-            int index = slot.getIndex();
-            if (index >= 0 && index < PLAYER_MENU_SLOTS && !reservedInventorySlots.contains(index) && isFullShulker(slot.getStack())) {
+            int index = slot.getContainerSlot();
+            if (index >= 0 && index < PLAYER_MENU_SLOTS && !reservedInventorySlots.contains(index) && isFullShulker(slot.getItem())) {
                 activeInventorySlots.add(index);
             }
         }
     }
 
-    private int activeInventoryCount(ScreenHandler menu, int containerSlots) {
+    private int activeInventoryCount(AbstractContainerMenu menu, int containerSlots) {
         refreshActiveInventorySlots(menu, containerSlots);
         return activeInventorySlots.size();
     }
@@ -1671,50 +1677,50 @@ public class THMStashMover extends Module {
         return activeInventorySlots.size() + activeBankSlots.size();
     }
 
-    private boolean hasOpenManagedInventorySlot(ScreenHandler menu, int containerSlots) {
+    private boolean hasOpenManagedInventorySlot(AbstractContainerMenu menu, int containerSlots) {
         for (int i = containerSlots; i < menu.slots.size(); i++) {
             Slot slot = menu.slots.get(i);
-            int index = slot.getIndex();
-            if (index >= 0 && index < PLAYER_MENU_SLOTS && !reservedInventorySlots.contains(index) && slot.getStack().isEmpty()) return true;
+            int index = slot.getContainerSlot();
+            if (index >= 0 && index < PLAYER_MENU_SLOTS && !reservedInventorySlots.contains(index) && slot.getItem().isEmpty()) return true;
         }
         return false;
     }
 
-    private int findActivePlayerMenuSlot(ScreenHandler menu, int containerSlots) {
+    private int findActivePlayerMenuSlot(AbstractContainerMenu menu, int containerSlots) {
         for (int i = containerSlots; i < menu.slots.size(); i++) {
             Slot slot = menu.slots.get(i);
-            int index = slot.getIndex();
-            if (activeInventorySlots.contains(index) && isFullShulker(slot.getStack())) return i;
+            int index = slot.getContainerSlot();
+            if (activeInventorySlots.contains(index) && isFullShulker(slot.getItem())) return i;
         }
         return -1;
     }
 
-    private void snapshotBankReservedSlots(ScreenHandler menu, int bankSlots) {
+    private void snapshotBankReservedSlots(AbstractContainerMenu menu, int bankSlots) {
         reservedBankSlots.clear();
         bankSlotCount = bankSlots;
         for (int i = 0; i < bankSlots; i++) {
-            if (!menu.slots.get(i).getStack().isEmpty()) reservedBankSlots.add(i);
+            if (!menu.slots.get(i).getItem().isEmpty()) reservedBankSlots.add(i);
         }
         bankSnapshotTaken = true;
     }
 
-    private void refreshActiveBankSlots(ScreenHandler menu, int bankSlots) {
-        activeBankSlots.removeIf(slot -> slot >= bankSlots || menu.slots.get(slot).getStack().isEmpty());
+    private void refreshActiveBankSlots(AbstractContainerMenu menu, int bankSlots) {
+        activeBankSlots.removeIf(slot -> slot >= bankSlots || menu.slots.get(slot).getItem().isEmpty());
         for (int i = 0; i < bankSlots; i++) {
-            if (!reservedBankSlots.contains(i) && isFullShulker(menu.slots.get(i).getStack())) activeBankSlots.add(i);
+            if (!reservedBankSlots.contains(i) && isFullShulker(menu.slots.get(i).getItem())) activeBankSlots.add(i);
         }
     }
 
-    private int findEmptyBankSlot(ScreenHandler menu, int bankSlots) {
+    private int findEmptyBankSlot(AbstractContainerMenu menu, int bankSlots) {
         for (int i = 0; i < bankSlots; i++) {
-            if (!reservedBankSlots.contains(i) && menu.slots.get(i).getStack().isEmpty()) return i;
+            if (!reservedBankSlots.contains(i) && menu.slots.get(i).getItem().isEmpty()) return i;
         }
         return -1;
     }
 
-    private int findActiveBankSlot(ScreenHandler menu, int bankSlots) {
+    private int findActiveBankSlot(AbstractContainerMenu menu, int bankSlots) {
         for (int i = 0; i < bankSlots; i++) {
-            if (activeBankSlots.contains(i) && isFullShulker(menu.slots.get(i).getStack())) return i;
+            if (activeBankSlots.contains(i) && isFullShulker(menu.slots.get(i).getItem())) return i;
         }
         return -1;
     }
@@ -1723,8 +1729,8 @@ public class THMStashMover extends Module {
         if (mc.player == null) return 0;
 
         int available = 0;
-        for (int i = 0; i < Math.min(PLAYER_MENU_SLOTS, mc.player.getInventory().size()); i++) {
-            if (!reservedInventorySlots.contains(i) && mc.player.getInventory().getStack(i).isEmpty()) available++;
+        for (int i = 0; i < Math.min(PLAYER_MENU_SLOTS, mc.player.getInventory().getContainerSize()); i++) {
+            if (!reservedInventorySlots.contains(i) && mc.player.getInventory().getItem(i).isEmpty()) available++;
         }
         return available;
     }
@@ -1769,7 +1775,7 @@ public class THMStashMover extends Module {
     }
 
     private double horizontalDistanceToApproachSqr(BlockPos pos) {
-        Vec3d center = pos.toCenterPos();
+        Vec3 center = pos.getCenter();
         double x = mc.player.getX() - center.x;
         double z = mc.player.getZ() - center.z;
         return x * x + z * z;
@@ -1796,7 +1802,7 @@ public class THMStashMover extends Module {
     }
 
     private void closeScreen() {
-        if (mc.player != null && mc.currentScreen != null) mc.player.closeHandledScreen();
+        if (mc.player != null && mc.screen != null) mc.player.closeContainer();
     }
 
     private List<String> resolvedHomes() {
@@ -1811,7 +1817,7 @@ public class THMStashMover extends Module {
     }
 
     private BlockPos enderChestApproachForHome(String home) {
-        return enderChestApproachesByHome.getOrDefault(normalizeHome(home), BlockPos.ORIGIN);
+        return enderChestApproachesByHome.getOrDefault(normalizeHome(home), BlockPos.ZERO);
     }
 
     private void setEnderChestApproachForHome(String home, BlockPos pos) {
@@ -1926,26 +1932,26 @@ public class THMStashMover extends Module {
         diagnostics.purpose = purpose.name().toLowerCase(Locale.ROOT);
         diagnostics.targetOrdinal = targetOrdinal();
 
-        if (mc.world != null && target != null) {
-            BlockState targetState = mc.world.getBlockState(target);
-            BlockEntity blockEntity = mc.world.getBlockEntity(target);
-            diagnostics.block = registryId(Registries.BLOCK.getId(targetState.getBlock()));
+        if (mc.level != null && target != null) {
+            BlockState targetState = mc.level.getBlockState(target);
+            BlockEntity blockEntity = mc.level.getBlockEntity(target);
+            diagnostics.block = registryId(BuiltInRegistries.BLOCK.getKey(targetState.getBlock()));
             diagnostics.blockEntity = blockEntity == null
                 ? "none"
-                : registryId(Registries.BLOCK_ENTITY_TYPE.getId(blockEntity.getType()));
-            diagnostics.blockAbove = registryId(Registries.BLOCK.getId(mc.world.getBlockState(target.up()).getBlock()));
+                : registryId(BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(blockEntity.getType()));
+            diagnostics.blockAbove = registryId(BuiltInRegistries.BLOCK.getKey(mc.level.getBlockState(target.above()).getBlock()));
             diagnostics.chunkReady = Boolean.toString(isChunkLoaded(target));
         }
 
         if (mc.player != null && target != null) {
-            diagnostics.distance = String.format(Locale.ROOT, "%.1f", mc.player.getEntityPos().distanceTo(Vec3d.ofCenter(target)));
-            diagnostics.interactionRange = String.format(Locale.ROOT, "%.1f", mc.player.getBlockInteractionRange());
-            double range = mc.player.getBlockInteractionRange();
-            diagnostics.inRange = Boolean.toString(mc.player.squaredDistanceTo(Vec3d.ofCenter(target)) <= range * range);
-            diagnostics.heldItem = mc.player.getMainHandStack().isEmpty()
+            diagnostics.distance = String.format(Locale.ROOT, "%.1f", mc.player.position().distanceTo(Vec3.atCenterOf(target)));
+            diagnostics.interactionRange = String.format(Locale.ROOT, "%.1f", mc.player.blockInteractionRange());
+            double range = mc.player.blockInteractionRange();
+            diagnostics.inRange = Boolean.toString(mc.player.distanceToSqr(Vec3.atCenterOf(target)) <= range * range);
+            diagnostics.heldItem = mc.player.getMainHandItem().isEmpty()
                 ? "minecraft:air"
-                : registryId(Registries.ITEM.getId(mc.player.getMainHandStack().getItem()));
-            diagnostics.sneaking = Boolean.toString(mc.player.isSneaking());
+                : registryId(BuiltInRegistries.ITEM.getKey(mc.player.getMainHandItem().getItem()));
+            diagnostics.sneaking = Boolean.toString(mc.player.isShiftKeyDown());
             diagnostics.pingMs = playerPingInfo();
         }
 
@@ -1967,7 +1973,7 @@ public class THMStashMover extends Module {
             + " reason=" + quoteLogValue(sanitizeLogReason(reason)));
     }
 
-    private void recordOpenRecovery(HandledScreen<?> screen) {
+    private void recordOpenRecovery(AbstractContainerScreen<?> screen) {
         OpenAttemptDiagnostics diagnostics = openAttemptDiagnostics;
         if (activeOpenTraceId > 0 && diagnostics != null) {
             diagnostics.traceId = activeOpenTraceId;
@@ -1994,8 +2000,8 @@ public class THMStashMover extends Module {
     private String openAttemptDetails(OpenAttemptDiagnostics diagnostics) {
         String interaction = diagnostics.interactionDispatched ? diagnostics.interactionResult : "not_dispatched";
         String consumes = diagnostics.interactionDispatched ? Boolean.toString(diagnostics.consumesAction) : "unknown";
-        String currentScreen = screenType(mc.currentScreen);
-        String currentMenu = screenMenuType(mc.currentScreen);
+        String currentScreen = screenType(mc.screen);
+        String currentMenu = screenMenuType(mc.screen);
 
         return "trace=" + diagnostics.traceId
             + " attempt_id=" + diagnostics.attemptId
@@ -2031,18 +2037,18 @@ public class THMStashMover extends Module {
     }
 
     private String playerPingInfo() {
-        if (mc.player == null || mc.getNetworkHandler() == null) return "unknown";
-        PlayerListEntry info = mc.getNetworkHandler().getPlayerListEntry(mc.player.getUuid());
+        if (mc.player == null || mc.getConnection() == null) return "unknown";
+        PlayerInfo info = mc.getConnection().getPlayerInfo(mc.player.getUUID());
         return info == null ? "unknown" : Integer.toString(Math.max(0, info.getLatency()));
     }
 
-    private String interactionResultName(ActionResult result) {
+    private String interactionResultName(InteractionResult result) {
         if (result == null) return "null";
-        if (result == ActionResult.SUCCESS) return "success";
-        if (result == ActionResult.SUCCESS_SERVER) return "success_server";
-        if (result == ActionResult.CONSUME) return "consume";
-        if (result == ActionResult.FAIL) return "fail";
-        if (result == ActionResult.PASS) return "pass";
+        if (result == InteractionResult.SUCCESS) return "success";
+        if (result == InteractionResult.SUCCESS_SERVER) return "success_server";
+        if (result == InteractionResult.CONSUME) return "consume";
+        if (result == InteractionResult.FAIL) return "fail";
+        if (result == InteractionResult.PASS) return "pass";
         return "other";
     }
 
@@ -2053,8 +2059,8 @@ public class THMStashMover extends Module {
     }
 
     private String screenMenuType(Screen screen) {
-        if (!(screen instanceof HandledScreen<?> containerScreen)) return "none";
-        return registryId(Registries.SCREEN_HANDLER.getId(containerScreen.getScreenHandler().getType()));
+        if (!(screen instanceof AbstractContainerScreen<?> containerScreen)) return "none";
+        return registryId(BuiltInRegistries.MENU.getKey(containerScreen.getMenu().getType()));
     }
 
     private String registryId(Identifier id) {
@@ -2115,7 +2121,7 @@ public class THMStashMover extends Module {
     private String targetDistanceInfo(BlockPos target) {
         if (target == null || mc.player == null) return "";
 
-        double distance = mc.player.getEntityPos().distanceTo(Vec3d.ofCenter(target));
+        double distance = mc.player.position().distanceTo(Vec3.atCenterOf(target));
         return String.format(Locale.ROOT, "%.1f", distance);
     }
 
@@ -2223,21 +2229,21 @@ public class THMStashMover extends Module {
 
     private String mainServerGateReason() {
         if (mc.player == null) return "player unavailable";
-        if (mc.world == null) return "world unavailable";
+        if (mc.level == null) return "world unavailable";
 
         if (hwyMonitorReconnectHandling.get()) {
             ServerStatusHandler.ServerState serverState = ServerStatusHandler.getInstance().getCommittedState();
             if (serverState != ServerStatusHandler.ServerState.MAIN_SERVER) return "server state is " + serverState.name();
         }
 
-        ClientPlayNetworkHandler connection = mc.getNetworkHandler();
+        ClientPacketListener connection = mc.getConnection();
         if (connection == null) return "server connection unavailable";
 
-        PlayerListEntry self = connection.getPlayerListEntry(mc.player.getUuid());
+        PlayerInfo self = connection.getPlayerInfo(mc.player.getUUID());
         if (self == null) return "player info unavailable";
 
-        GameMode gameType = self.getGameMode();
-        if (gameType != GameMode.SURVIVAL) return "game mode is " + String.valueOf(gameType);
+        GameType gameType = self.getGameMode();
+        if (gameType != GameType.SURVIVAL) return "game mode is " + String.valueOf(gameType);
         return null;
     }
 
@@ -2312,15 +2318,15 @@ public class THMStashMover extends Module {
     }
 
     private boolean isTravelWorldReady() {
-        if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null) return false;
-        return isChunkLoaded(mc.player.getBlockPos()) && (!isConfiguredPos(travelApproach) || isChunkLoaded(travelApproach));
+        if (mc.player == null || mc.level == null || mc.getConnection() == null) return false;
+        return isChunkLoaded(mc.player.blockPosition()) && (!isConfiguredPos(travelApproach) || isChunkLoaded(travelApproach));
     }
 
     private boolean isChunkLoaded(BlockPos pos) {
-        if (pos == null || mc.world == null) return false;
+        if (pos == null || mc.level == null) return false;
 
         try {
-            return mc.world.getChunkManager().getChunk(pos.getX() >> 4, pos.getZ() >> 4, ChunkStatus.FULL, false) != null;
+            return mc.level.getChunkSource().getChunk(pos.getX() >> 4, pos.getZ() >> 4, ChunkStatus.FULL, false) != null;
         } catch (Throwable ignored) {
             return false;
         }
@@ -2458,7 +2464,7 @@ public class THMStashMover extends Module {
     }
 
     private boolean isConfiguredPos(BlockPos pos) {
-        return pos != null && !pos.equals(BlockPos.ORIGIN);
+        return pos != null && !pos.equals(BlockPos.ZERO);
     }
 
     private void ensureDefaultPair() {
@@ -2540,7 +2546,7 @@ public class THMStashMover extends Module {
 
     private void sendMsg(String msg) {
         if (mc.player != null) {
-            mc.player.sendMessage(Text.literal("\u00a76[THMStashMover]\u00a7r " + msg), false);
+            mc.player.displayClientMessage(Component.literal("\u00a76[THMStashMover]\u00a7r " + msg), false);
         }
     }
 
@@ -2557,7 +2563,7 @@ public class THMStashMover extends Module {
         private boolean clicking;
 
         private PairBlockPosEdit(BlockPos value, boolean clickButton, boolean setHereButton, Consumer<BlockPos> onChanged) {
-            this.value = value == null ? BlockPos.ORIGIN : value;
+            this.value = value == null ? BlockPos.ZERO : value;
             this.clickButton = clickButton;
             this.setHereButton = setHereButton;
             this.onChanged = onChanged;
@@ -2578,7 +2584,7 @@ public class THMStashMover extends Module {
                 WButton here = add(theme.button("Set Here")).widget();
                 here.action = () -> {
                     if (mc.player == null) return;
-                    updateValue(mc.player.getBlockPos());
+                    updateValue(mc.player.blockPosition());
                     clear();
                     init();
                 };
@@ -2615,7 +2621,7 @@ public class THMStashMover extends Module {
 
             clicking = true;
             MeteorClient.EVENT_BUS.subscribe(this);
-            previousScreen = mc.currentScreen;
+            previousScreen = mc.screen;
             mc.setScreen(null);
         }
 
@@ -2630,7 +2636,7 @@ public class THMStashMover extends Module {
         }
 
         private BlockPos parseTextBox(WTextBox textBox, int first, int second, Axis axis) {
-            if (textBox.get().isEmpty()) return BlockPos.ORIGIN;
+            if (textBox.get().isEmpty()) return BlockPos.ZERO;
 
             try {
                 int parsed = Integer.parseInt(textBox.get());
@@ -2657,7 +2663,7 @@ public class THMStashMover extends Module {
         }
 
         private void updateValue(BlockPos value) {
-            BlockPos newValue = value == null ? BlockPos.ORIGIN : value;
+            BlockPos newValue = value == null ? BlockPos.ZERO : value;
             if (newValue.equals(this.value)) return;
 
             this.value = newValue;
@@ -2758,20 +2764,20 @@ public class THMStashMover extends Module {
         String name;
         boolean active = true;
         String inputHome = "stash-input";
-        BlockPos inputCorner1 = BlockPos.ORIGIN;
-        BlockPos inputCorner2 = BlockPos.ORIGIN;
-        BlockPos inputApproachPos = BlockPos.ORIGIN;
+        BlockPos inputCorner1 = BlockPos.ZERO;
+        BlockPos inputCorner2 = BlockPos.ZERO;
+        BlockPos inputApproachPos = BlockPos.ZERO;
         String depositHome = "stash-deposit";
-        BlockPos depositCorner1 = BlockPos.ORIGIN;
-        BlockPos depositCorner2 = BlockPos.ORIGIN;
-        BlockPos depositApproachPos = BlockPos.ORIGIN;
+        BlockPos depositCorner1 = BlockPos.ZERO;
+        BlockPos depositCorner2 = BlockPos.ZERO;
+        BlockPos depositApproachPos = BlockPos.ZERO;
 
         KitPair(String name) {
             this.name = name;
         }
 
-        NbtCompound toTag() {
-            NbtCompound tag = new NbtCompound();
+        CompoundTag toTag() {
+            CompoundTag tag = new CompoundTag();
             tag.putString("name", name);
             tag.putBoolean("active", active);
             tag.putString("inputHome", inputHome);
@@ -2785,17 +2791,17 @@ public class THMStashMover extends Module {
             return tag;
         }
 
-        static KitPair fromTag(NbtCompound tag) {
-            KitPair pair = new KitPair(tag.getString("name", "default"));
-            pair.active = tag.getBoolean("active", true);
-            pair.inputHome = tag.getString("inputHome", "stash-input");
-            pair.inputCorner1 = BlockPos.fromLong(tag.getLong("inputCorner1", BlockPos.ORIGIN.asLong()));
-            pair.inputCorner2 = BlockPos.fromLong(tag.getLong("inputCorner2", BlockPos.ORIGIN.asLong()));
-            pair.inputApproachPos = BlockPos.fromLong(tag.getLong("inputApproachPos", BlockPos.ORIGIN.asLong()));
-            pair.depositHome = tag.getString("depositHome", "stash-deposit");
-            pair.depositCorner1 = BlockPos.fromLong(tag.getLong("depositCorner1", BlockPos.ORIGIN.asLong()));
-            pair.depositCorner2 = BlockPos.fromLong(tag.getLong("depositCorner2", BlockPos.ORIGIN.asLong()));
-            pair.depositApproachPos = BlockPos.fromLong(tag.getLong("depositApproachPos", BlockPos.ORIGIN.asLong()));
+        static KitPair fromTag(CompoundTag tag) {
+            KitPair pair = new KitPair(tag.getStringOr("name", "default"));
+            pair.active = tag.getBooleanOr("active", true);
+            pair.inputHome = tag.getStringOr("inputHome", "stash-input");
+            pair.inputCorner1 = BlockPos.of(tag.getLongOr("inputCorner1", BlockPos.ZERO.asLong()));
+            pair.inputCorner2 = BlockPos.of(tag.getLongOr("inputCorner2", BlockPos.ZERO.asLong()));
+            pair.inputApproachPos = BlockPos.of(tag.getLongOr("inputApproachPos", BlockPos.ZERO.asLong()));
+            pair.depositHome = tag.getStringOr("depositHome", "stash-deposit");
+            pair.depositCorner1 = BlockPos.of(tag.getLongOr("depositCorner1", BlockPos.ZERO.asLong()));
+            pair.depositCorner2 = BlockPos.of(tag.getLongOr("depositCorner2", BlockPos.ZERO.asLong()));
+            pair.depositApproachPos = BlockPos.of(tag.getLongOr("depositApproachPos", BlockPos.ZERO.asLong()));
             return pair;
         }
 

@@ -14,16 +14,16 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.BlockItem;
-import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
+import net.minecraft.util.Mth;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 import xyz.thm.addon.THMAddon;
 
 import java.util.List;
@@ -94,19 +94,19 @@ public class ScaffoldTHM extends Module {
 
     @EventHandler
     public void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
-        float f = MathHelper.sin(mc.player.getYaw() * 0.017453292f);
-        float g = MathHelper.cos(mc.player.getYaw() * 0.017453292f);
+        float f = Mth.sin(mc.player.getYRot() * 0.017453292f);
+        float g = Mth.cos(mc.player.getYRot() * 0.017453292f);
 
-        for (int i = 0; i <= (mc.player.getVelocity().x == 0.0 && mc.player.getVelocity().z == 0.0 ? 0 : ext.get()); i++) {
+        for (int i = 0; i <= (mc.player.getDeltaMovement().x == 0.0 && mc.player.getDeltaMovement().z == 0.0 ? 0 : ext.get()); i++) {
             // Loop body
-            Vec3d pos = mc.player.getEntityPos().add(-f * i, -0.5, g * i);
+            Vec3 pos = mc.player.position().add(-f * i, -0.5, g * i);
             if (keepY.get()) ((IVec3d) pos).meteor$setY(height.get() - 1.0);
 
-            BlockPos bPos = BlockPos.ofFloored(pos);
+            BlockPos bPos = BlockPos.containing(pos);
 
-            if (!mc.world.getWorldBorder().contains(bPos) || !mc.world.getBlockState(bPos).isReplaceable()) {
+            if (!mc.level.getWorldBorder().isWithinBounds(bPos) || !mc.level.getBlockState(bPos).canBeReplaced()) {
                 worked = false;
                 continue;
             }
@@ -116,9 +116,9 @@ public class ScaffoldTHM extends Module {
             // Find slot with a block
             FindItemResult item;
             if (listMode.get() == ListMode.Whitelist) {
-                item = InvUtils.findInHotbar(itemStack -> itemStack.getItem() instanceof BlockItem && whitelist.get().contains(Block.getBlockFromItem(itemStack.getItem())));
+                item = InvUtils.findInHotbar(itemStack -> itemStack.getItem() instanceof BlockItem && whitelist.get().contains(Block.byItem(itemStack.getItem())));
             } else {
-                item = InvUtils.findInHotbar(itemStack -> itemStack.getItem() instanceof BlockItem && !blacklist.get().contains(Block.getBlockFromItem(itemStack.getItem())));
+                item = InvUtils.findInHotbar(itemStack -> itemStack.getItem() instanceof BlockItem && !blacklist.get().contains(Block.byItem(itemStack.getItem())));
             }
             if (!item.found()) {
                 return;
@@ -126,7 +126,7 @@ public class ScaffoldTHM extends Module {
                 InvUtils.swap(item.slot(), true);
             }
 
-            mc.player.networkHandler.sendPacket(new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, new BlockHitResult(pos, Direction.getFacing(pos).getOpposite(), bPos, true), 0));
+            mc.player.connection.send(new ServerboundUseItemOnPacket(InteractionHand.MAIN_HAND, new BlockHitResult(pos, Direction.getApproximateNearest(pos).getOpposite(), bPos, true), 0));
             if (packetPlaceOnce.get()) PacketPlaceTracker.markSent(bPos, PacketPlaceTracker.DEFAULT_RESEND_TICKS);
 
             InvUtils.swapBack();

@@ -29,18 +29,18 @@ import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.ShapeContext;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-import net.minecraft.world.RaycastContext;
+import net.minecraft.core.BlockPos;
+import net.minecraft.util.Mth;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.CollisionContext;
 import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.interfaces.LogoutSpotsPlayers;
@@ -257,7 +257,7 @@ public class AutoTrapPlus extends Module {
     );
 
     private final List<BlockPos> placePositions = new ArrayList<>();
-    private PlayerEntity target;
+    private Player target;
     private boolean placedAny;
     private int timer;
     private BlockPos gapPos;
@@ -314,7 +314,7 @@ public class AutoTrapPlus extends Module {
         }
 
         // Find blocks in hotbar
-        FindItemResult block = InvUtils.findInHotbar(itemStack -> blocks.get().contains(Block.getBlockFromItem(itemStack.getItem())));
+        FindItemResult block = InvUtils.findInHotbar(itemStack -> blocks.get().contains(Block.byItem(itemStack.getItem())));
         if (!block.found()) return;
 
         if (logoutTrap.get() && runLogoutTrapTick(block)) {
@@ -326,7 +326,7 @@ public class AutoTrapPlus extends Module {
         }
 
         // Find targets
-        List<PlayerEntity> targets = getTargets();
+        List<Player> targets = getTargets();
         if (targets.isEmpty()) {
             target = null;
             placePositions.clear();
@@ -337,7 +337,7 @@ public class AutoTrapPlus extends Module {
         int placedCount = 0;
         LinkedHashSet<BlockPos> allPositions = new LinkedHashSet<>();
 
-        for (PlayerEntity t : targets) {
+        for (Player t : targets) {
             target = t;
 
             // Compute gap position (feet-level) to skip and to avoid filling with supports
@@ -345,8 +345,8 @@ public class AutoTrapPlus extends Module {
             if (gapSide.get() != GapSide.None) {
                 int feetY = (int) Math.floor(t.getBoundingBox().minY);
                 int gapY = heightMode.get() == HeightMode.Eye ? (int) Math.floor(t.getEyeY()) : feetY;
-                BlockPos center = BlockPos.ofFloored(t.getX(), gapY, t.getZ());
-                gapPos = center.add(getGapOffsetX(t), 0, getGapOffsetZ(t));
+                BlockPos center = BlockPos.containing(t.getX(), gapY, t.getZ());
+                gapPos = center.offset(getGapOffsetX(t), 0, getGapOffsetZ(t));
             }
 
             // Compute trap positions for this target
@@ -380,7 +380,7 @@ public class AutoTrapPlus extends Module {
         if (logoutTrapMode.get() == LogoutTrapMode.Auto) {
             if (!pendingLogoutSpots.isEmpty()) spotsToProcess.addAll(pendingLogoutSpots);
         } else {
-            if (logoutTrapKeybind.get().isPressed() && mc.currentScreen == null) {
+            if (logoutTrapKeybind.get().isPressed() && mc.screen == null) {
                 if (!logoutManualPressed) {
                     logoutManualPressed = true;
                     if (!pendingLogoutSpots.isEmpty()) spotsToProcess.addAll(pendingLogoutSpots);
@@ -446,13 +446,13 @@ public class AutoTrapPlus extends Module {
         if (!isLogoutSpotsModuleActive()) return;
 
         Set<UUID> aliveNow = new HashSet<>();
-        List<PlayerEntity> currentPlayers = getTargets();
-        for (PlayerEntity player : currentPlayers) {
-            aliveNow.add(player.getUuid());
-            trackedPlayers.put(player.getUuid(), new LogoutSpotData(
-                player.getUuid(),
+        List<Player> currentPlayers = getTargets();
+        for (Player player : currentPlayers) {
+            aliveNow.add(player.getUUID());
+            trackedPlayers.put(player.getUUID(), new LogoutSpotData(
+                player.getUUID(),
                 EntityUtils.getName(player),
-                BlockPos.ofFloored(player.getX(), Math.floor(player.getBoundingBox().minY), player.getZ()),
+                BlockPos.containing(player.getX(), Math.floor(player.getBoundingBox().minY), player.getZ()),
                 player.getEyeY()
             ));
         }
@@ -490,7 +490,7 @@ public class AutoTrapPlus extends Module {
                 queueLogoutSpot(new LogoutSpotData(
                     entry.thm$getUuid(),
                     name,
-                    BlockPos.ofFloored(centerX, feetY, centerZ),
+                    BlockPos.containing(centerX, feetY, centerZ),
                     eyeY
                 ));
             }
@@ -516,20 +516,20 @@ public class AutoTrapPlus extends Module {
         }
     }
 
-    private List<PlayerEntity> getTargets() {
+    private List<Player> getTargets() {
         List<Entity> entities = new ArrayList<>();
         TargetUtils.getList(entities, entity -> {
-            if (!(entity instanceof PlayerEntity player) || entity == mc.player) return false;
+            if (!(entity instanceof Player player) || entity == mc.player) return false;
             if (player.isSpectator() || !player.isAlive()) return false;
             if (!PlayerUtils.isWithin(entity, targetRange.get())) return false;
             if (!Friends.get().shouldAttack(player)) return false;
             if (entity instanceof FakePlayerEntity fakePlayer) return !fakePlayer.noHit;
-            return EntityUtils.getGameMode(player) == GameMode.SURVIVAL;
+            return EntityUtils.getGameMode(player) == GameType.SURVIVAL;
         }, priority.get(), Integer.MAX_VALUE);
 
-        List<PlayerEntity> players = new ArrayList<>(entities.size());
+        List<Player> players = new ArrayList<>(entities.size());
         for (Entity entity : entities) {
-            if (entity instanceof PlayerEntity p) players.add(p);
+            if (entity instanceof Player p) players.add(p);
         }
         return players;
     }
@@ -553,30 +553,30 @@ public class AutoTrapPlus extends Module {
             }
             return false;
         }
-        if (!mc.world.getBlockState(placePos).isReplaceable()) return false;
+        if (!mc.level.getBlockState(placePos).canBeReplaced()) return false;
 
         // Build candidate directions with outward first, then others
-        net.minecraft.util.math.Direction outward = net.minecraft.util.math.Direction.NORTH;
+        net.minecraft.core.Direction outward = net.minecraft.core.Direction.NORTH;
         if (target != null) {
-            BlockPos center = BlockPos.ofFloored(target.getX(), Math.floor(target.getBoundingBox().minY), target.getZ());
+            BlockPos center = BlockPos.containing(target.getX(), Math.floor(target.getBoundingBox().minY), target.getZ());
             int dx = placePos.getX() - center.getX();
             int dz = placePos.getZ() - center.getZ();
-            if (Math.abs(dx) >= Math.abs(dz)) outward = dx > 0 ? net.minecraft.util.math.Direction.EAST : net.minecraft.util.math.Direction.WEST;
-            else outward = dz > 0 ? net.minecraft.util.math.Direction.SOUTH : net.minecraft.util.math.Direction.NORTH;
+            if (Math.abs(dx) >= Math.abs(dz)) outward = dx > 0 ? net.minecraft.core.Direction.EAST : net.minecraft.core.Direction.WEST;
+            else outward = dz > 0 ? net.minecraft.core.Direction.SOUTH : net.minecraft.core.Direction.NORTH;
         }
 
-        net.minecraft.util.math.Direction[] dirs = new net.minecraft.util.math.Direction[] {
+        net.minecraft.core.Direction[] dirs = new net.minecraft.core.Direction[] {
             outward,
-            outward.rotateYClockwise(),
-            outward.rotateYCounterclockwise(),
+            outward.getClockWise(),
+            outward.getCounterClockWise(),
             outward.getOpposite()
         };
 
         // Optimize supports: place exactly one side support adjacent to target, preferring outward first
-        for (net.minecraft.util.math.Direction d : dirs) {
-            BlockPos s = placePos.offset(d);
+        for (net.minecraft.core.Direction d : dirs) {
+            BlockPos s = placePos.relative(d);
             // don't block the feet gap column
-            if (gapPos != null && s.down().equals(gapPos)) continue;
+            if (gapPos != null && s.below().equals(gapPos)) continue;
             if (isBlockedByOtherEntity(s, target)) continue;
             if (BlockUtils.getPlaceSide(s) == null) continue;
             if (placeBlock(s, block)) {
@@ -604,16 +604,16 @@ public class AutoTrapPlus extends Module {
 
     // Removed old helper methods for broad support search to keep logic minimal
 
-    private void fillPlaceArray(PlayerEntity t) {
+    private void fillPlaceArray(Player t) {
         placePositions.clear();
 
         double epsilon = 1e-5;
-        Box box = t.getBoundingBox();
+        AABB box = t.getBoundingBox();
         List<BlockPos> corners = new ArrayList<>();
-        corners.add(BlockPos.ofFloored(box.minX, box.minY, box.minZ));
-        corners.add(BlockPos.ofFloored(box.minX, box.minY, box.maxZ - epsilon));
-        corners.add(BlockPos.ofFloored(box.maxX - epsilon, box.minY, box.minZ));
-        corners.add(BlockPos.ofFloored(box.maxX - epsilon, box.minY, box.maxZ - epsilon));
+        corners.add(BlockPos.containing(box.minX, box.minY, box.minZ));
+        corners.add(BlockPos.containing(box.minX, box.minY, box.maxZ - epsilon));
+        corners.add(BlockPos.containing(box.maxX - epsilon, box.minY, box.minZ));
+        corners.add(BlockPos.containing(box.maxX - epsilon, box.minY, box.maxZ - epsilon));
 
         Set<BlockPos> overlappedPositions = new LinkedHashSet<>(corners);
         for (BlockPos base : overlappedPositions) {
@@ -621,43 +621,43 @@ public class AutoTrapPlus extends Module {
                 int eyeY = (int) Math.floor(t.getEyeY());
                 BlockPos eyeBase = new BlockPos(base.getX(), eyeY, base.getZ());
                 // Eye-height ring
-                add(eyeBase.add(1, 0, 0));
-                add(eyeBase.add(-1, 0, 0));
-                add(eyeBase.add(0, 0, -1));
-                add(eyeBase.add(0, 0, 1));
+                add(eyeBase.offset(1, 0, 0));
+                add(eyeBase.offset(-1, 0, 0));
+                add(eyeBase.offset(0, 0, -1));
+                add(eyeBase.offset(0, 0, 1));
                 // Top block above eye height to prevent jumping
-                add(eyeBase.add(0, 1, 0));
+                add(eyeBase.offset(0, 1, 0));
                 continue;
             }
 
             switch (topPlacement.get()) {
                 case Full -> {
-                    add(base.add(0, 2, 0));
-                    add(base.add(1, 1, 0));
-                    add(base.add(-1, 1, 0));
-                    add(base.add(0, 1, 1));
-                    add(base.add(0, 1, -1));
+                    add(base.offset(0, 2, 0));
+                    add(base.offset(1, 1, 0));
+                    add(base.offset(-1, 1, 0));
+                    add(base.offset(0, 1, 1));
+                    add(base.offset(0, 1, -1));
                 }
                 case Face -> {
-                    add(base.add(1, 1, 0));
-                    add(base.add(-1, 1, 0));
-                    add(base.add(0, 1, 1));
-                    add(base.add(0, 1, -1));
+                    add(base.offset(1, 1, 0));
+                    add(base.offset(-1, 1, 0));
+                    add(base.offset(0, 1, 1));
+                    add(base.offset(0, 1, -1));
                 }
-                case Top -> add(base.add(0, 2, 0));
+                case Top -> add(base.offset(0, 2, 0));
                 case None -> {}
             }
             // Bottom - always Full: platform below (y -1) and full ring at feet level (y 0)
-            add(base.add(0, -1, 0));
-            add(base.add(1, -1, 0));
-            add(base.add(-1, -1, 0));
-            add(base.add(0, -1, 1));
-            add(base.add(0, -1, -1));
+            add(base.offset(0, -1, 0));
+            add(base.offset(1, -1, 0));
+            add(base.offset(-1, -1, 0));
+            add(base.offset(0, -1, 1));
+            add(base.offset(0, -1, -1));
 
-            add(base.add(1, 0, 0));
-            add(base.add(-1, 0, 0));
-            add(base.add(0, 0, -1));
-            add(base.add(0, 0, 1));
+            add(base.offset(1, 0, 0));
+            add(base.offset(-1, 0, 0));
+            add(base.offset(0, 0, -1));
+            add(base.offset(0, 0, 1));
         }
 
         // Apply gap: remove only the feet-level block on the chosen side
@@ -687,39 +687,39 @@ public class AutoTrapPlus extends Module {
         if (heightMode.get() == HeightMode.Eye) {
             int eyeY = (int) Math.floor(spot.eyeY);
             BlockPos eyeBase = new BlockPos(base.getX(), eyeY, base.getZ());
-            add(eyeBase.add(1, 0, 0));
-            add(eyeBase.add(-1, 0, 0));
-            add(eyeBase.add(0, 0, -1));
-            add(eyeBase.add(0, 0, 1));
-            add(eyeBase.add(0, 1, 0));
+            add(eyeBase.offset(1, 0, 0));
+            add(eyeBase.offset(-1, 0, 0));
+            add(eyeBase.offset(0, 0, -1));
+            add(eyeBase.offset(0, 0, 1));
+            add(eyeBase.offset(0, 1, 0));
         } else {
             switch (topPlacement.get()) {
                 case Full -> {
-                    add(base.add(0, 2, 0));
-                    add(base.add(1, 1, 0));
-                    add(base.add(-1, 1, 0));
-                    add(base.add(0, 1, 1));
-                    add(base.add(0, 1, -1));
+                    add(base.offset(0, 2, 0));
+                    add(base.offset(1, 1, 0));
+                    add(base.offset(-1, 1, 0));
+                    add(base.offset(0, 1, 1));
+                    add(base.offset(0, 1, -1));
                 }
                 case Face -> {
-                    add(base.add(1, 1, 0));
-                    add(base.add(-1, 1, 0));
-                    add(base.add(0, 1, 1));
-                    add(base.add(0, 1, -1));
+                    add(base.offset(1, 1, 0));
+                    add(base.offset(-1, 1, 0));
+                    add(base.offset(0, 1, 1));
+                    add(base.offset(0, 1, -1));
                 }
-                case Top -> add(base.add(0, 2, 0));
+                case Top -> add(base.offset(0, 2, 0));
                 case None -> {}
             }
-            add(base.add(0, -1, 0));
-            add(base.add(1, -1, 0));
-            add(base.add(-1, -1, 0));
-            add(base.add(0, -1, 1));
-            add(base.add(0, -1, -1));
+            add(base.offset(0, -1, 0));
+            add(base.offset(1, -1, 0));
+            add(base.offset(-1, -1, 0));
+            add(base.offset(0, -1, 1));
+            add(base.offset(0, -1, -1));
 
-            add(base.add(1, 0, 0));
-            add(base.add(-1, 0, 0));
-            add(base.add(0, 0, -1));
-            add(base.add(0, 0, 1));
+            add(base.offset(1, 0, 0));
+            add(base.offset(-1, 0, 0));
+            add(base.offset(0, 0, -1));
+            add(base.offset(0, 0, 1));
         }
 
         boolean bottomToTop = buildOrder.get() == BuildOrder.BottomToTop;
@@ -736,50 +736,50 @@ public class AutoTrapPlus extends Module {
         if (heightMode.get() == HeightMode.Eye) {
             int eyeY = (int) Math.floor(spot.eyeY);
             BlockPos eyeBase = new BlockPos(base.getX(), eyeY, base.getZ());
-            return isTrapPosUnfilled(eyeBase.add(1, 0, 0))
-                || isTrapPosUnfilled(eyeBase.add(-1, 0, 0))
-                || isTrapPosUnfilled(eyeBase.add(0, 0, -1))
-                || isTrapPosUnfilled(eyeBase.add(0, 0, 1))
-                || isTrapPosUnfilled(eyeBase.add(0, 1, 0));
+            return isTrapPosUnfilled(eyeBase.offset(1, 0, 0))
+                || isTrapPosUnfilled(eyeBase.offset(-1, 0, 0))
+                || isTrapPosUnfilled(eyeBase.offset(0, 0, -1))
+                || isTrapPosUnfilled(eyeBase.offset(0, 0, 1))
+                || isTrapPosUnfilled(eyeBase.offset(0, 1, 0));
         }
 
         if (topPlacement.get() == TopMode.Full || topPlacement.get() == TopMode.Top) {
-            if (isTrapPosUnfilled(base.add(0, 2, 0))) return true;
+            if (isTrapPosUnfilled(base.offset(0, 2, 0))) return true;
         }
         if (topPlacement.get() == TopMode.Full || topPlacement.get() == TopMode.Face) {
-            if (isTrapPosUnfilled(base.add(1, 1, 0))) return true;
-            if (isTrapPosUnfilled(base.add(-1, 1, 0))) return true;
-            if (isTrapPosUnfilled(base.add(0, 1, 1))) return true;
-            if (isTrapPosUnfilled(base.add(0, 1, -1))) return true;
+            if (isTrapPosUnfilled(base.offset(1, 1, 0))) return true;
+            if (isTrapPosUnfilled(base.offset(-1, 1, 0))) return true;
+            if (isTrapPosUnfilled(base.offset(0, 1, 1))) return true;
+            if (isTrapPosUnfilled(base.offset(0, 1, -1))) return true;
         }
 
-        return isTrapPosUnfilled(base.add(0, -1, 0))
-            || isTrapPosUnfilled(base.add(1, -1, 0))
-            || isTrapPosUnfilled(base.add(-1, -1, 0))
-            || isTrapPosUnfilled(base.add(0, -1, 1))
-            || isTrapPosUnfilled(base.add(0, -1, -1))
-            || isTrapPosUnfilled(base.add(1, 0, 0))
-            || isTrapPosUnfilled(base.add(-1, 0, 0))
-            || isTrapPosUnfilled(base.add(0, 0, -1))
-            || isTrapPosUnfilled(base.add(0, 0, 1));
+        return isTrapPosUnfilled(base.offset(0, -1, 0))
+            || isTrapPosUnfilled(base.offset(1, -1, 0))
+            || isTrapPosUnfilled(base.offset(-1, -1, 0))
+            || isTrapPosUnfilled(base.offset(0, -1, 1))
+            || isTrapPosUnfilled(base.offset(0, -1, -1))
+            || isTrapPosUnfilled(base.offset(1, 0, 0))
+            || isTrapPosUnfilled(base.offset(-1, 0, 0))
+            || isTrapPosUnfilled(base.offset(0, 0, -1))
+            || isTrapPosUnfilled(base.offset(0, 0, 1));
     }
 
     private boolean isTrapPosUnfilled(BlockPos pos) {
-        return mc.world.getBlockState(pos).isReplaceable();
+        return mc.level.getBlockState(pos).canBeReplaced();
     }
 
     private boolean canQueue(BlockPos pos) {
         // Allow positions without neighbors; supports/air-place handle those later.
-        if (!mc.world.getBlockState(pos).isReplaceable()) return false;
+        if (!mc.level.getBlockState(pos).canBeReplaced()) return false;
         // Ignore entity collisions here so straddling targets still queue correctly.
-        if (!mc.world.canPlace(Blocks.OBSIDIAN.getDefaultState(), pos, ShapeContext.absent())) return false;
+        if (!mc.level.isUnobstructed(Blocks.OBSIDIAN.defaultBlockState(), pos, CollisionContext.empty())) return false;
         return !isBlockedByOtherEntity(pos, target);
     }
 
-    private boolean isBlockedByOtherEntity(BlockPos pos, PlayerEntity allowed) {
-        Box checkBox = Box.from(Vec3d.ofCenter(pos));
-        List<net.minecraft.entity.Entity> entities = mc.world.getOtherEntities(null, checkBox);
-        for (net.minecraft.entity.Entity entity : entities) {
+    private boolean isBlockedByOtherEntity(BlockPos pos, Player allowed) {
+        AABB checkBox = AABB.unitCubeFromLowerCorner(Vec3.atCenterOf(pos));
+        List<net.minecraft.world.entity.Entity> entities = mc.level.getEntities(null, checkBox);
+        for (net.minecraft.world.entity.Entity entity : entities) {
             if (entity == allowed) continue;
             if (!entity.isSpectator() && entity.isAlive()) return true;
         }
@@ -791,11 +791,11 @@ public class AutoTrapPlus extends Module {
     }
 
     private boolean isOutOfRange(BlockPos blockPos) {
-        Vec3d pos = blockPos.toCenterPos();
+        Vec3 pos = blockPos.getCenter();
         if (!PlayerUtils.isWithin(pos, placeRange.get())) return true;
 
-        RaycastContext raycastContext = new RaycastContext(mc.player.getEyePos(), pos, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, mc.player);
-        BlockHitResult result = mc.world.raycast(raycastContext);
+        ClipContext raycastContext = new ClipContext(mc.player.getEyePosition(), pos, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player);
+        BlockHitResult result = mc.level.clip(raycastContext);
         if (result == null || !result.getBlockPos().equals(blockPos)) return !PlayerUtils.isWithin(pos, placeWallsRange.get());
         return false;
     }
@@ -820,21 +820,21 @@ public class AutoTrapPlus extends Module {
             double progress = 1.0;
             if (fade.get()) {
                 long alive = System.currentTimeMillis() - time;
-                progress = 1.0 - MathHelper.clamp((double) alive / (fadeTime.get() * 1000), 0.0, 1.0);
+                progress = 1.0 - Mth.clamp((double) alive / (fadeTime.get() * 1000), 0.0, 1.0);
             }
 
             RenderUtilsTHM.renderBlockFaded(event, pos, sideColor.get(), lineColor.get(), shapeMode.get(), progress);
         });
     }
 
-    private int getGapOffsetX(PlayerEntity t) {
+    private int getGapOffsetX(Player t) {
         return switch (gapSide.get()) {
             case East -> 1;
             case West -> -1;
             case South, North -> 0;
             case TowardPlayer -> {
                 //? if >=1.21.9 {
-                Vec3d toPlayer = mc.player.getEntityPos().subtract(t.getEntityPos());
+                Vec3 toPlayer = mc.player.position().subtract(t.position());
                 //?} else
                 /*Vec3d toPlayer = mc.player.getPos().subtract(t.getPos());
                 */
@@ -845,14 +845,14 @@ public class AutoTrapPlus extends Module {
         };
     }
 
-    private int getGapOffsetZ(PlayerEntity t) {
+    private int getGapOffsetZ(Player t) {
         return switch (gapSide.get()) {
             case South -> 1;
             case North -> -1;
             case East, West -> 0;
             case TowardPlayer -> {
                 //? if >=1.21.9 {
-                Vec3d toPlayer = mc.player.getEntityPos().subtract(t.getEntityPos());
+                Vec3 toPlayer = mc.player.position().subtract(t.position());
                 //?} else
                 /*Vec3d toPlayer = mc.player.getPos().subtract(t.getPos());
                 */

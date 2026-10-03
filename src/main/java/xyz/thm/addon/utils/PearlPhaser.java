@@ -8,19 +8,23 @@ package xyz.thm.addon.utils;
 
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
-import net.minecraft.block.ScaffoldingBlock;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.decoration.ItemFrameEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.network.packet.c2s.play.*;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.network.protocol.game.ServerboundInteractPacket;
+import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
+import net.minecraft.network.protocol.game.ServerboundSwingPacket;
+import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.decoration.ItemFrame;
+import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.ScaffoldingBlock;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
 
 import java.util.function.BooleanSupplier;
@@ -62,7 +66,7 @@ public class PearlPhaser {
     /**
      * {@code extras = false} leaves out attack and self-fill. {@code visible} hides every setting this
      * creates when it returns false — Meteor has no per-group visibility, so it's ANDed into each one.
-     * {@code aimed} says whether the owner calls {@link #throwPearl(Vec3d)}; only then can a pitch be
+     * {@code aimed} says whether the owner calls {@link #throwPearl(Vec3)}; only then can a pitch be
      * solved, so only then is the auto-pitch toggle shown.
      */
     public PearlPhaser(Settings settings, boolean extras, BooleanSupplier visible, boolean aimed) {
@@ -154,7 +158,7 @@ public class PearlPhaser {
     /** True when a pearl is available and off cooldown. */
     public boolean canThrow() {
         return PlacementUtils.getEnderPearlSlot() != -1
-            && !mc.player.getItemCooldownManager().isCoolingDown(Items.ENDER_PEARL.getDefaultStack());
+            && !mc.player.getCooldowns().isOnCooldown(Items.ENDER_PEARL.getDefaultInstance());
     }
 
     /** Straight down into your own block, at the configured pitch. */
@@ -167,9 +171,9 @@ public class PearlPhaser {
      * solved from the real eye position, so any sub-block offset is accounted for and the {@code pitch}
      * setting doesn't apply.
      */
-    public void throwPearl(Vec3d aim) {
+    public void throwPearl(Vec3 aim) {
         int pearlSlot = PlacementUtils.getEnderPearlSlot();
-        if (pearlSlot == -1 || mc.player.getItemCooldownManager().isCoolingDown(Items.ENDER_PEARL.getDefaultStack())) {
+        if (pearlSlot == -1 || mc.player.getCooldowns().isOnCooldown(Items.ENDER_PEARL.getDefaultInstance())) {
             return;
         }
         float yaw, throwPitch;
@@ -177,13 +181,13 @@ public class PearlPhaser {
             // Solve from where the pearl actually spawns (ThrownItemEntity: player x/z, eyeY - 0.1), not
             // from the eye. Gravity is 0.03/tick against a 1.5 b/tick throw, so over the ~1 block this
             // covers the trajectory is a straight line and no ballistic solve is needed.
-            float[] rotations = RotationUtils.getRotationsTo(mc.player.getEyePos().subtract(0.0, 0.1, 0.0), aim);
+            float[] rotations = RotationUtils.getRotationsTo(mc.player.getEyePosition().subtract(0.0, 0.1, 0.0), aim);
             yaw = rotations[0];
             // Yaw stays solved either way — a fixed yaw would just miss the block sideways.
             throwPitch = autoPitch.get() ? rotations[1] : pitch.get();
         } else {
-            Vec3d pearlTargetVec = new Vec3d(Math.floor(mc.player.getX()) + 0.5, 0.0, Math.floor(mc.player.getZ()) + 0.5);
-            yaw = RotationUtils.getRotationsTo(mc.player.getEyePos(), pearlTargetVec)[0] + 180.0f;
+            Vec3 pearlTargetVec = new Vec3(Math.floor(mc.player.getX()) + 0.5, 0.0, Math.floor(mc.player.getZ()) + 0.5);
+            yaw = RotationUtils.getRotationsTo(mc.player.getEyePosition(), pearlTargetVec)[0] + 180.0f;
             throwPitch = pitch.get();
         }
 
@@ -218,12 +222,12 @@ public class PearlPhaser {
         if (selfPlace.get() && optimize.get()) {
             performSelfPlace(true);
         }
-        mc.getNetworkHandler().sendPacket(new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, 0, yaw, throwPitch));
+        mc.getConnection().send(new ServerboundUseItemPacket(InteractionHand.MAIN_HAND, 0, yaw, throwPitch));
 
         if (swing.get()) {
-            mc.player.swingHand(Hand.MAIN_HAND);
+            mc.player.swing(InteractionHand.MAIN_HAND);
         } else {
-            mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
+            mc.getConnection().send(new ServerboundSwingPacket(InteractionHand.MAIN_HAND));
         }
 
         if (swapAlternative.get()) {
@@ -240,24 +244,24 @@ public class PearlPhaser {
     }
 
     private void handlePearlAttacks(float yaw) {
-        BlockHitResult hitResult = (BlockHitResult) mc.player.raycast(3.0, 0, false);
-        Box searchBox = Box.from(Vec3d.ofCenter(hitResult.getBlockPos())).expand(0.2);
-        for (Entity entity : mc.world.getOtherEntities(null, searchBox)) {
-            if (entity instanceof ItemFrameEntity itemFrame) {
-                mc.getNetworkHandler().sendPacket(PlayerInteractEntityC2SPacket.attack(entity, mc.player.isSneaking()));
-                mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
+        BlockHitResult hitResult = (BlockHitResult) mc.player.pick(3.0, 0, false);
+        AABB searchBox = AABB.unitCubeFromLowerCorner(Vec3.atCenterOf(hitResult.getBlockPos())).inflate(0.2);
+        for (Entity entity : mc.level.getEntities(null, searchBox)) {
+            if (entity instanceof ItemFrame itemFrame) {
+                mc.getConnection().send(ServerboundInteractPacket.createAttackPacket(entity, mc.player.isShiftKeyDown()));
+                mc.getConnection().send(new ServerboundSwingPacket(InteractionHand.MAIN_HAND));
             }
         }
     }
 
     /** Scaffolding is 0-hardness, so a START+STOP pair breaks it instantly and the pearl still leaves this tick. */
     private void breakScaffolding() {
-        BlockPos feet = mc.player.getBlockPos();
-        for (BlockPos pos : new BlockPos[]{feet, feet.up()}) {
-            if (!(mc.world.getBlockState(pos).getBlock() instanceof ScaffoldingBlock)) continue;
-            mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, Direction.UP));
-            mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, Direction.UP));
-            mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
+        BlockPos feet = mc.player.blockPosition();
+        for (BlockPos pos : new BlockPos[]{feet, feet.above()}) {
+            if (!(mc.level.getBlockState(pos).getBlock() instanceof ScaffoldingBlock)) continue;
+            mc.getConnection().send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, pos, Direction.UP));
+            mc.getConnection().send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, pos, Direction.UP));
+            mc.getConnection().send(new ServerboundSwingPacket(InteractionHand.MAIN_HAND));
         }
     }
 
@@ -266,7 +270,7 @@ public class PearlPhaser {
         if (yaw1 < 0.0f) {
             yaw1 += 360.0f;
         }
-        BlockPos blockPos = mc.player.getBlockPos();
+        BlockPos blockPos = mc.player.blockPosition();
         if (yaw1 >= 22.5 && yaw1 < 67.5) {
             blockPos = blockPos.south().west();
         } else if (yaw1 >= 67.5 && yaw1 < 112.5) {
@@ -285,7 +289,7 @@ public class PearlPhaser {
             blockPos = blockPos.south();
         }
         FindItemResult resistantBlock = PlacementUtils.findResistantBlock();
-        if (resistantBlock.found() && blockPos != null && !mc.world.getBlockState(blockPos.down()).isReplaceable()) {
+        if (resistantBlock.found() && blockPos != null && !mc.level.getBlockState(blockPos.below()).canBeReplaced()) {
             PlacementUtils.placeBlock(blockPos, true, true, true);
         }
     }
@@ -293,12 +297,12 @@ public class PearlPhaser {
     private int findSelfPlaceItem() {
         if (selfPlaceType.get() == SelfPlaceType.Fire) {
             for (int i = 0; i < 45; i++) {
-                ItemStack stack = mc.player.getInventory().getStack(i);
+                ItemStack stack = mc.player.getInventory().getItem(i);
                 if (stack.getItem() == Items.FLINT_AND_STEEL || stack.getItem() == Items.FIRE_CHARGE) return i;
             }
         } else {
             for (int i = 0; i < 45; i++) {
-                ItemStack stack = mc.player.getInventory().getStack(i);
+                ItemStack stack = mc.player.getInventory().getItem(i);
                 if (stack.getItem() == Items.COBWEB) return i;
             }
         }
@@ -323,21 +327,21 @@ public class PearlPhaser {
         RotationUtils rotationManager = RotationUtils.getInstance();
 
         if (selfPlaceType.get() == SelfPlaceType.Fire) {
-            BlockPos belowPos = mc.player.getBlockPos().down();
-            Vec3d hitVec = Vec3d.ofCenter(belowPos).add(0, 0.5, 0);
+            BlockPos belowPos = mc.player.blockPosition().below();
+            Vec3 hitVec = Vec3.atCenterOf(belowPos).add(0, 0.5, 0);
             if (!optimized && selfPlaceRotate.get()) {
-                rotationManager.setRotationSilent(mc.player.getYaw(), 90.0f);
+                rotationManager.setRotationSilent(mc.player.getYRot(), 90.0f);
             }
             interact(new BlockHitResult(hitVec, Direction.UP, belowPos, false));
         } else {
-            BlockPos feetPos = mc.player.getBlockPos();
+            BlockPos feetPos = mc.player.blockPosition();
             Direction side = PlacementUtils.getPlaceSide(feetPos);
             if (side == null) side = Direction.DOWN;
-            BlockPos neighbor = feetPos.offset(side);
+            BlockPos neighbor = feetPos.relative(side);
             Direction opposite = side.getOpposite();
-            Vec3d hitVec = Vec3d.ofCenter(neighbor).add(Vec3d.of(opposite.getVector()).multiply(0.5));
+            Vec3 hitVec = Vec3.atCenterOf(neighbor).add(Vec3.atLowerCornerOf(opposite.getUnitVec3i()).scale(0.5));
             if (!optimized && selfPlaceRotate.get()) {
-                float[] rot = RotationUtils.getRotationsTo(mc.player.getEyePos(), hitVec);
+                float[] rot = RotationUtils.getRotationsTo(mc.player.getEyePosition(), hitVec);
                 rotationManager.setRotationSilent(rot[0], rot[1]);
             }
             interact(new BlockHitResult(hitVec, opposite, neighbor, false));
@@ -362,14 +366,14 @@ public class PearlPhaser {
      * interaction — which is why self-place never lit the fire.
      */
     private void interact(BlockHitResult hitResult) {
-        mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hitResult);
-        mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
+        mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hitResult);
+        mc.getConnection().send(new ServerboundSwingPacket(InteractionHand.MAIN_HAND));
     }
 
     private void performInventorySwapPVP(int pearlSlot) {
-        mc.interactionManager.clickSlot(0, pearlSlot < 9 ? pearlSlot + 36 : pearlSlot, 0, SlotActionType.PICKUP, mc.player);
-        mc.interactionManager.clickSlot(0, ((PlayerInventoryAccessor) mc.player.getInventory()).getSelectedSlot() + 36, 0, SlotActionType.PICKUP, mc.player);
-        mc.interactionManager.clickSlot(0, pearlSlot < 9 ? pearlSlot + 36 : pearlSlot, 0, SlotActionType.PICKUP, mc.player);
+        mc.gameMode.handleInventoryMouseClick(0, pearlSlot < 9 ? pearlSlot + 36 : pearlSlot, 0, ClickType.PICKUP, mc.player);
+        mc.gameMode.handleInventoryMouseClick(0, ((PlayerInventoryAccessor) mc.player.getInventory()).getSelectedSlot() + 36, 0, ClickType.PICKUP, mc.player);
+        mc.gameMode.handleInventoryMouseClick(0, pearlSlot < 9 ? pearlSlot + 36 : pearlSlot, 0, ClickType.PICKUP, mc.player);
     }
 
     public enum SelfPlaceType {

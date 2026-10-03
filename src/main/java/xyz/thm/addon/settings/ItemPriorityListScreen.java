@@ -15,10 +15,9 @@ import meteordevelopment.meteorclient.gui.widgets.input.WTextBox;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WPressable;
 import meteordevelopment.meteorclient.settings.GenericSetting;
 import meteordevelopment.meteorclient.utils.misc.Names;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Predicate;
@@ -60,13 +59,13 @@ public class ItemPriorityListScreen extends WindowScreen {
     private void initTable() {
         Predicate<Item> notSelected = item -> item != Items.AIR && !selected.contains(item)
             && (itemFilter == null || itemFilter.test(item));
-        Iterable<Item> left = SortingHelper.sort(Registries.ITEM, notSelected, this::names, filterText);
+        Iterable<Item> left = SortingHelper.sort(BuiltInRegistries.ITEM, notSelected, this::names, filterText);
 
         Cell<WTable> leftCell = table.add(theme.table()).top();
         WTable leftTable = leftCell.widget();
 
         left.forEach(item -> {
-            leftTable.add(theme.itemWithLabel(item.getDefaultStack()));
+            leftTable.add(theme.itemWithLabel(item.getDefaultInstance()));
 
             WPressable add = leftTable.add(theme.plus()).expandCellX().right().widget();
             add.action = () -> {
@@ -88,7 +87,7 @@ public class ItemPriorityListScreen extends WindowScreen {
             if (!filterText.isBlank() && !matches(item, filterText)) continue;
 
             int index = i;
-            rightTable.add(theme.itemWithLabel(item.getDefaultStack()));
+            rightTable.add(theme.itemWithLabel(item.getDefaultInstance()));
 
             WPressable up = rightTable.add(theme.button("^")).widget();
             up.action = () -> {
@@ -131,7 +130,7 @@ public class ItemPriorityListScreen extends WindowScreen {
     private String[] names(Item item) {
         return new String[] {
             Names.get(item),
-            Registries.ITEM.getId(item).toString()
+            BuiltInRegistries.ITEM.getKey(item).toString()
         };
     }
 }

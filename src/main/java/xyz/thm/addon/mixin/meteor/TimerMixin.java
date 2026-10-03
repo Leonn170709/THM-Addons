@@ -14,10 +14,10 @@ import meteordevelopment.meteorclient.systems.modules.world.Timer;
 import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.world.TickRate;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.world.ClientChunkManager;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.world.chunk.Chunk;
-import net.minecraft.world.chunk.ChunkStatus;
+import net.minecraft.client.multiplayer.ClientChunkCache;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -65,7 +65,7 @@ public abstract class TimerMixin extends Module {
     @Unique
     private int lastUnloadedCount = 0;
     @Unique
-    private net.minecraft.util.math.Vec3d lastPlayerPos = null;
+    private net.minecraft.world.phys.Vec3 lastPlayerPos = null;
     @Unique
     private int speedCheckTicks = 0;
     @Unique
@@ -177,12 +177,12 @@ public abstract class TimerMixin extends Module {
         }
         if (!autoAdjust.get()) return;
         if (lastPlayerPos != null) {
-            net.minecraft.util.math.Vec3d currentPos = mc.player.getEntityPos();
+            net.minecraft.world.phys.Vec3 currentPos = mc.player.position();
             double distanceTraveled = currentPos.subtract(lastPlayerPos).multiply(1, 0, 1).length();
             double speedBPS = distanceTraveled * 20.0;
             currentSpeed = speedBPS * 3.6;
         }
-        lastPlayerPos = mc.player.getEntityPos();
+        lastPlayerPos = mc.player.position();
         tickCounter++;
         if (tickCounter < checkInterval.get()) return;
         tickCounter = 0;
@@ -211,16 +211,16 @@ public abstract class TimerMixin extends Module {
     }
     @Unique
     private int countUnloadedChunks() {
-        if (mc.player == null || mc.world == null) return 0;
-        ClientChunkManager chunkManager = mc.world.getChunkManager();
-        ChunkPos playerChunkPos = mc.player.getChunkPos();
+        if (mc.player == null || mc.level == null) return 0;
+        ClientChunkCache chunkManager = mc.level.getChunkSource();
+        ChunkPos playerChunkPos = mc.player.chunkPosition();
         int radius = checkRadius.get();
         int unloadedCount = 0;
         for (int x = -radius; x <= radius; x++) {
             for (int z = -radius; z <= radius; z++) {
                 int chunkX = playerChunkPos.x + x;
                 int chunkZ = playerChunkPos.z + z;
-                Chunk chunk = chunkManager.getChunk(chunkX, chunkZ, ChunkStatus.FULL, false);
+                ChunkAccess chunk = chunkManager.getChunk(chunkX, chunkZ, ChunkStatus.FULL, false);
                 if (chunk == null) {
                     unloadedCount++;
                 }

@@ -9,12 +9,12 @@ package xyz.thm.addon.utils;
 import com.google.gson.JsonObject;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
-import net.minecraft.network.packet.s2c.play.PlayerActionResponseS2CPacket;
-import net.minecraft.registry.DynamicRegistryManager;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.network.protocol.game.ClientboundBlockChangedAckPacket;
+import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -48,7 +48,7 @@ class PacketFieldSerializerTest {
 
     @Test
     void encodesCompletePayloadForBothDirections() throws ReflectiveOperationException {
-        assertEquals("0003", PacketFieldSerializer.encodePayload(new UpdateSelectedSlotC2SPacket(3), DynamicRegistryManager.EMPTY));
-        assertEquals("03", PacketFieldSerializer.encodePayload(new PlayerActionResponseS2CPacket(3), DynamicRegistryManager.EMPTY));
+        assertEquals("0003", PacketFieldSerializer.encodePayload(new ServerboundSetCarriedItemPacket(3), RegistryAccess.EMPTY));
+        assertEquals("03", PacketFieldSerializer.encodePayload(new ClientboundBlockChangedAckPacket(3), RegistryAccess.EMPTY));
     }
 }

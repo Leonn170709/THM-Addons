@@ -19,9 +19,9 @@ import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -41,7 +41,7 @@ import static meteordevelopment.meteorclient.MeteorClient.mc;
 public abstract class ScaffoldMixin {
     @Shadow @Final private SettingGroup sgGeneral;
     @Shadow @Final private SettingGroup sgRender;
-    @Shadow @Final private BlockPos.Mutable bp;
+    @Shadow @Final private BlockPos.MutableBlockPos bp;
 
     @Shadow protected abstract boolean place(BlockPos pos);
 
@@ -80,7 +80,7 @@ public abstract class ScaffoldMixin {
         public void onClipAtLedge(ClipAtLedgeEvent event) {
             if (thm$safeMove == null || !thm$safeMove.get()) return;
             if (!((Module)(Object)ScaffoldMixin.this).isActive()) return;
-            if (mc.player == null || mc.world == null) return;
+            if (mc.player == null || mc.level == null) return;
             event.setClip(true);
         }
     };
@@ -237,32 +237,32 @@ public abstract class ScaffoldMixin {
     private void thm$handleKeepYReactivation(TickEvent.Pre event, CallbackInfo ci) {
         if (mc.player == null) return;
 
-        if (thm$lastScaffoldTickAge != Integer.MIN_VALUE && mc.player.age - thm$lastScaffoldTickAge > 1) {
+        if (thm$lastScaffoldTickAge != Integer.MIN_VALUE && mc.player.tickCount - thm$lastScaffoldTickAge > 1) {
             thm$lockedY = Integer.MIN_VALUE;
             thm$lastScaffoldBp = null;
         }
 
-        thm$lastScaffoldTickAge = mc.player.age;
+        thm$lastScaffoldTickAge = mc.player.tickCount;
     }
 
     @Inject(method = "onTick", at = @At("TAIL"))
     private void thm$doInterpolationAndLookahead(TickEvent.Pre event, CallbackInfo ci) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
         thm$interpRenderSet.clear();
         thm$lookaheadRenderSet.clear();
 
         // Lookahead: project current velocity forward and pre-place blocks along predicted path
         if (thm$lookahead != null && thm$lookahead.get()) {
-            Vec3d vel = mc.player.getVelocity();
-            if (vel.horizontalLength() > 0.05) {
+            Vec3 vel = mc.player.getDeltaMovement();
+            if (vel.horizontalDistance() > 0.05) {
                 for (int i = 1; i <= thm$lookaheadTicks.get(); i++) {
-                    BlockPos predBp = thm$applyKeepY(BlockPos.ofFloored(
+                    BlockPos predBp = thm$applyKeepY(BlockPos.containing(
                         mc.player.getX() + vel.x * i,
                         mc.player.getY() - 1,
                         mc.player.getZ() + vel.z * i
                     ));
-                    if (!mc.world.getBlockState(predBp).isReplaceable()) continue;
+                    if (!mc.level.getBlockState(predBp).canBeReplaced()) continue;
                     place(predBp);
                     if (thm$lookaheadRender != null && thm$lookaheadRender.get()) {
                         thm$lookaheadRenderSet.add(BlockPos.asLong(predBp.getX(), predBp.getY(), predBp.getZ()));
@@ -284,7 +284,7 @@ public abstract class ScaffoldMixin {
                         bp.getY(),
                         thm$lastScaffoldBp.getZ() + Math.round(dz * t)
                     ));
-                    if (!mc.world.getBlockState(interpPos).isReplaceable()) continue;
+                    if (!mc.level.getBlockState(interpPos).canBeReplaced()) continue;
                     place(interpPos);
                     if (thm$interpolateRender != null && thm$interpolateRender.get()) {
                         thm$interpRenderSet.add(BlockPos.asLong(interpPos.getX(), interpPos.getY(), interpPos.getZ()));
@@ -297,10 +297,10 @@ public abstract class ScaffoldMixin {
         }
     }
 
-    @Redirect(method = "place", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/utils/world/BlockUtils;place(Lnet/minecraft/util/math/BlockPos;Lmeteordevelopment/meteorclient/utils/player/FindItemResult;ZIZZ)Z"))
+    @Redirect(method = "place", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/utils/world/BlockUtils;place(Lnet/minecraft/core/BlockPos;Lmeteordevelopment/meteorclient/utils/player/FindItemResult;ZIZZ)Z"))
     private boolean thm$redirectPlace(BlockPos pos, FindItemResult item, boolean rotate, int rotationPriority, boolean swingHand, boolean checkEntities) {
         BlockPos placePos = thm$applyKeepY(pos);
-        if (mc.world != null && !mc.world.getWorldBorder().contains(placePos)) return false;
+        if (mc.level != null && !mc.level.getWorldBorder().isWithinBounds(placePos)) return false;
 
         if (thm$packetPlace != null && thm$packetPlace.get()) {
             int rotateTicks = thm$packetRotateTicks != null ? thm$packetRotateTicks.get() : rotationPriority;
@@ -310,8 +310,8 @@ public abstract class ScaffoldMixin {
             boolean placed = PlacementUtils.placeBlockPacket(placePos, item, rotate, rotateTicks, airPlace);
             if (placed && once) PacketPlaceTracker.markSent(placePos, PacketPlaceTracker.DEFAULT_RESEND_TICKS);
             if (placed && swingHand && mc.player != null) {
-                Hand hand = item.isOffhand() ? Hand.OFF_HAND : Hand.MAIN_HAND;
-                mc.player.swingHand(hand, true);
+                InteractionHand hand = item.isOffhand() ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
+                mc.player.swing(hand, true);
             }
             return placed;
         }
@@ -320,7 +320,7 @@ public abstract class ScaffoldMixin {
 
     @ModifyArg(
         method = "onTick",
-        at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/systems/modules/movement/Scaffold;place(Lnet/minecraft/util/math/BlockPos;)Z"),
+        at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/systems/modules/movement/Scaffold;place(Lnet/minecraft/core/BlockPos;)Z"),
         index = 0
     )
     private BlockPos thm$modifyScaffoldPlaceTarget(BlockPos pos) {

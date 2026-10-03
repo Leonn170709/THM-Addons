@@ -6,11 +6,11 @@
 
 package xyz.thm.addon.mixin.xaero;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.world.World;
-import net.minecraft.world.chunk.EmptyChunk;
-import net.minecraft.world.chunk.WorldChunk;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.chunk.EmptyLevelChunk;
+import net.minecraft.world.level.chunk.LevelChunk;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
@@ -23,14 +23,14 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 public abstract class XaeroWorldMapEdgeMixin {
     @Redirect(
         method = "writeChunk",
-        at = @At(value = "INVOKE", target = "Lnet/minecraft/world/World;getChunk(II)Lnet/minecraft/world/chunk/WorldChunk;", remap = true)
+        at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;getChunk(II)Lnet/minecraft/world/level/chunk/LevelChunk;", remap = true)
     )
-    private WorldChunk thm$neighborAlwaysLoaded(World world, int x, int z) {
-        WorldChunk chunk = world.getChunk(x, z);
-        if (!(chunk instanceof EmptyChunk)) return chunk;
+    private LevelChunk thm$neighborAlwaysLoaded(Level world, int x, int z) {
+        LevelChunk chunk = world.getChunk(x, z);
+        if (!(chunk instanceof EmptyLevelChunk)) return chunk;
 
-        PlayerEntity player = MinecraftClient.getInstance().player;
+        Player player = Minecraft.getInstance().player;
         if (player == null) return chunk;
-        return world.getChunk(player.getChunkPos().x, player.getChunkPos().z);
+        return world.getChunk(player.chunkPosition().x, player.chunkPosition().z);
     }
 }

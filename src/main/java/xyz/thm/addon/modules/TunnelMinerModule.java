@@ -25,25 +25,35 @@ import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.ChatFormatting;
 import net.minecraft.block.*;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.ContainerComponent;
-import net.minecraft.entity.EntityPose;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.item.BlockItem;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.text.MutableText;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.Hand;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
+import net.minecraft.resources.Identifier;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.util.Mth;
 import net.minecraft.util.math.*;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Pose;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.world.level.block.BaseEntityBlock;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.RangeUtils;
@@ -1508,9 +1518,9 @@ public class TunnelMinerModule extends Module {
         watchdogWriteBufferLines = 0;
         requestedDestX = optTargetX();
         requestedDestZ = optTargetZ();
-        int px = MathHelper.floor(mc.player.getX());
-        int py = MathHelper.floor(mc.player.getY());
-        int pz = MathHelper.floor(mc.player.getZ());
+        int px = Mth.floor(mc.player.getX());
+        int py = Mth.floor(mc.player.getY());
+        int pz = Mth.floor(mc.player.getZ());
 
         if (!optResumeCacheOnReactivate()) {
             clearResumeCacheState("setting-disabled");
@@ -1658,7 +1668,7 @@ public class TunnelMinerModule extends Module {
 
     @Override
     public void onDeactivate() {
-        if (mc.options != null) mc.options.forwardKey.setPressed(false);
+        if (mc.options != null) mc.options.keyUp.setDown(false);
         renderBreakPositions.clear();
         renderPlacePositions.clear();
         renderPathPreviewSteps.clear();
@@ -1682,8 +1692,8 @@ public class TunnelMinerModule extends Module {
             pendingAStarRequest = null;
         }
         if (mc.player != null) {
-            resumePauseX = MathHelper.floor(mc.player.getX());
-            resumePauseZ = MathHelper.floor(mc.player.getZ());
+            resumePauseX = Mth.floor(mc.player.getX());
+            resumePauseZ = Mth.floor(mc.player.getZ());
             resumePausePosValid = true;
         }
         resumeDestX = requestedDestX;
@@ -1709,8 +1719,8 @@ public class TunnelMinerModule extends Module {
     @EventHandler
     private void onGameLeft(GameLeftEvent e) {
         if (mc.player != null) {
-            resumePauseX = MathHelper.floor(mc.player.getX());
-            resumePauseZ = MathHelper.floor(mc.player.getZ());
+            resumePauseX = Mth.floor(mc.player.getX());
+            resumePauseZ = Mth.floor(mc.player.getZ());
             resumePausePosValid = true;
         }
         watchdog("onGameLeft");
@@ -1729,7 +1739,7 @@ public class TunnelMinerModule extends Module {
 
         boolean playerUsingFood = mc.player != null
             && mc.player.isUsingItem()
-            && mc.player.getActiveItem().contains(DataComponentTypes.FOOD);
+            && mc.player.getUseItem().has(DataComponents.FOOD);
 
         boolean pause = autoEatEating || autoGapEating || playerUsingFood;
         if (pause) {
@@ -1757,8 +1767,8 @@ public class TunnelMinerModule extends Module {
                         "lastHazard=%s,recoveryTicks=%d,air=%d,maxAir=%d",
                         hazardRecoveryCondition.id,
                         hazardRecoveryTicks,
-                        mc.player.getAir(),
-                        mc.player.getMaxAir()
+                        mc.player.getAirSupply(),
+                        mc.player.getMaxAirSupply()
                     )
                 );
             }
@@ -1775,8 +1785,8 @@ public class TunnelMinerModule extends Module {
                     "from=%s,to=%s,air=%d,maxAir=%d",
                     hazardRecoveryCondition.id,
                     hazard.id,
-                    mc.player.getAir(),
-                    mc.player.getMaxAir()
+                    mc.player.getAirSupply(),
+                    mc.player.getMaxAirSupply()
                 )
             );
             hazardRecoveryCondition = hazard;
@@ -1784,9 +1794,9 @@ public class TunnelMinerModule extends Module {
         }
 
         hazardRecoveryTicks++;
-        if (mc.options != null) mc.options.forwardKey.setPressed(false);
+        if (mc.options != null) mc.options.keyUp.setDown(false);
         boolean swimming = mc.player.isSwimming();
-        boolean swimmingPose = mc.player.getPose() == EntityPose.SWIMMING;
+        boolean swimmingPose = mc.player.getPose() == Pose.SWIMMING;
         watchdogStealthGate = "pause-hazard-recovery";
         watchdogStealthGateDetails = String.format(
             Locale.ROOT,
@@ -1803,11 +1813,11 @@ public class TunnelMinerModule extends Module {
                 hazard.id,
                 hazardRecoveryTicks,
                 HAZARD_RECOVERY_MAX_TICKS,
-                mc.player.getAir(),
-                mc.player.getMaxAir(),
+                mc.player.getAirSupply(),
+                mc.player.getMaxAirSupply(),
                 mc.player.isOnFire(),
                 mc.player.isInLava(),
-                mc.player.isSubmergedInWater(),
+                mc.player.isUnderWater(),
                 swimming,
                 swimmingPose
             )
@@ -1852,19 +1862,19 @@ public class TunnelMinerModule extends Module {
     }
 
     private HazardCondition detectCurrentHazard() {
-        if (mc.player == null || mc.world == null) return HazardCondition.NONE;
+        if (mc.player == null || mc.level == null) return HazardCondition.NONE;
 
-        boolean suffocating = isLikelySuffocating(BlockPos.ofFloored(mc.player.getX(), mc.player.getY(), mc.player.getZ()))
-            || isLikelySuffocating(BlockPos.ofFloored(mc.player.getX(), mc.player.getEyeY(), mc.player.getZ()));
+        boolean suffocating = isLikelySuffocating(BlockPos.containing(mc.player.getX(), mc.player.getY(), mc.player.getZ()))
+            || isLikelySuffocating(BlockPos.containing(mc.player.getX(), mc.player.getEyeY(), mc.player.getZ()));
         if (suffocating) return HazardCondition.SUFFOCATING;
 
         if (optTunnelHeight() >= 2) {
             boolean swimming = mc.player.isSwimming();
-            boolean swimmingPose = mc.player.getPose() == EntityPose.SWIMMING;
+            boolean swimmingPose = mc.player.getPose() == Pose.SWIMMING;
             if (swimming || swimmingPose) return HazardCondition.SWIMMING;
         }
 
-        boolean drowning = mc.player.isSubmergedInWater() && mc.player.getAir() <= 40;
+        boolean drowning = mc.player.isUnderWater() && mc.player.getAirSupply() <= 40;
         if (drowning) return HazardCondition.DROWNING;
 
         boolean burning = mc.player.isOnFire() || mc.player.isInLava();
@@ -1874,10 +1884,10 @@ public class TunnelMinerModule extends Module {
     }
 
     private boolean isLikelySuffocating(BlockPos pos) {
-        BlockState state = mc.world.getBlockState(pos);
+        BlockState state = mc.level.getBlockState(pos);
         if (state.isAir()) return false;
         if (!state.getFluidState().isEmpty()) return false;
-        return state.isSolidBlock(mc.world, pos);
+        return state.isRedstoneConductor(mc.level, pos);
     }
 
     private boolean isRestockPhase(Phase p) {
@@ -1913,7 +1923,7 @@ public class TunnelMinerModule extends Module {
     private void onTick(TickEvent.Pre event) {
         long tickStartNs = optWatchdogEnabled() && HARD_WATCHDOG_LOG_TICKS ? System.nanoTime() : 0L;
 
-        if (mc.player == null || mc.world == null) {
+        if (mc.player == null || mc.level == null) {
             watchdogTick("onTick-skip-null-world-player", tickStartNs);
             if (isActive()) toggle();
             return;
@@ -1925,9 +1935,9 @@ public class TunnelMinerModule extends Module {
 
         if (handleHazardRecovery(tickStartNs)) return;
 
-        int currentY = MathHelper.floor(mc.player.getY());
+        int currentY = Mth.floor(mc.player.getY());
         if (currentY != tunnelY) {
-            mc.options.forwardKey.setPressed(false);
+            mc.options.keyUp.setDown(false);
             if (optDebugMessages()) warning("Y changed from " + tunnelY + " to " + currentY + "; stopping to preserve fixed-Y pathing.");
             watchdog("y-lock-stop", "lockedY=" + tunnelY + ",currentY=" + currentY);
             toggle();
@@ -1935,12 +1945,12 @@ public class TunnelMinerModule extends Module {
         }
 
         if (shouldPauseForEating()) {
-            if (mc.options != null) mc.options.forwardKey.setPressed(false);
+            if (mc.options != null) mc.options.keyUp.setDown(false);
             watchdogTick("onTick-skip-eating", tickStartNs);
             return;
         }
 
-        updateWatchdogProgressTelemetry(blocksLeftFrom(MathHelper.floor(mc.player.getX()), MathHelper.floor(mc.player.getZ())));
+        updateWatchdogProgressTelemetry(blocksLeftFrom(Mth.floor(mc.player.getX()), Mth.floor(mc.player.getZ())));
 
         // Decrement timers and skip phase logic if active
         if (placeTimer > 0) {
@@ -1955,7 +1965,7 @@ public class TunnelMinerModule extends Module {
         }
 
         renderPlacePositions.clear();
-        markDetourVisit(MathHelper.floor(mc.player.getX()), MathHelper.floor(mc.player.getZ()));
+        markDetourVisit(Mth.floor(mc.player.getX()), Mth.floor(mc.player.getZ()));
 
         Phase executedPhase = phase;
         switch (phase) {
@@ -1987,9 +1997,9 @@ public class TunnelMinerModule extends Module {
                 break;
         }
 
-        int px = MathHelper.floor(mc.player.getX());
-        int py = MathHelper.floor(mc.player.getY());
-        int pz = MathHelper.floor(mc.player.getZ());
+        int px = Mth.floor(mc.player.getX());
+        int py = Mth.floor(mc.player.getY());
+        int pz = Mth.floor(mc.player.getZ());
         refreshRenderOverlays(px, py, pz);
 
         maybeStopForStealthStall();
@@ -2005,8 +2015,8 @@ public class TunnelMinerModule extends Module {
 
         // Render blocks to place
         if (optRenderPlacing()) {
-            int px = MathHelper.floor(mc.player.getX());
-            int pz = MathHelper.floor(mc.player.getZ());
+            int px = Mth.floor(mc.player.getX());
+            int pz = Mth.floor(mc.player.getZ());
 
             // Skips the player's own column, which is never a placement target.
             RenderUtilsTHM.renderBlocks(event, renderPlacePositions, pos -> pos.getX() != px || pos.getZ() != pz,
@@ -2068,15 +2078,15 @@ public class TunnelMinerModule extends Module {
     }
 
     private void addFloorPlacePreview(LinkedHashSet<BlockPos> positions) {
-        BlockPos myFloor = mc.player.getBlockPos().down();
-        if (shouldPreviewFloor(myFloor)) positions.add(myFloor.toImmutable());
+        BlockPos myFloor = mc.player.blockPosition().below();
+        if (shouldPreviewFloor(myFloor)) positions.add(myFloor.immutable());
 
-        BlockPos targetFloor = new BlockPos(MathHelper.floor(walkTargetX), tunnelY - 1, MathHelper.floor(walkTargetZ));
-        if (shouldPreviewFloor(targetFloor)) positions.add(targetFloor.toImmutable());
+        BlockPos targetFloor = new BlockPos(Mth.floor(walkTargetX), tunnelY - 1, Mth.floor(walkTargetZ));
+        if (shouldPreviewFloor(targetFloor)) positions.add(targetFloor.immutable());
     }
 
     private boolean shouldPreviewFloor(BlockPos pos) {
-        BlockState state = mc.world.getBlockState(pos);
+        BlockState state = mc.level.getBlockState(pos);
         return state.isAir() || !state.getFluidState().isEmpty();
     }
 
@@ -2088,8 +2098,8 @@ public class TunnelMinerModule extends Module {
 
         for (int d = 1; d <= optAirPlaceDistance(); d++) {
             BlockPos placePos = new BlockPos(px + stepX * d, py - 1, pz + stepZ * d);
-            if (mc.world.getBlockState(placePos).isAir()) {
-                positions.add(placePos.toImmutable());
+            if (mc.level.getBlockState(placePos).isAir()) {
+                positions.add(placePos.immutable());
             }
         }
     }
@@ -2167,13 +2177,13 @@ public class TunnelMinerModule extends Module {
 
         // Harden known no-probe deadlock: force a full planner reset/retry instead of auto-toggle.
         if (optStealthMode() && "pause-no-probe-steps".equals(watchdogStealthGate)) {
-            if (mc.options != null) mc.options.forwardKey.setPressed(false);
+            if (mc.options != null) mc.options.keyUp.setDown(false);
             recoverFromNoProbeStepsStall(details);
             return;
         }
 
         if (optDebugMessages()) warning("Stealth stall detected, stopping: " + details);
-        if (mc.options != null) mc.options.forwardKey.setPressed(false);
+        if (mc.options != null) mc.options.keyUp.setDown(false);
         watchdog("stall-stop", details);
         toggle();
     }
@@ -2210,8 +2220,8 @@ public class TunnelMinerModule extends Module {
         committedMoveStep = null;
 
         if (mc != null && mc.player != null) {
-            int px = MathHelper.floor(mc.player.getX());
-            int pz = MathHelper.floor(mc.player.getZ());
+            int px = Mth.floor(mc.player.getX());
+            int pz = Mth.floor(mc.player.getZ());
             wallFollowHeading = chooseWallFollowHeading(px, pz);
         } else {
             wallFollowHeading = 0;
@@ -2265,9 +2275,9 @@ public class TunnelMinerModule extends Module {
             return;
         }
 
-        int px = MathHelper.floor(mc.player.getX());
+        int px = Mth.floor(mc.player.getX());
         int py = tunnelY;
-        int pz = MathHelper.floor(mc.player.getZ());
+        int pz = Mth.floor(mc.player.getZ());
         tickEmergencyAirFallbackWindow();
         if (!refreshActiveNavigationGoal(px, py, pz)) return;
         boolean atGoalCoords = px == destX && pz == destZ;
@@ -2334,7 +2344,7 @@ public class TunnelMinerModule extends Module {
                 formatMineBlock(normalMining),
                 formatMineBlock(packetMining)
             );
-            mc.options.forwardKey.setPressed(false);
+            mc.options.keyUp.setDown(false);
         } else {
             boolean maintainBehindParity = shouldMaintainBehindParity();
             boolean finalizing = probeSteps.isEmpty() && atGoalReady;
@@ -2362,12 +2372,12 @@ public class TunnelMinerModule extends Module {
                 if (!hasReachableStealthRestore(true)) {
                     watchdogStealthGate = "finalizing-no-reachable-restore";
                     watchdogStealthGateDetails = "restorePending=true,reachable=false";
-                    mc.options.forwardKey.setPressed(false);
+                    mc.options.keyUp.setDown(false);
                     return;
                 }
                 watchdogStealthGate = "finalizing-restore-drain";
                 watchdogStealthGateDetails = "restorePending=true,reachable=true";
-                mc.options.forwardKey.setPressed(false);
+                mc.options.keyUp.setDown(false);
                 return;
             }
 
@@ -2379,7 +2389,7 @@ public class TunnelMinerModule extends Module {
                     if (reachableRestore) {
                         watchdogStealthGate = "pause-restore-lag";
                         watchdogStealthGateDetails = "maxLag=" + optStealthRestoreLagDistance() + ",reachable=true";
-                        mc.options.forwardKey.setPressed(false);
+                        mc.options.keyUp.setDown(false);
                         return;
                     } else {
                         watchdogStealthGate = "lag-unreachable-continue";
@@ -2401,7 +2411,7 @@ public class TunnelMinerModule extends Module {
                     }
                     watchdogStealthGate = "pause-floor-support-failed";
                     watchdogStealthGateDetails = "next=" + formatPathStep(next) + ",emergencyNoScaffold=" + emergencyNoScaffold;
-                    mc.options.forwardKey.setPressed(false);
+                    mc.options.keyUp.setDown(false);
                     return;
                 }
                 if (isStepClear(py, next)) {
@@ -2412,14 +2422,14 @@ public class TunnelMinerModule extends Module {
                 } else {
                     watchdogStealthGate = "pause-step-not-clear";
                     watchdogStealthGateDetails = "next=" + formatPathStep(next);
-                    mc.options.forwardKey.setPressed(false);
+                    mc.options.keyUp.setDown(false);
                 }
             } else {
                 noProbePauseTicks++;
                 committedMoveStep = null;
                 watchdogStealthGate = "pause-no-probe-steps";
                 watchdogStealthGateDetails = "probeSteps=0";
-                mc.options.forwardKey.setPressed(false);
+                mc.options.keyUp.setDown(false);
                 if (atGoalReady && (!maintainBehindParity || !hasAnyStealthRestorePending(true))) setPhase(Phase.DONE);
             }
         }
@@ -3178,7 +3188,7 @@ public class TunnelMinerModule extends Module {
         }
         boolean emergencyRelaxAirGaps = forceNoProbeReplan && rejectAirGapDetours && isEmergencyAirFallbackActive();
         int radius = Math.max(1, probeRadius);
-        int age = (mc != null && mc.player != null) ? mc.player.age : Integer.MIN_VALUE;
+        int age = (mc != null && mc.player != null) ? mc.player.tickCount : Integer.MIN_VALUE;
         int sinceLastReplan = (age == Integer.MIN_VALUE || cachedProbeLastReplanAge == Integer.MIN_VALUE)
             ? Integer.MAX_VALUE
             : age - cachedProbeLastReplanAge;
@@ -3522,7 +3532,7 @@ public class TunnelMinerModule extends Module {
         }
 
         for (BlockPos pos : getStepProfilePositions(py, step, false)) {
-            BlockState state = mc.world.getBlockState(pos);
+            BlockState state = mc.level.getBlockState(pos);
             if (isAvoidanceBlock(state)) return true;
             if (touchesNoTouchChainBlock(pos)) return true;
             if (touchesLavaDetourRisk(pos)) return true;
@@ -3537,7 +3547,7 @@ public class TunnelMinerModule extends Module {
             for (BlockPos pos : getStepProfilePositions(py, step, true)) {
                 activeProbePositions.add(pos);
                 int before = stealthCache.size();
-                stealthCache.putIfAbsent(pos, mc.world.getBlockState(pos));
+                stealthCache.putIfAbsent(pos, mc.level.getBlockState(pos));
                 if (stealthCache.size() != before) added++;
             }
         }
@@ -3553,20 +3563,20 @@ public class TunnelMinerModule extends Module {
         for (PathStep step : steps) {
             for (BlockPos pos : getStepProfilePositions(py, step, false)) {
                 scanned++;
-                BlockState state = mc.world.getBlockState(pos);
+                BlockState state = mc.level.getBlockState(pos);
                 if (isMineCandidate(pos, state)) {
                     if (!isMineReachableNow(pos)) {
                         skippedRange++;
                         continue;
                     }
                     candidates++;
-                    targets.add(pos.toImmutable());
+                    targets.add(pos.immutable());
                 }
             }
         }
 
         List<BlockPos> ordered = new ArrayList<>(targets);
-        ordered.sort(Comparator.comparingDouble(pos -> Vec3d.ofCenter(pos).distanceTo(mc.player.getEyePos())));
+        ordered.sort(Comparator.comparingDouble(pos -> Vec3.atCenterOf(pos).distanceTo(mc.player.getEyePosition())));
         watchdogCalc(
             "collect-mine-targets",
             String.format(
@@ -3613,13 +3623,13 @@ public class TunnelMinerModule extends Module {
 
     private boolean hasCloseMineTarget(List<BlockPos> targets) {
         double stopRangeSq = optStealthStopRange() * optStealthStopRange();
-        Vec3d playerPos = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
+        Vec3 playerPos = new Vec3(mc.player.getX(), mc.player.getY(), mc.player.getZ());
         int tested = 0;
 
         for (BlockPos pos : targets) {
             tested++;
-            if (!isMineCandidate(pos, mc.world.getBlockState(pos))) continue;
-            double distSq = Vec3d.ofCenter(pos).squaredDistanceTo(playerPos);
+            if (!isMineCandidate(pos, mc.level.getBlockState(pos))) continue;
+            double distSq = Vec3.atCenterOf(pos).distanceToSqr(playerPos);
             if (distSq <= stopRangeSq) {
                 watchdogCalc("close-mine-target", String.format(Locale.ROOT, "result=true,tested=%d,pos=%s,distSq=%.3f,stopRangeSq=%.3f", tested, formatPos(pos), distSq, stopRangeSq));
                 return true;
@@ -3632,10 +3642,10 @@ public class TunnelMinerModule extends Module {
 
     private boolean hasCloseActiveMine() {
         double stopRangeSq = optStealthStopRange() * optStealthStopRange();
-        Vec3d playerPos = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
+        Vec3 playerPos = new Vec3(mc.player.getX(), mc.player.getY(), mc.player.getZ());
 
-        boolean result = (normalMining != null && Vec3d.ofCenter(normalMining.blockPos).squaredDistanceTo(playerPos) <= stopRangeSq)
-            || (packetMining != null && Vec3d.ofCenter(packetMining.blockPos).squaredDistanceTo(playerPos) <= stopRangeSq);
+        boolean result = (normalMining != null && Vec3.atCenterOf(normalMining.blockPos).distanceToSqr(playerPos) <= stopRangeSq)
+            || (packetMining != null && Vec3.atCenterOf(packetMining.blockPos).distanceToSqr(playerPos) <= stopRangeSq);
         watchdogCalc("close-active-mine", String.format(Locale.ROOT, "result=%s,stopRangeSq=%.3f,normal=%s,packet=%s", result, stopRangeSq, formatMineBlock(normalMining), formatMineBlock(packetMining)));
         return result;
     }
@@ -3659,7 +3669,7 @@ public class TunnelMinerModule extends Module {
 
     private boolean tryFillStealthLava(int py, List<PathStep> steps) {
         BlockPos target = steps.isEmpty()
-            ? mc.player.getBlockPos().down()
+            ? mc.player.blockPosition().below()
             : new BlockPos(steps.get(0).toX(), py - 1, steps.get(0).toZ());
         int slot = findTraversalPlacementSlot(target);
         if (slot == -1) {
@@ -3691,11 +3701,11 @@ public class TunnelMinerModule extends Module {
 
     private boolean isStepClear(int py, PathStep step) {
         for (BlockPos pos : getStepProfilePositions(py, step, false)) {
-            BlockState state = mc.world.getBlockState(pos);
+            BlockState state = mc.level.getBlockState(pos);
             if (!state.isAir() || isLavaState(state)) return false;
         }
 
-        BlockState floorState = mc.world.getBlockState(new BlockPos(step.toX(), py - 1, step.toZ()));
+        BlockState floorState = mc.level.getBlockState(new BlockPos(step.toX(), py - 1, step.toZ()));
         return !floorState.isAir() && floorState.getFluidState().isEmpty();
     }
 
@@ -3703,8 +3713,8 @@ public class TunnelMinerModule extends Module {
         boolean activeDoubleMine = normalMining != null || packetMining != null;
         boolean strictExactRestore = isStrictStealthExactRestoreEnabled();
 
-        int px = MathHelper.floor(mc.player.getX());
-        int pz = MathHelper.floor(mc.player.getZ());
+        int px = Mth.floor(mc.player.getX());
+        int pz = Mth.floor(mc.player.getZ());
         int actions = 0;
         boolean placed = false;
         double reach = 4 + Objects.requireNonNull(Modules.get().get(Reach.class)).blockReach();
@@ -3732,7 +3742,7 @@ public class TunnelMinerModule extends Module {
             Map.Entry<BlockPos, BlockState> entry = it.next();
             BlockPos pos = entry.getKey();
             BlockState original = entry.getValue();
-            BlockState current = mc.world.getBlockState(pos);
+            BlockState current = mc.level.getBlockState(pos);
             scanned++;
 
             if (activeProbePositions.contains(pos)) {
@@ -3758,7 +3768,7 @@ public class TunnelMinerModule extends Module {
                 continue;
             }
 
-            if (Vec3d.ofCenter(pos).distanceTo(mc.player.getEyePos()) > reach) {
+            if (Vec3.atCenterOf(pos).distanceTo(mc.player.getEyePosition()) > reach) {
                 skippedReach++;
                 continue;
             }
@@ -3838,7 +3848,7 @@ public class TunnelMinerModule extends Module {
             if (tryAirPlaceAt(pos, hb, false)) {
                 actions++;
                 placed = true;
-                BlockState after = mc.world.getBlockState(pos);
+                BlockState after = mc.level.getBlockState(pos);
                 if (isRestoreSatisfied(original, after, strictExactRestore)) {
                     it.remove();
                     if (exactRestore) placedExact++;
@@ -3890,28 +3900,28 @@ public class TunnelMinerModule extends Module {
     }
 
     private boolean hasAnyPendingRestoreWithinDistance(double maxDistance) {
-        if (mc == null || mc.player == null || mc.world == null) return false;
+        if (mc == null || mc.player == null || mc.level == null) return false;
 
         boolean strictExactRestore = isStrictStealthExactRestoreEnabled();
         double maxSq = maxDistance * maxDistance;
-        Vec3d eyes = mc.player.getEyePos();
+        Vec3 eyes = mc.player.getEyePosition();
 
         for (Map.Entry<BlockPos, BlockState> entry : stealthCache.entrySet()) {
             BlockPos pos = entry.getKey();
             BlockState original = entry.getValue();
-            BlockState current = mc.world.getBlockState(pos);
+            BlockState current = mc.level.getBlockState(pos);
             if (isRestoreSatisfied(original, current, strictExactRestore)) continue;
 
-            if (Vec3d.ofCenter(pos).squaredDistanceTo(eyes) <= maxSq) return true;
+            if (Vec3.atCenterOf(pos).distanceToSqr(eyes) <= maxSq) return true;
         }
 
         for (Map.Entry<BlockPos, BlockState> entry : fillLog.entrySet()) {
             BlockPos pos = entry.getKey();
             BlockState original = entry.getValue();
-            BlockState current = mc.world.getBlockState(pos);
+            BlockState current = mc.level.getBlockState(pos);
             if (isRestoreSatisfied(original, current, strictExactRestore)) continue;
 
-            if (Vec3d.ofCenter(pos).squaredDistanceTo(eyes) <= maxSq) return true;
+            if (Vec3.atCenterOf(pos).distanceToSqr(eyes) <= maxSq) return true;
         }
 
         return false;
@@ -3921,14 +3931,14 @@ public class TunnelMinerModule extends Module {
         if (mc.player == null) return false;
 
         boolean strictExactRestore = isStrictStealthExactRestoreEnabled();
-        int px = MathHelper.floor(mc.player.getX());
-        int pz = MathHelper.floor(mc.player.getZ());
+        int px = Mth.floor(mc.player.getX());
+        int pz = Mth.floor(mc.player.getZ());
         double reach = 4 + Objects.requireNonNull(Modules.get().get(Reach.class)).blockReach();
 
         for (Map.Entry<BlockPos, BlockState> entry : stealthCache.entrySet()) {
             BlockPos pos = entry.getKey();
             BlockState original = entry.getValue();
-            BlockState current = mc.world.getBlockState(pos);
+            BlockState current = mc.level.getBlockState(pos);
 
             if (activeProbePositions.contains(pos)) continue;
             if (isLavaState(original)) continue;
@@ -3939,7 +3949,7 @@ public class TunnelMinerModule extends Module {
             } else {
                 if (pos.getX() == px && pos.getZ() == pz) continue;
             }
-            if (Vec3d.ofCenter(pos).distanceTo(mc.player.getEyePos()) > reach) continue;
+            if (Vec3.atCenterOf(pos).distanceTo(mc.player.getEyePosition()) > reach) continue;
             return true;
         }
 
@@ -3950,13 +3960,13 @@ public class TunnelMinerModule extends Module {
         if (mc.player == null) return false;
 
         boolean strictExactRestore = isStrictStealthExactRestoreEnabled();
-        int px = MathHelper.floor(mc.player.getX());
-        int pz = MathHelper.floor(mc.player.getZ());
+        int px = Mth.floor(mc.player.getX());
+        int pz = Mth.floor(mc.player.getZ());
 
         for (Map.Entry<BlockPos, BlockState> entry : stealthCache.entrySet()) {
             BlockPos pos = entry.getKey();
             BlockState original = entry.getValue();
-            BlockState current = mc.world.getBlockState(pos);
+            BlockState current = mc.level.getBlockState(pos);
 
             if (activeProbePositions.contains(pos)) continue;
             if (isLavaState(original)) continue;
@@ -3979,13 +3989,13 @@ public class TunnelMinerModule extends Module {
         double maxSq = (double) maxDistance * maxDistance;
         double playerX = mc.player.getX();
         double playerZ = mc.player.getZ();
-        int px = MathHelper.floor(playerX);
-        int pz = MathHelper.floor(playerZ);
+        int px = Mth.floor(playerX);
+        int pz = Mth.floor(playerZ);
 
         for (Map.Entry<BlockPos, BlockState> entry : stealthCache.entrySet()) {
             BlockPos pos = entry.getKey();
             BlockState original = entry.getValue();
-            BlockState current = mc.world.getBlockState(pos);
+            BlockState current = mc.level.getBlockState(pos);
 
             if (activeProbePositions.contains(pos)) continue;
             if (isLavaState(original)) continue;
@@ -4033,12 +4043,12 @@ public class TunnelMinerModule extends Module {
     }
 
     private boolean isSolidSupportFloor(BlockPos floorPos) {
-        BlockState state = mc.world.getBlockState(floorPos);
+        BlockState state = mc.level.getBlockState(floorPos);
         return !state.isAir() && state.getFluidState().isEmpty();
     }
 
     private boolean ensureStealthFloorAt(BlockPos floorPos, boolean allowEntityIntersection) {
-        BlockState floorState = mc.world.getBlockState(floorPos);
+        BlockState floorState = mc.level.getBlockState(floorPos);
         if (!floorState.isAir() && floorState.getFluidState().isEmpty()) {
             watchdogCalc("support-floor", "result=true,reason=floor-solid,pos=" + formatPos(floorPos));
             return true;
@@ -4050,7 +4060,7 @@ public class TunnelMinerModule extends Module {
         }
 
         // Cache floor blocks we support-place so restore can remove/rebuild them later.
-        stealthCache.putIfAbsent(floorPos.toImmutable(), floorState);
+        stealthCache.putIfAbsent(floorPos.immutable(), floorState);
 
         int slot = findTraversalPlacementSlot(floorPos);
         if (slot == -1) {
@@ -4078,24 +4088,24 @@ public class TunnelMinerModule extends Module {
     private boolean tryAirPlaceAt(BlockPos pos, int hotbarSlot, boolean allowEntityIntersection) {
         markRenderPlace(pos);
         // Primary attempt.
-        if (BlockUtils.place(pos, Hand.MAIN_HAND, hotbarSlot, false, 0, true, !allowEntityIntersection, true)) {
+        if (BlockUtils.place(pos, InteractionHand.MAIN_HAND, hotbarSlot, false, 0, true, !allowEntityIntersection, true)) {
             watchdogCalc("air-place", String.format(Locale.ROOT, "result=true,attempt=1,pos=%s,hotbar=%d,allowEntityIntersection=%s", formatPos(pos), hotbarSlot, allowEntityIntersection));
             return true;
         }
 
         // Fallback attempts to improve reliability when the first place packet is rejected.
-        if (BlockUtils.place(pos, Hand.MAIN_HAND, hotbarSlot, false, 0, true, !allowEntityIntersection, true)) {
+        if (BlockUtils.place(pos, InteractionHand.MAIN_HAND, hotbarSlot, false, 0, true, !allowEntityIntersection, true)) {
             watchdogCalc("air-place", String.format(Locale.ROOT, "result=true,attempt=2,pos=%s,hotbar=%d,allowEntityIntersection=%s", formatPos(pos), hotbarSlot, allowEntityIntersection));
             return true;
         }
-        boolean third = BlockUtils.place(pos, Hand.MAIN_HAND, hotbarSlot, false, 0, true, false, true);
+        boolean third = BlockUtils.place(pos, InteractionHand.MAIN_HAND, hotbarSlot, false, 0, true, false, true);
         watchdogCalc("air-place", String.format(Locale.ROOT, "result=%s,attempt=3,pos=%s,hotbar=%d,allowEntityIntersection=%s", third, formatPos(pos), hotbarSlot, allowEntityIntersection));
         return third;
     }
 
     private boolean tryDirectPlaceAt(BlockPos pos, int hotbarSlot, boolean allowEntityIntersection) {
         markRenderPlace(pos);
-        boolean result = BlockUtils.place(pos, Hand.MAIN_HAND, hotbarSlot, false, 0, true, !allowEntityIntersection, true);
+        boolean result = BlockUtils.place(pos, InteractionHand.MAIN_HAND, hotbarSlot, false, 0, true, !allowEntityIntersection, true);
         watchdogCalc(
             "direct-place",
             String.format(
@@ -4112,7 +4122,7 @@ public class TunnelMinerModule extends Module {
 
     private void markRenderPlace(BlockPos pos) {
         if (!optRenderPlacing() || pos == null) return;
-        renderPlacePositions.add(pos.toImmutable());
+        renderPlacePositions.add(pos.immutable());
     }
 
     private void minePhase() {
@@ -4125,9 +4135,9 @@ public class TunnelMinerModule extends Module {
             return;
         }
 
-        int px = MathHelper.floor(mc.player.getX());
-        int py = MathHelper.floor(mc.player.getY());
-        int pz = MathHelper.floor(mc.player.getZ());
+        int px = Mth.floor(mc.player.getX());
+        int py = Mth.floor(mc.player.getY());
+        int pz = Mth.floor(mc.player.getZ());
         if (!refreshActiveNavigationGoal(px, py, pz)) return;
         boolean atGoalReady = px == destX && pz == destZ && isGoalCompletionCellLoaded();
 
@@ -4149,7 +4159,7 @@ public class TunnelMinerModule extends Module {
         watchdogCalc("mine-phase-step", String.format(Locale.ROOT, "pos=(%d,%d),step=(%d,%d),dest=(%d,%d),onXAxis=%s,pathMode=%s", px, pz, stepX, stepZ, destX, destZ, onXAxis, hardPathMode()));
         if (stepX == 0 && stepZ == 0) {
             if (atGoalReady) setPhase(Phase.DONE);
-            else mc.options.forwardKey.setPressed(false);
+            else mc.options.keyUp.setDown(false);
             return;
         }
 
@@ -4175,7 +4185,7 @@ public class TunnelMinerModule extends Module {
 
             for (int i = 0; i < n; i++) {
                 BlockPos bp = toBreak.get(i);
-                if (optFillBehind()) fillLog.putIfAbsent(bp, mc.world.getBlockState(bp));
+                if (optFillBehind()) fillLog.putIfAbsent(bp, mc.level.getBlockState(bp));
 
                 BlockUtils.breakBlock(bp, true);
             }
@@ -4198,7 +4208,7 @@ public class TunnelMinerModule extends Module {
         int added = 0;
         for (int h = 0; h < optTunnelHeight(); h++) {
             BlockPos bp = new BlockPos(x, py + h, z);
-            BlockState bs = mc.world.getBlockState(bp);
+            BlockState bs = mc.level.getBlockState(bp);
             if (!bs.isAir() && bs.getBlock() != Blocks.BEDROCK && !isAvoidanceBlock(bs) && !touchesNoTouchChainBlock(bp) && !touchesLavaDetourRisk(bp)) {
                 out.add(bp);
                 added++;
@@ -4306,11 +4316,11 @@ public class TunnelMinerModule extends Module {
         probes.add(new BlockPos(x, py + optTunnelHeight(), z));
 
         for (BlockPos probe : probes) {
-            if (isLavaState(mc.world.getBlockState(probe))) targets.add(probe.toImmutable());
+            if (isLavaState(mc.level.getBlockState(probe))) targets.add(probe.immutable());
 
             for (Direction dir : Direction.values()) {
-                BlockPos adjacent = probe.offset(dir);
-                if (isLavaState(mc.world.getBlockState(adjacent))) targets.add(adjacent.toImmutable());
+                BlockPos adjacent = probe.relative(dir);
+                if (isLavaState(mc.level.getBlockState(adjacent))) targets.add(adjacent.immutable());
             }
         }
 
@@ -4330,8 +4340,8 @@ public class TunnelMinerModule extends Module {
 
     private void walkPhase() {
         // Bridging: check below current pos and target pos
-        BlockPos myFloor = mc.player.getBlockPos().down();
-        BlockPos targetFloor = new BlockPos(MathHelper.floor(walkTargetX), tunnelY - 1, MathHelper.floor(walkTargetZ));
+        BlockPos myFloor = mc.player.blockPosition().below();
+        BlockPos targetFloor = new BlockPos(Mth.floor(walkTargetX), tunnelY - 1, Mth.floor(walkTargetZ));
 
         if (placeFloor(myFloor) || placeFloor(targetFloor)) {
             return;
@@ -4355,7 +4365,7 @@ public class TunnelMinerModule extends Module {
     }
 
     private boolean placeFloor(BlockPos pos) {
-        if (mc.world.getBlockState(pos).isAir() || !mc.world.getBlockState(pos).getFluidState().isEmpty()) {
+        if (mc.level.getBlockState(pos).isAir() || !mc.level.getBlockState(pos).getFluidState().isEmpty()) {
             int slot = findTraversalPlacementSlot(pos);
             if (slot != -1) {
                 int hb = toHotbar(slot);
@@ -4374,9 +4384,9 @@ public class TunnelMinerModule extends Module {
 
     // Place blocks ahead in the air to prevent falling
     private boolean placeAheadBlocks() {
-        int px = MathHelper.floor(mc.player.getX());
+        int px = Mth.floor(mc.player.getX());
         int py = tunnelY;
-        int pz = MathHelper.floor(mc.player.getZ());
+        int pz = Mth.floor(mc.player.getZ());
         int[] step = nextStep(px, pz);
         int stepX = step[0];
         int stepZ = step[1];
@@ -4388,7 +4398,7 @@ public class TunnelMinerModule extends Module {
 
         for (int d = 1; d <= optAirPlaceDistance(); d++) {
             BlockPos placePos = new BlockPos(px + stepX * d, py - 1, pz + stepZ * d);
-            if (mc.world.getBlockState(placePos).isAir()) {
+            if (mc.level.getBlockState(placePos).isAir()) {
                 int slot = findTraversalPlacementSlot(placePos);
                 if (slot == -1) {
                     watchdogCalc("place-ahead", String.format(Locale.ROOT, "result=false,reason=no-slot,pos=%s,d=%d", formatPos(placePos), d));
@@ -4421,15 +4431,15 @@ public class TunnelMinerModule extends Module {
         watchdogCalc("move-toward", String.format(Locale.ROOT, "target=(%.3f,%.3f),dx=%.5f,dz=%.5f,distSq=%.5f", targetX, targetZ, dx, dz, distSq));
 
         if (distSq < 0.04) { // < 0.2 blocks
-            mc.options.forwardKey.setPressed(false);
+            mc.options.keyUp.setDown(false);
             watchdogCalc("move-toward", String.format(Locale.ROOT, "arrived=true,target=(%.3f,%.3f)", targetX, targetZ));
             onArrival.run();
             return;
         }
 
         float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-        mc.player.setYaw(yaw);
-        mc.options.forwardKey.setPressed(true);
+        mc.player.setYRot(yaw);
+        mc.options.keyUp.setDown(true);
         watchdogCalc("move-toward", String.format(Locale.ROOT, "arrived=false,yaw=%.3f", yaw));
     }
 
@@ -4452,8 +4462,8 @@ public class TunnelMinerModule extends Module {
             }
         }
 
-        int px = MathHelper.floor(mc.player.getX());
-        int pz = MathHelper.floor(mc.player.getZ());
+        int px = Mth.floor(mc.player.getX());
+        int pz = Mth.floor(mc.player.getZ());
         int placed = 0;
         int scanned = 0;
         int skippedNear = 0;
@@ -4468,7 +4478,7 @@ public class TunnelMinerModule extends Module {
             Map.Entry<BlockPos, BlockState> e = it.next();
             BlockPos pos = e.getKey();
             BlockState original = e.getValue();
-            BlockState current = mc.world.getBlockState(pos);
+            BlockState current = mc.level.getBlockState(pos);
             scanned++;
 
             // Skip if player is standing on or next to this block
@@ -4478,7 +4488,7 @@ public class TunnelMinerModule extends Module {
             }
 
             // Skip if too far away
-            if (Vec3d.ofCenter(pos).distanceTo(mc.player.getEyePos()) > 4 + Objects.requireNonNull(Modules.get().get(Reach.class)).blockReach()) {
+            if (Vec3.atCenterOf(pos).distanceTo(mc.player.getEyePosition()) > 4 + Objects.requireNonNull(Modules.get().get(Reach.class)).blockReach()) {
                 skippedFar++;
                 continue;
             }
@@ -4521,7 +4531,7 @@ public class TunnelMinerModule extends Module {
                 continue;
             }
 
-            if (!optAirPlace() && mc.world.getBlockState(pos.down()).isAir()) {
+            if (!optAirPlace() && mc.level.getBlockState(pos.below()).isAir()) {
                 skippedNoSupport++;
                 continue;
             }
@@ -4550,7 +4560,7 @@ public class TunnelMinerModule extends Module {
 
             InvUtils.swap(hb, true);
             if (tryAirPlaceAt(pos, hb, false)) {
-                BlockState after = mc.world.getBlockState(pos);
+                BlockState after = mc.level.getBlockState(pos);
                 if (isRestoreSatisfied(original, after, strictExactRestore)) {
                     it.remove();
                     placed++;
@@ -4581,9 +4591,9 @@ public class TunnelMinerModule extends Module {
         int stepZ = step[1];
 
         if (stepX == 0 && stepZ == 0) {
-            Direction facing = mc.player.getHorizontalFacing();
-            stepX = facing.getOffsetX();
-            stepZ = facing.getOffsetZ();
+            Direction facing = mc.player.getDirection();
+            stepX = facing.getStepX();
+            stepZ = facing.getStepZ();
         }
 
         // Reserve one column directly behind the player for container placement.
@@ -4604,14 +4614,14 @@ public class TunnelMinerModule extends Module {
         for (Map.Entry<BlockPos, BlockState> entry : stealthCache.entrySet()) {
             BlockPos pos = entry.getKey();
             BlockState original = entry.getValue();
-            BlockState current = mc.world.getBlockState(pos);
+            BlockState current = mc.level.getBlockState(pos);
 
             if (pos.getX() == reservedX && pos.getZ() == reservedZ) continue;
             if (!isBehindForRestock(px, pz, forwardX, forwardZ, pos)) continue;
             if (isLavaState(original)) continue;
             if (isLavaState(current)) continue;
             if (isRestoreSatisfied(original, current, strictExactRestore)) continue;
-            if (reachableOnly && Vec3d.ofCenter(pos).distanceTo(mc.player.getEyePos()) > reach) continue;
+            if (reachableOnly && Vec3.atCenterOf(pos).distanceTo(mc.player.getEyePosition()) > reach) continue;
             return true;
         }
 
@@ -4645,7 +4655,7 @@ public class TunnelMinerModule extends Module {
             Map.Entry<BlockPos, BlockState> entry = it.next();
             BlockPos pos = entry.getKey();
             BlockState original = entry.getValue();
-            BlockState current = mc.world.getBlockState(pos);
+            BlockState current = mc.level.getBlockState(pos);
             scanned++;
 
             if (pos.getX() == reservedX && pos.getZ() == reservedZ) {
@@ -4663,7 +4673,7 @@ public class TunnelMinerModule extends Module {
                 continue;
             }
 
-            if (Vec3d.ofCenter(pos).distanceTo(mc.player.getEyePos()) > reach) {
+            if (Vec3.atCenterOf(pos).distanceTo(mc.player.getEyePosition()) > reach) {
                 skippedReach++;
                 continue;
             }
@@ -4727,7 +4737,7 @@ public class TunnelMinerModule extends Module {
             if (tryAirPlaceAt(pos, hb, false)) {
                 actions++;
                 placed = true;
-                BlockState after = mc.world.getBlockState(pos);
+                BlockState after = mc.level.getBlockState(pos);
                 if (isRestoreSatisfied(original, after, strictExactRestore)) {
                     it.remove();
                     if (exactRestore) placedExact++;
@@ -4778,9 +4788,9 @@ public class TunnelMinerModule extends Module {
     }
 
     private void restockClear() {
-        int px = MathHelper.floor(mc.player.getX());
+        int px = Mth.floor(mc.player.getX());
         int py = tunnelY;
-        int pz = MathHelper.floor(mc.player.getZ());
+        int pz = Mth.floor(mc.player.getZ());
         RestockPlacement placement = computeRestockPlacement(px, py, pz);
         containerPos = placement.containerPos();
         boolean maintainBehindParity = shouldMaintainBehindParity();
@@ -4792,11 +4802,11 @@ public class TunnelMinerModule extends Module {
 
         boolean clear = true;
         for (int h = 0; h < optTunnelHeight(); h++) {
-            BlockPos bp = containerPos.up(h);
-            BlockState state = mc.world.getBlockState(bp);
+            BlockPos bp = containerPos.above(h);
+            BlockState state = mc.level.getBlockState(bp);
             if (state.isAir()) continue;
 
-            if (maintainBehindParity) stealthCache.putIfAbsent(bp.toImmutable(), state);
+            if (maintainBehindParity) stealthCache.putIfAbsent(bp.immutable(), state);
             ensurePickaxe();
             BlockUtils.breakBlock(bp, true);
             clear = false;
@@ -4823,7 +4833,7 @@ public class TunnelMinerModule extends Module {
                         Locale.ROOT,
                         "container=shulker,slot=%d,pickShulker=%s,preferNext=%s,fromEcExtract=%s,ecExhausted=%s",
                         sk,
-                        shulkerContainsPickaxe(mc.player.getInventory().getStack(sk)),
+                        shulkerContainsPickaxe(mc.player.getInventory().getItem(sk)),
                         restockPreferShulkerNext,
                         restockEcExtractedPickShulker,
                         restockEcSearchExhausted
@@ -4864,17 +4874,17 @@ public class TunnelMinerModule extends Module {
     private void restockPlace() {
         if (!centerForRestockPlacement()) return;
 
-        int px = MathHelper.floor(mc.player.getX());
+        int px = Mth.floor(mc.player.getX());
         int py = tunnelY;
-        int pz = MathHelper.floor(mc.player.getZ());
+        int pz = Mth.floor(mc.player.getZ());
         RestockPlacement placement = computeRestockPlacement(px, py, pz);
         containerPos = placement.containerPos();
-        restockCleanupPos = containerPos.toImmutable();
+        restockCleanupPos = containerPos.immutable();
 
-        BlockPos floor = containerPos.down();
-        BlockState floorState = mc.world.getBlockState(floor);
+        BlockPos floor = containerPos.below();
+        BlockState floorState = mc.level.getBlockState(floor);
         if (floorState.isAir()) {
-            if (shouldMaintainBehindParity()) stealthCache.putIfAbsent(floor.toImmutable(), floorState);
+            if (shouldMaintainBehindParity()) stealthCache.putIfAbsent(floor.immutable(), floorState);
             int supportSlot = findTraversalPlacementSlot(floor);
             if (supportSlot == -1) {
                 if (optDebugMessages()) warning("No floor and no support block for restock container.");
@@ -4917,8 +4927,8 @@ public class TunnelMinerModule extends Module {
         }
 
         boolean placedNow = restockEC
-            ? mc.world.getBlockState(containerPos).getBlock() == Blocks.ENDER_CHEST
-            : mc.world.getBlockState(containerPos).getBlock() instanceof ShulkerBoxBlock;
+            ? mc.level.getBlockState(containerPos).getBlock() == Blocks.ENDER_CHEST
+            : mc.level.getBlockState(containerPos).getBlock() instanceof ShulkerBoxBlock;
         if (!placedNow) {
             restockPlaceRetries++;
             watchdogCalc(
@@ -4950,8 +4960,8 @@ public class TunnelMinerModule extends Module {
     }
 
     private boolean centerForRestockPlacement() {
-        int px = MathHelper.floor(mc.player.getX());
-        int pz = MathHelper.floor(mc.player.getZ());
+        int px = Mth.floor(mc.player.getX());
+        int pz = Mth.floor(mc.player.getZ());
         double targetX = px + 0.5;
         double targetZ = pz + 0.5;
         double dx = targetX - mc.player.getX();
@@ -4960,7 +4970,7 @@ public class TunnelMinerModule extends Module {
 
         // Keep this tight so we are reliably centered before attempting placement.
         if (distSq <= 0.0025) {
-            mc.options.forwardKey.setPressed(false);
+            mc.options.keyUp.setDown(false);
             waitTicks = 0;
             watchdogCalc(
                 "restock-center",
@@ -4977,9 +4987,9 @@ public class TunnelMinerModule extends Module {
 
         // If close enough for moveToward "arrival", snap exactly to .5/.5 like HighwayBuilder.
         if (distSq < 0.04) {
-            mc.options.forwardKey.setPressed(false);
-            mc.player.setVelocity(0, 0, 0);
-            mc.player.setPosition(targetX, mc.player.getY(), targetZ);
+            mc.options.keyUp.setDown(false);
+            mc.player.setDeltaMovement(0, 0, 0);
+            mc.player.setPos(targetX, mc.player.getY(), targetZ);
             waitTicks = 0;
             watchdogCalc(
                 "restock-center",
@@ -4996,9 +5006,9 @@ public class TunnelMinerModule extends Module {
 
         waitTicks++;
         if (waitTicks > MAX_WAIT) {
-            mc.options.forwardKey.setPressed(false);
-            mc.player.setVelocity(0, 0, 0);
-            mc.player.setPosition(targetX, mc.player.getY(), targetZ);
+            mc.options.keyUp.setDown(false);
+            mc.player.setDeltaMovement(0, 0, 0);
+            mc.player.setPos(targetX, mc.player.getY(), targetZ);
             watchdogCalc(
                 "restock-center",
                 String.format(
@@ -5034,8 +5044,8 @@ public class TunnelMinerModule extends Module {
     private void restockWait() {
         waitTicks++;
         boolean here = restockEC
-            ? mc.world.getBlockState(containerPos).getBlock() == Blocks.ENDER_CHEST
-            : mc.world.getBlockState(containerPos).getBlock() instanceof ShulkerBoxBlock;
+            ? mc.level.getBlockState(containerPos).getBlock() == Blocks.ENDER_CHEST
+            : mc.level.getBlockState(containerPos).getBlock() instanceof ShulkerBoxBlock;
         if (here) {
             waitTicks = 0;
             restockPlaceRetries = 0;
@@ -5085,11 +5095,11 @@ public class TunnelMinerModule extends Module {
         if (waitTicks == 1) {
             BlockPos bp = containerPos;
             Rotations.rotate(Rotations.getYaw(bp), Rotations.getPitch(bp),
-                () -> mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND,
-                    new BlockHitResult(Vec3d.ofCenter(bp), Direction.UP, bp, false)));
+                () -> mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND,
+                    new BlockHitResult(Vec3.atCenterOf(bp), Direction.UP, bp, false)));
             return;
         }
-        if (mc.currentScreen != null) {
+        if (mc.screen != null) {
             waitTicks = 0;
             invTimer = optInvDelay();
             if (optDebugMessages()) info("Container open, looting pickaxes.");
@@ -5103,7 +5113,7 @@ public class TunnelMinerModule extends Module {
     }
 
     private void restockLoot() {
-        if (mc.currentScreen == null) {
+        if (mc.screen == null) {
             watchdogCalc("restock-loot", "action=close-screen-null");
             setPhase(Phase.RESTOCK_CLOSE);
             return;
@@ -5111,8 +5121,8 @@ public class TunnelMinerModule extends Module {
 
         // Count free slots — must keep AT LEAST 1 free for the container item drop
         int free = 0;
-        for (int i = 0; i < mc.player.getInventory().size(); i++) {
-            if (mc.player.getInventory().getStack(i).isEmpty()) {
+        for (int i = 0; i < mc.player.getInventory().getContainerSize(); i++) {
+            if (mc.player.getInventory().getItem(i).isEmpty()) {
                 free++;
             }
         }
@@ -5142,10 +5152,10 @@ public class TunnelMinerModule extends Module {
             return;
         }
 
-        var handler = mc.player.currentScreenHandler;
+        var handler = mc.player.containerMenu;
         int containerSlots = Math.min(27, handler.slots.size());
         for (int i = 0; i < containerSlots; i++) {
-            if (isPickaxe(handler.slots.get(i).getStack())) {
+            if (isPickaxe(handler.slots.get(i).getItem())) {
                 InvUtils.shiftClick().slotId(i);
                 watchdogCalc(
                     "restock-loot",
@@ -5193,7 +5203,7 @@ public class TunnelMinerModule extends Module {
             int bestSlot = -1;
             int bestPickCount = 0;
             for (int i = 0; i < containerSlots; i++) {
-                ItemStack stack = handler.slots.get(i).getStack();
+                ItemStack stack = handler.slots.get(i).getItem();
                 if (!isShulkerBox(stack)) continue;
                 shulkersSeen++;
                 int picksInShulker = countPickaxesInShulker(stack);
@@ -5288,8 +5298,8 @@ public class TunnelMinerModule extends Module {
     }
 
     private void restockClose() {
-        if (mc.currentScreen != null) {
-            mc.currentScreen.close();
+        if (mc.screen != null) {
+            mc.screen.onClose();
             invTimer = optInvDelay();
             return;
         }
@@ -5302,10 +5312,10 @@ public class TunnelMinerModule extends Module {
             setPhase(Phase.RESTOCK_PICKUP);
             return;
         }
-        boolean here = mc.world.getBlockState(containerPos).getBlock() instanceof ShulkerBoxBlock
-            || mc.world.getBlockState(containerPos).getBlock() == Blocks.ENDER_CHEST;
+        boolean here = mc.level.getBlockState(containerPos).getBlock() instanceof ShulkerBoxBlock
+            || mc.level.getBlockState(containerPos).getBlock() == Blocks.ENDER_CHEST;
         if (here) {
-            restockCleanupPos = containerPos.toImmutable();
+            restockCleanupPos = containerPos.immutable();
             ensurePickaxe();
             BlockUtils.breakBlock(containerPos, true);
             return;
@@ -5316,27 +5326,27 @@ public class TunnelMinerModule extends Module {
 
     private boolean isRestockDropItem(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return false;
-        if (stack.isOf(Items.ENDER_CHEST) || stack.isOf(Items.OBSIDIAN)) return true;
+        if (stack.is(Items.ENDER_CHEST) || stack.is(Items.OBSIDIAN)) return true;
         return stack.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock;
     }
 
     private List<ItemEntity> collectRestockDropEntities() {
         BlockPos center = restockCleanupPos != null
             ? restockCleanupPos
-            : (containerPos != null ? containerPos : mc.player.getBlockPos());
-        Box area = new Box(center).expand(2.5, 1.5, 2.5);
-        return mc.world.getEntitiesByClass(
+            : (containerPos != null ? containerPos : mc.player.blockPosition());
+        AABB area = new AABB(center).inflate(2.5, 1.5, 2.5);
+        return mc.level.getEntitiesOfClass(
             ItemEntity.class,
             area,
-            entity -> entity != null && entity.isAlive() && isRestockDropItem(entity.getStack())
+            entity -> entity != null && entity.isAlive() && isRestockDropItem(entity.getItem())
         );
     }
 
     private String summarizeRestockDropEntities(List<ItemEntity> drops) {
         HashMap<String, Integer> counts = new HashMap<>();
         for (ItemEntity drop : drops) {
-            ItemStack stack = drop.getStack();
-            String id = Registries.ITEM.getId(stack.getItem()).toString();
+            ItemStack stack = drop.getItem();
+            String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
             counts.merge(id, stack.getCount(), Integer::sum);
         }
         ArrayList<Map.Entry<String, Integer>> entries = new ArrayList<>(counts.entrySet());
@@ -5357,7 +5367,7 @@ public class TunnelMinerModule extends Module {
             ItemEntity nearestDrop = null;
             double nearestDistSq = Double.POSITIVE_INFINITY;
             for (ItemEntity drop : drops) {
-                double distSq = mc.player.squaredDistanceTo(drop.getX(), drop.getY(), drop.getZ());
+                double distSq = mc.player.distanceToSqr(drop.getX(), drop.getY(), drop.getZ());
                 if (distSq < nearestDistSq) {
                     nearestDistSq = distSq;
                     nearestDrop = drop;
@@ -5369,7 +5379,7 @@ public class TunnelMinerModule extends Module {
             if (moveThisTick) {
                 moveToward(nearestDrop.getX(), nearestDrop.getZ(), () -> {});
             } else {
-                mc.options.forwardKey.setPressed(false);
+                mc.options.keyUp.setDown(false);
             }
 
             watchdogCalc(
@@ -5382,7 +5392,7 @@ public class TunnelMinerModule extends Module {
                     summarizeRestockDropEntities(drops),
                     restockCleanupPos == null ? "null" : formatPos(restockCleanupPos),
                     moveThisTick,
-                    nearestDrop == null ? "none" : formatPos(nearestDrop.getBlockPos()),
+                    nearestDrop == null ? "none" : formatPos(nearestDrop.blockPosition()),
                     nearestDistSq
                 )
             );
@@ -5393,7 +5403,7 @@ public class TunnelMinerModule extends Module {
             return;
         }
 
-        mc.options.forwardKey.setPressed(false);
+        mc.options.keyUp.setDown(false);
         if (++waitTicks < 8) return;
         containerPos = null;
         restockCleanupPos = null;
@@ -5479,8 +5489,8 @@ public class TunnelMinerModule extends Module {
 
     private void hardFailRestock(String reason) {
         watchdogCalc("restock-hard-fail", "reason=" + sanitizeLogField(reason));
-        if (mc.getNetworkHandler() != null && mc.getNetworkHandler().getConnection() != null) {
-            mc.getNetworkHandler().getConnection().disconnect(Text.literal("[TunnelMiner] Restock failure: " + reason));
+        if (mc.getConnection() != null && mc.getConnection().getConnection() != null) {
+            mc.getConnection().getConnection().disconnect(Component.literal("[TunnelMiner] Restock failure: " + reason));
         }
         if (isActive()) toggle();
     }
@@ -5508,13 +5518,13 @@ public class TunnelMinerModule extends Module {
         watchdog("success-disconnect", sanitizeLogField(completionMessage));
         watchdogCalc("success-disconnect", sanitizeLogField(completionMessage));
 
-        if (mc.getNetworkHandler() != null && mc.getNetworkHandler().getConnection() != null) {
-            MutableText text = Text.literal("[")
-                .styled(style -> style.withColor(Formatting.WHITE))
-                .append(Text.literal(title).styled(style -> style.withColor(Formatting.BLUE)))
-                .append(Text.literal("] ").styled(style -> style.withColor(Formatting.WHITE)))
-                .append(Text.literal(completionMessage).styled(style -> style.withColor(Formatting.GREEN)));
-            mc.getNetworkHandler().getConnection().disconnect(text);
+        if (mc.getConnection() != null && mc.getConnection().getConnection() != null) {
+            MutableComponent text = Component.literal("[")
+                .withStyle(style -> style.withColor(ChatFormatting.WHITE))
+                .append(Component.literal(title).withStyle(style -> style.withColor(ChatFormatting.BLUE)))
+                .append(Component.literal("] ").withStyle(style -> style.withColor(ChatFormatting.WHITE)))
+                .append(Component.literal(completionMessage).withStyle(style -> style.withColor(ChatFormatting.GREEN)));
+            mc.getConnection().getConnection().disconnect(text);
         }
 
         if (isActive()) toggle();
@@ -5540,8 +5550,8 @@ public class TunnelMinerModule extends Module {
             sanitizeLogField(userReason)
         );
         watchdogCalc("hazard-hard-fail", details);
-        if (mc.getNetworkHandler() != null && mc.getNetworkHandler().getConnection() != null) {
-            mc.getNetworkHandler().getConnection().disconnect(Text.literal("[TunnelMiner] Hazard failure: " + userReason));
+        if (mc.getConnection() != null && mc.getConnection().getConnection() != null) {
+            mc.getConnection().getConnection().disconnect(Component.literal("[TunnelMiner] Hazard failure: " + userReason));
         }
         if (isActive()) toggle();
     }
@@ -5563,7 +5573,7 @@ public class TunnelMinerModule extends Module {
         watchdog("destination-unreachable", details);
         watchdogCalc("destination-unreachable", details);
         if (optDebugMessages()) warning("Destination unreachable under current safety rules: " + details);
-        if (mc.options != null) mc.options.forwardKey.setPressed(false);
+        if (mc.options != null) mc.options.keyUp.setDown(false);
         if (isActive()) toggle();
     }
 
@@ -5641,7 +5651,7 @@ public class TunnelMinerModule extends Module {
             && fallbackSearchCachedDestZ == requestedDestZ
             && fallbackSearchCachedRejectAirGaps == rejectAirGapDetours
             && fallbackSearchCachedAge != Integer.MIN_VALUE
-            && (mc.player.age - fallbackSearchCachedAge) <= hardPathCalcIntervalTicks()) {
+            && (mc.player.tickCount - fallbackSearchCachedAge) <= hardPathCalcIntervalTicks()) {
             return new GoalResolution(
                 fallbackSearchResultX,
                 fallbackSearchResultZ,
@@ -5752,7 +5762,7 @@ public class TunnelMinerModule extends Module {
         fallbackSearchCachedDestX = requestedDestX;
         fallbackSearchCachedDestZ = requestedDestZ;
         fallbackSearchCachedRejectAirGaps = rejectAirGapDetours;
-        fallbackSearchCachedAge = (mc != null && mc.player != null) ? mc.player.age : Integer.MIN_VALUE;
+        fallbackSearchCachedAge = (mc != null && mc.player != null) ? mc.player.tickCount : Integer.MIN_VALUE;
         fallbackSearchResultX = result.x();
         fallbackSearchResultZ = result.z();
         fallbackSearchResultMode = result.mode();
@@ -5782,7 +5792,7 @@ public class TunnelMinerModule extends Module {
     }
 
     public boolean goTo(int x, int z, int stealthMode, boolean renderingEnabled) {
-        if (mc == null || !mc.isOnThread()) {
+        if (mc == null || !mc.isSameThread()) {
             warning("TunnelMiner API goTo must be called on the Minecraft client thread.");
             return false;
         }
@@ -5792,7 +5802,7 @@ public class TunnelMinerModule extends Module {
             return false;
         }
 
-        if (mc == null || mc.player == null || mc.world == null) {
+        if (mc == null || mc.player == null || mc.level == null) {
             warning("Cannot start TunnelMiner API goTo without an active world/player context.");
             return false;
         }
@@ -5827,9 +5837,9 @@ public class TunnelMinerModule extends Module {
         watchdogWriteBuffer.setLength(0);
         watchdogWriteBufferLines = 0;
 
-        int px = MathHelper.floor(mc.player.getX());
-        int py = MathHelper.floor(mc.player.getY());
-        int pz = MathHelper.floor(mc.player.getZ());
+        int px = Mth.floor(mc.player.getX());
+        int py = Mth.floor(mc.player.getY());
+        int pz = Mth.floor(mc.player.getZ());
         requestedDestX = optTargetX();
         requestedDestZ = optTargetZ();
 
@@ -5943,7 +5953,7 @@ public class TunnelMinerModule extends Module {
 
     public int getBlocksLeft() {
         if (mc.player == null || !isActive()) return 0;
-        return blocksLeftFrom(MathHelper.floor(mc.player.getX()), MathHelper.floor(mc.player.getZ()));
+        return blocksLeftFrom(Mth.floor(mc.player.getX()), Mth.floor(mc.player.getZ()));
     }
 
     public double getEtaSeconds() {
@@ -5994,9 +6004,9 @@ public class TunnelMinerModule extends Module {
     }
 
     private boolean isGoalCompletionCellLoaded() {
-        if (mc == null || mc.world == null) return false;
+        if (mc == null || mc.level == null) return false;
         BlockPos completionPos = new BlockPos(destX, tunnelY, destZ);
-        return mc.world.getBlockState(completionPos).getBlock() != Blocks.VOID_AIR;
+        return mc.level.getBlockState(completionPos).getBlock() != Blocks.VOID_AIR;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -6384,7 +6394,7 @@ public class TunnelMinerModule extends Module {
 
                 for (int h = 0; h < height; h++) {
                     BlockPos pos = new BlockPos(x, py + h, z);
-                    BlockState state = mc.world.getBlockState(pos);
+                    BlockState state = mc.level.getBlockState(pos);
                     boolean isLava = isLavaState(state);
                     boolean isAir = state.isAir() || isLava;
 
@@ -6605,7 +6615,7 @@ public class TunnelMinerModule extends Module {
 
         for (int h = 0; h < optTunnelHeight(); h++) {
             BlockPos pos = new BlockPos(x, py + h, z);
-            BlockState state = mc.world.getBlockState(pos);
+            BlockState state = mc.level.getBlockState(pos);
 
             if (isAvoidanceBlock(state)) return true;
             if (touchesNoTouchChainBlock(pos)) return true;
@@ -6634,7 +6644,7 @@ public class TunnelMinerModule extends Module {
     private int[] getProactiveAStarCachedStep(int x, int z, int py, boolean axisMode) {
         if (mc == null || mc.player == null) return null;
         if (proactiveAStarCacheFromX == Integer.MIN_VALUE || proactiveAStarCacheAge == Integer.MIN_VALUE) return null;
-        int ageDelta = mc.player.age - proactiveAStarCacheAge;
+        int ageDelta = mc.player.tickCount - proactiveAStarCacheAge;
         if (ageDelta < 0 || ageDelta > PROACTIVE_ASTAR_REUSE_TICKS) return null;
         if (x != proactiveAStarCacheFromX || z != proactiveAStarCacheFromZ) return null;
         if (py != proactiveAStarCachePy) return null;
@@ -6653,7 +6663,7 @@ public class TunnelMinerModule extends Module {
         proactiveAStarCacheStepX = stepX;
         proactiveAStarCacheStepZ = stepZ;
         proactiveAStarCacheSummary = summary == null ? "" : summary;
-        proactiveAStarCacheAge = (mc != null && mc.player != null) ? mc.player.age : Integer.MIN_VALUE;
+        proactiveAStarCacheAge = (mc != null && mc.player != null) ? mc.player.tickCount : Integer.MIN_VALUE;
     }
 
     private boolean isStepTraversable(int fromX, int fromZ, int toX, int toZ, int py) {
@@ -6693,11 +6703,11 @@ public class TunnelMinerModule extends Module {
 
         PathStep step = new PathStep(fromX, fromZ, toX, toZ, stepX, stepZ);
         for (BlockPos pos : getStepProfilePositions(py, step, false)) {
-            BlockState state = mc.world.getBlockState(pos);
+            BlockState state = mc.level.getBlockState(pos);
 
             if (isAvoidanceBlock(state)) {
-                if (captureFailure) watchdogTraverseFail = "avoidance@" + pos.toShortString() + ":" + Registries.BLOCK.getId(state.getBlock());
-                watchdogCalc("traversable", String.format(Locale.ROOT, "from=(%d,%d),to=(%d,%d),pos=%s,state=%s,result=false,reason=avoidance", fromX, fromZ, toX, toZ, pos.toShortString(), Registries.BLOCK.getId(state.getBlock())));
+                if (captureFailure) watchdogTraverseFail = "avoidance@" + pos.toShortString() + ":" + BuiltInRegistries.BLOCK.getKey(state.getBlock());
+                watchdogCalc("traversable", String.format(Locale.ROOT, "from=(%d,%d),to=(%d,%d),pos=%s,state=%s,result=false,reason=avoidance", fromX, fromZ, toX, toZ, pos.toShortString(), BuiltInRegistries.BLOCK.getKey(state.getBlock())));
                 return false;
             }
             if (touchesNoTouchChainBlock(pos)) {
@@ -6717,8 +6727,8 @@ public class TunnelMinerModule extends Module {
                 return false;
             }
             if (!BlockUtils.canBreak(pos, state)) {
-                if (captureFailure) watchdogTraverseFail = "cannot-break@" + pos.toShortString() + ":" + Registries.BLOCK.getId(state.getBlock());
-                watchdogCalc("traversable", String.format(Locale.ROOT, "from=(%d,%d),to=(%d,%d),pos=%s,state=%s,result=false,reason=cannot-break", fromX, fromZ, toX, toZ, pos.toShortString(), Registries.BLOCK.getId(state.getBlock())));
+                if (captureFailure) watchdogTraverseFail = "cannot-break@" + pos.toShortString() + ":" + BuiltInRegistries.BLOCK.getKey(state.getBlock());
+                watchdogCalc("traversable", String.format(Locale.ROOT, "from=(%d,%d),to=(%d,%d),pos=%s,state=%s,result=false,reason=cannot-break", fromX, fromZ, toX, toZ, pos.toShortString(), BuiltInRegistries.BLOCK.getKey(state.getBlock())));
                 return false;
             }
         }
@@ -6769,7 +6779,7 @@ public class TunnelMinerModule extends Module {
     }
 
     private void hardFailStealthExactRestore(BlockPos pos, BlockState original, String stage) {
-        String blockId = Registries.BLOCK.getId(original.getBlock()).toString();
+        String blockId = BuiltInRegistries.BLOCK.getKey(original.getBlock()).toString();
         String details = String.format(
             Locale.ROOT,
             "reason=missing-exact-restore-block,stage=%s,pos=%s,block=%s",
@@ -6780,9 +6790,9 @@ public class TunnelMinerModule extends Module {
         watchdog("stealth-restore-hard-fail", details);
         String msg = "[TunnelMiner] Missing materials to restore tunnel (block=" + blockId + ", pos=" + pos.toShortString() + ").";
         if (optDebugMessages()) warning("Stealth restore hard fail: " + msg + " stage=" + stage);
-        if (mc.options != null) mc.options.forwardKey.setPressed(false);
-        if (mc.getNetworkHandler() != null && mc.getNetworkHandler().getConnection() != null) {
-            mc.getNetworkHandler().getConnection().disconnect(Text.literal(msg));
+        if (mc.options != null) mc.options.keyUp.setDown(false);
+        if (mc.getConnection() != null && mc.getConnection().getConnection() != null) {
+            mc.getConnection().getConnection().disconnect(Component.literal(msg));
         }
         if (isActive()) toggle();
     }
@@ -6824,10 +6834,10 @@ public class TunnelMinerModule extends Module {
 
     private boolean touchesNoTouchChainBlock(BlockPos pos) {
         if (!useStealthAvoidChainReactionBlocks()) return false;
-        if (isNoTouchChainState(mc.world.getBlockState(pos))) return true;
+        if (isNoTouchChainState(mc.level.getBlockState(pos))) return true;
 
         for (Direction dir : Direction.values()) {
-            if (isNoTouchChainState(mc.world.getBlockState(pos.offset(dir)))) return true;
+            if (isNoTouchChainState(mc.level.getBlockState(pos.relative(dir)))) return true;
         }
 
         return false;
@@ -6835,10 +6845,10 @@ public class TunnelMinerModule extends Module {
 
     private boolean touchesLavaDetourRisk(BlockPos pos) {
         if (!useStealthAvoidLavaDetours()) return false;
-        if (isLavaState(mc.world.getBlockState(pos))) return true;
+        if (isLavaState(mc.level.getBlockState(pos))) return true;
 
         for (Direction dir : Direction.values()) {
-            if (isLavaState(mc.world.getBlockState(pos.offset(dir)))) return true;
+            if (isLavaState(mc.level.getBlockState(pos.relative(dir)))) return true;
         }
 
         return false;
@@ -6846,13 +6856,13 @@ public class TunnelMinerModule extends Module {
 
     private boolean touchesAirGapDetourRisk(BlockPos floorPos, boolean rejectAirGaps) {
         if (!rejectAirGaps) return false;
-        if (mc.world.getBlockState(floorPos).isAir()) return true;
+        if (mc.level.getBlockState(floorPos).isAir()) return true;
 
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 if (dx == 0 && dz == 0) continue;
-                BlockPos adjacentFloor = floorPos.add(dx, 0, dz);
-                if (mc.world.getBlockState(adjacentFloor).isAir()) return true;
+                BlockPos adjacentFloor = floorPos.offset(dx, 0, dz);
+                if (mc.level.getBlockState(adjacentFloor).isAir()) return true;
             }
         }
 
@@ -6877,12 +6887,12 @@ public class TunnelMinerModule extends Module {
             if (token.isEmpty()) continue;
 
             Identifier id = Identifier.tryParse(token);
-            if (id == null || !Registries.BLOCK.containsId(id)) {
+            if (id == null || !BuiltInRegistries.BLOCK.containsKey(id)) {
                 if (optDebugMessages()) warning("Embedded avoidance block id not found: " + token);
                 continue;
             }
 
-            Block block = Registries.BLOCK.get(id);
+            Block block = BuiltInRegistries.BLOCK.getValue(id);
             if (block != Blocks.AIR && out.add(block)) loaded++;
         }
 
@@ -6948,7 +6958,7 @@ public class TunnelMinerModule extends Module {
         if (optStealthDoubleMine()) {
             ArrayDeque<BlockPos> doubleMineTargets = new ArrayDeque<>();
             for (BlockPos pos : targets) {
-                BlockState state = mc.world.getBlockState(pos);
+                BlockState state = mc.level.getBlockState(pos);
                 if (!isMineCandidate(pos, state) || BlockUtils.canInstaBreak(pos)) {
                     doubleSkipped++;
                     continue;
@@ -6961,7 +6971,7 @@ public class TunnelMinerModule extends Module {
                     doubleSkipped++;
                     continue;
                 }
-                doubleMineTargets.add(pos.toImmutable());
+                doubleMineTargets.add(pos.immutable());
             }
             doubleQueued = doubleMineTargets.size();
 
@@ -7009,7 +7019,7 @@ public class TunnelMinerModule extends Module {
                 return;
             }
 
-            BlockState state = mc.world.getBlockState(pos);
+            BlockState state = mc.level.getBlockState(pos);
             if (!isMineCandidate(pos, state)) {
                 directSkippedNonCandidate++;
                 continue;
@@ -7069,7 +7079,7 @@ public class TunnelMinerModule extends Module {
                 normalMining = null;
                 StealthDoubleMineBlock.rateLimited = true;
                 changed = true;
-            } else if (mc.world.getBlockState(normalMining.blockPos).getBlock() != normalMining.block) {
+            } else if (mc.level.getBlockState(normalMining.blockPos).getBlock() != normalMining.block) {
                 normalMining = null;
                 blocksMined++;
                 StealthDoubleMineBlock.rateLimited = false;
@@ -7079,14 +7089,14 @@ public class TunnelMinerModule extends Module {
                 changed = true;
             }
 
-            mc.player.swingHand(Hand.MAIN_HAND);
+            mc.player.swing(InteractionHand.MAIN_HAND);
         }
 
         if (packetMining != null) {
             if (packetMining.shouldRemove()) {
                 packetMining = null;
                 changed = true;
-            } else if (mc.world.getBlockState(packetMining.blockPos).getBlock() != packetMining.block) {
+            } else if (mc.level.getBlockState(packetMining.blockPos).getBlock() != packetMining.block) {
                 packetMining = null;
                 blocksMined++;
                 changed = true;
@@ -7177,8 +7187,8 @@ public class TunnelMinerModule extends Module {
             for (int dy = -1; dy <= 1; dy++) {
                 for (int dz = -1; dz <= 1; dz++) {
                     if (dx == 0 && dy == 0 && dz == 0) continue;
-                    BlockPos probe = target.add(dx, dy, dz);
-                    if (!mc.world.getBlockState(probe).isAir()) continue;
+                    BlockPos probe = target.offset(dx, dy, dz);
+                    if (!mc.level.getBlockState(probe).isAir()) continue;
                     watchdogCalc("restore-adj-air", String.format(Locale.ROOT, "target=%s,result=true,adj=%s,delta=(%d,%d,%d)", formatPos(target), formatPos(probe), dx, dy, dz));
                     return true;
                 }
@@ -7197,7 +7207,7 @@ public class TunnelMinerModule extends Module {
                 for (int dz = -1; dz <= 1; dz++) {
                     if (dx == 0 && dy == 0 && dz == 0) continue;
 
-                    BlockState state = mc.world.getBlockState(target.add(dx, dy, dz));
+                    BlockState state = mc.level.getBlockState(target.offset(dx, dy, dz));
                     if (!isUsableRestoreReplacementBlock(state)) continue;
                     localCounts.merge(state.getBlock(), 1, Integer::sum);
                 }
@@ -7215,10 +7225,10 @@ public class TunnelMinerModule extends Module {
 
         for (Map.Entry<Block, Integer> entry : ranked) {
             if (ranking.length() > 0) ranking.append(';');
-            ranking.append(Registries.BLOCK.getId(entry.getKey())).append(':').append(entry.getValue());
+            ranking.append(BuiltInRegistries.BLOCK.getKey(entry.getKey())).append(':').append(entry.getValue());
             int slot = findExactBlockInInv(entry.getKey());
             if (slot != -1) {
-                watchdogCalc("restore-adj-slot", String.format(Locale.ROOT, "target=%s,result=%d,match=%s,ranking=%s", formatPos(target), slot, Registries.BLOCK.getId(entry.getKey()), ranking));
+                watchdogCalc("restore-adj-slot", String.format(Locale.ROOT, "target=%s,result=%d,match=%s,ranking=%s", formatPos(target), slot, BuiltInRegistries.BLOCK.getKey(entry.getKey()), ranking));
                 return slot;
             }
         }
@@ -7233,11 +7243,11 @@ public class TunnelMinerModule extends Module {
             if (!(stack.getItem() instanceof BlockItem blockItem)) return false;
 
             Block block = blockItem.getBlock();
-            BlockState state = block.getDefaultState();
+            BlockState state = block.defaultBlockState();
             if (!isUsableRestoreReplacementBlock(state)) return false;
 
             // Avoid placing containers/utility blocks as generic restore filler.
-            if (block instanceof BlockWithEntity) return false;
+            if (block instanceof BaseEntityBlock) return false;
             return true;
         });
         watchdogCalc("restore-any-slot", String.format(Locale.ROOT, "result=%d", slot));
@@ -7253,7 +7263,7 @@ public class TunnelMinerModule extends Module {
     }
 
     private boolean isLavaState(BlockState state) {
-        return state.getBlock() == Blocks.LAVA || state.getFluidState().isIn(FluidTags.LAVA);
+        return state.getBlock() == Blocks.LAVA || state.getFluidState().is(FluidTags.LAVA);
     }
 
     private static boolean isPickaxe(ItemStack s) {
@@ -7275,10 +7285,10 @@ public class TunnelMinerModule extends Module {
 
     private int countPickaxesInShulker(ItemStack shulker) {
         if (!isShulkerBox(shulker)) return 0;
-        ContainerComponent container = shulker.get(DataComponentTypes.CONTAINER);
+        ItemContainerContents container = shulker.get(DataComponents.CONTAINER);
         if (container == null) return 0;
         int picks = 0;
-        for (ItemStack stack : container.iterateNonEmpty()) {
+        for (ItemStack stack : container.nonEmptyItems()) {
             if (isPickaxe(stack)) picks += Math.max(1, stack.getCount());
         }
         return picks;
@@ -7286,8 +7296,8 @@ public class TunnelMinerModule extends Module {
 
     private int countPickaxesStoredInInventoryShulkers() {
         int total = 0;
-        for (int i = 0; i < mc.player.getInventory().size(); i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+        for (int i = 0; i < mc.player.getInventory().getContainerSize(); i++) {
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (!isShulkerBox(stack)) continue;
             total += countPickaxesInShulker(stack);
         }
@@ -7295,19 +7305,19 @@ public class TunnelMinerModule extends Module {
     }
 
     private static boolean isEnderChest(ItemStack s) {
-        return !s.isEmpty() && s.isOf(Items.ENDER_CHEST);
+        return !s.isEmpty() && s.is(Items.ENDER_CHEST);
     }
 
     private static int durabilityLeft(ItemStack s) {
-        if (!s.isDamageable()) return Integer.MAX_VALUE;
-        Integer d = s.get(DataComponentTypes.DAMAGE);
+        if (!s.isDamageableItem()) return Integer.MAX_VALUE;
+        Integer d = s.get(DataComponents.DAMAGE);
         return s.getMaxDamage() - (d != null ? d : 0);
     }
 
     private int countPickaxes() {
         int n = 0;
-        for (int i = 0; i < mc.player.getInventory().size(); i++) {
-            if (isPickaxe(mc.player.getInventory().getStack(i))) n++;
+        for (int i = 0; i < mc.player.getInventory().getContainerSize(); i++) {
+            if (isPickaxe(mc.player.getInventory().getItem(i))) n++;
         }
         return n;
     }
@@ -7320,8 +7330,8 @@ public class TunnelMinerModule extends Module {
     }
 
     private int findInInv(Predicate<ItemStack> p) {
-        for (int i = 0; i < mc.player.getInventory().size(); i++) {
-            if (p.test(mc.player.getInventory().getStack(i))) return i;
+        for (int i = 0; i < mc.player.getInventory().getContainerSize(); i++) {
+            if (p.test(mc.player.getInventory().getItem(i))) return i;
         }
         return -1;
     }
@@ -7330,11 +7340,11 @@ public class TunnelMinerModule extends Module {
         int best = -1;
         int bestDurability = Integer.MAX_VALUE;
         StringBuilder scored = new StringBuilder();
-        for (int i = 0; i < mc.player.getInventory().size(); i++) {
-            ItemStack s = mc.player.getInventory().getStack(i);
+        for (int i = 0; i < mc.player.getInventory().getContainerSize(); i++) {
+            ItemStack s = mc.player.getInventory().getItem(i);
             int sc = isPickaxe(s) ? durabilityLeft(s) : Integer.MAX_VALUE;
             if (scored.length() > 0) scored.append(';');
-            scored.append(i).append(':').append(sc).append(':').append(Registries.ITEM.getId(s.getItem()));
+            scored.append(i).append(':').append(sc).append(':').append(BuiltInRegistries.ITEM.getKey(s.getItem()));
             if (isPickaxe(s) && sc < bestDurability) {
                 bestDurability = sc;
                 best = i;
@@ -7352,7 +7362,7 @@ public class TunnelMinerModule extends Module {
     }
 
     private void ensurePickaxe() {
-        if (pickSlot >= 0 && isPickaxe(mc.player.getInventory().getStack(pickSlot))) {
+        if (pickSlot >= 0 && isPickaxe(mc.player.getInventory().getItem(pickSlot))) {
             InvUtils.swap(pickSlot, true);
             watchdogCalc("ensure-pickaxe", String.format(Locale.ROOT, "action=swap-existing,pickSlot=%d", pickSlot));
         } else {
@@ -7368,7 +7378,7 @@ public class TunnelMinerModule extends Module {
             watchdogCalc("to-hotbar", String.format(Locale.ROOT, "from=%d,to=%d,reason=already-hotbar,pickSlot=%d", slot, slot, pickSlot));
             return slot;
         }
-        if (slot < 0 || slot >= mc.player.getInventory().size()) {
+        if (slot < 0 || slot >= mc.player.getInventory().getContainerSize()) {
             watchdogCalc("to-hotbar", String.format(Locale.ROOT, "from=%d,to=-1,reason=invalid-slot,pickSlot=%d", slot, pickSlot));
             return -1;
         }
@@ -7390,7 +7400,7 @@ public class TunnelMinerModule extends Module {
     }
 
     private int shiftClickToHotbar(int sourceSlot) {
-        ItemStack sourceBefore = mc.player.getInventory().getStack(sourceSlot).copy();
+        ItemStack sourceBefore = mc.player.getInventory().getItem(sourceSlot).copy();
         if (sourceBefore.isEmpty()) {
             watchdogCalc("to-hotbar-shift", String.format(Locale.ROOT, "from=%d,result=-1,reason=source-empty", sourceSlot));
             return -1;
@@ -7406,7 +7416,7 @@ public class TunnelMinerModule extends Module {
 
         for (int i = 0; i < 9; i++) {
             ItemStack before = hotbarBefore[i];
-            ItemStack after = mc.player.getInventory().getStack(i);
+            ItemStack after = mc.player.getInventory().getItem(i);
             if (sameInventorySignature(before, after)) continue;
 
             if (!after.isEmpty() && after.getItem() == sourceBefore.getItem()) {
@@ -7428,7 +7438,7 @@ public class TunnelMinerModule extends Module {
                     "from=%d,result=%d,reason=changed-hotbar,sourceItem=%s,sourceCountBefore=%d,bestDelta=%d",
                     sourceSlot,
                     bestChanged,
-                    Registries.ITEM.getId(sourceBefore.getItem()),
+                    BuiltInRegistries.ITEM.getKey(sourceBefore.getItem()),
                     sourceCountBefore,
                     bestDelta
                 )
@@ -7436,7 +7446,7 @@ public class TunnelMinerModule extends Module {
             return bestChanged;
         }
 
-        ItemStack sourceAfter = mc.player.getInventory().getStack(sourceSlot);
+        ItemStack sourceAfter = mc.player.getInventory().getItem(sourceSlot);
         int sourceCountAfter = sourceAfter.getCount();
         if (sourceAfter.isEmpty() || sourceCountAfter < sourceCountBefore) {
             int fallback = findHotbarWithItem(sourceBefore.getItem());
@@ -7447,7 +7457,7 @@ public class TunnelMinerModule extends Module {
                     "from=%d,result=%d,reason=source-decreased-fallback,sourceItem=%s,sourceCountBefore=%d,sourceCountAfter=%d",
                     sourceSlot,
                     fallback,
-                    Registries.ITEM.getId(sourceBefore.getItem()),
+                    BuiltInRegistries.ITEM.getKey(sourceBefore.getItem()),
                     sourceCountBefore,
                     sourceCountAfter
                 )
@@ -7461,7 +7471,7 @@ public class TunnelMinerModule extends Module {
                 Locale.ROOT,
                 "from=%d,result=-1,reason=no-hotbar-change,sourceItem=%s,sourceCountBefore=%d,sourceCountAfter=%d",
                 sourceSlot,
-                Registries.ITEM.getId(sourceBefore.getItem()),
+                BuiltInRegistries.ITEM.getKey(sourceBefore.getItem()),
                 sourceCountBefore,
                 sourceCountAfter
             )
@@ -7472,11 +7482,11 @@ public class TunnelMinerModule extends Module {
     private int freeHotbarSlotByShiftClick() {
         for (int i = 0; i < 9; i++) {
             if (i == pickSlot) continue;
-            ItemStack before = mc.player.getInventory().getStack(i).copy();
+            ItemStack before = mc.player.getInventory().getItem(i).copy();
             if (before.isEmpty()) return i;
 
             InvUtils.shiftClick().slot(i);
-            ItemStack after = mc.player.getInventory().getStack(i);
+            ItemStack after = mc.player.getInventory().getItem(i);
             if (after.isEmpty() || !sameInventorySignature(before, after)) {
                 watchdogCalc(
                     "to-hotbar-free",
@@ -7484,7 +7494,7 @@ public class TunnelMinerModule extends Module {
                         Locale.ROOT,
                         "result=%d,reason=shift-cleared-or-changed,itemBefore=%s,countBefore=%d,countAfter=%d",
                         i,
-                        Registries.ITEM.getId(before.getItem()),
+                        BuiltInRegistries.ITEM.getKey(before.getItem()),
                         before.getCount(),
                         after.getCount()
                     )
@@ -7499,7 +7509,7 @@ public class TunnelMinerModule extends Module {
 
     private int findHotbarWithItem(Item item) {
         for (int i = 0; i < 9; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (!stack.isEmpty() && stack.getItem() == item) return i;
         }
         return -1;
@@ -7507,7 +7517,7 @@ public class TunnelMinerModule extends Module {
 
     private ItemStack[] snapshotHotbar() {
         ItemStack[] out = new ItemStack[9];
-        for (int i = 0; i < 9; i++) out[i] = mc.player.getInventory().getStack(i).copy();
+        for (int i = 0; i < 9; i++) out[i] = mc.player.getInventory().getItem(i).copy();
         return out;
     }
 
@@ -7562,28 +7572,28 @@ public class TunnelMinerModule extends Module {
         private StealthDoubleMineBlock(TunnelMinerModule module, BlockPos pos) {
             this.module = module;
             this.blockPos = pos;
-            this.blockState = module.mc.world.getBlockState(this.blockPos);
+            this.blockState = module.mc.level.getBlockState(this.blockPos);
             this.block = this.blockState.getBlock();
             this.direction = RangeUtils.nearestFace(pos);
             this.packet = false;
         }
 
         private StealthDoubleMineBlock startDestroying() {
-            if (module.mc.getNetworkHandler() != null) {
-                module.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(
-                    PlayerActionC2SPacket.Action.START_DESTROY_BLOCK,
+            if (module.mc.getConnection() != null) {
+                module.mc.getConnection().send(new ServerboundPlayerActionPacket(
+                    ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
                     this.blockPos,
                     this.direction
                 ));
             }
-            normalStartTime = module.mc.player.age;
+            normalStartTime = module.mc.player.tickCount;
             return this;
         }
 
         private StealthDoubleMineBlock stopDestroying() {
-            if (module.mc.getNetworkHandler() != null) {
-                module.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(
-                    PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK,
+            if (module.mc.getConnection() != null) {
+                module.mc.getConnection().send(new ServerboundPlayerActionPacket(
+                    ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK,
                     this.blockPos,
                     this.direction
                 ));
@@ -7592,9 +7602,9 @@ public class TunnelMinerModule extends Module {
         }
 
         private void abortDestroying() {
-            if (module.mc.getNetworkHandler() != null) {
-                module.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(
-                    PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK,
+            if (module.mc.getConnection() != null) {
+                module.mc.getConnection().send(new ServerboundPlayerActionPacket(
+                    ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK,
                     this.blockPos,
                     this.direction
                 ));
@@ -7602,7 +7612,7 @@ public class TunnelMinerModule extends Module {
         }
 
         private StealthDoubleMineBlock packetMine() {
-            packetStartTime = module.mc.player.age;
+            packetStartTime = module.mc.player.tickCount;
             packet = true;
             return stopDestroying();
         }
@@ -7615,14 +7625,14 @@ public class TunnelMinerModule extends Module {
             if (module.mc.player == null) return true;
 
             boolean distance = !packet && !RangeUtils.isInReach(blockPos);
-            boolean timeout = progress() > 2.0 && (module.mc.player.age - (packet ? packetStartTime : normalStartTime) > 60);
+            boolean timeout = progress() > 2.0 && (module.mc.player.tickCount - (packet ? packetStartTime : normalStartTime) > 60);
 
             return distance || timeout;
         }
 
         private double progress() {
             int slot = module.mc.player.getInventory().getSelectedSlot();
-            return BlockUtils.getBreakDelta(slot, blockState) * ((module.mc.player.age - (packet ? packetStartTime : normalStartTime)) + 1);
+            return BlockUtils.getBreakDelta(slot, blockState) * ((module.mc.player.tickCount - (packet ? packetStartTime : normalStartTime)) + 1);
         }
     }
 
@@ -7792,7 +7802,7 @@ public class TunnelMinerModule extends Module {
 
     private void appendResumeEntry(StringBuilder out, String group, Map.Entry<BlockPos, BlockState> entry) {
         if (entry == null || entry.getKey() == null || entry.getValue() == null) return;
-        Identifier id = Registries.BLOCK.getId(entry.getValue().getBlock());
+        Identifier id = BuiltInRegistries.BLOCK.getKey(entry.getValue().getBlock());
         if (id == null) return;
         BlockPos pos = entry.getKey();
         out.append(group).append('|')
@@ -7824,20 +7834,20 @@ public class TunnelMinerModule extends Module {
     private BlockState parsePersistedBlockState(String value) {
         if (value == null || value.isBlank()) return null;
         Identifier id = Identifier.tryParse(value.trim());
-        if (id == null || !Registries.BLOCK.containsId(id)) return null;
-        return Registries.BLOCK.get(id).getDefaultState();
+        if (id == null || !BuiltInRegistries.BLOCK.containsKey(id)) return null;
+        return BuiltInRegistries.BLOCK.getValue(id).defaultBlockState();
     }
 
     private String currentDimensionKey() {
-        if (mc != null && mc.world != null && mc.world.getRegistryKey() != null && mc.world.getRegistryKey().getValue() != null) {
-            return mc.world.getRegistryKey().getValue().toString();
+        if (mc != null && mc.level != null && mc.level.dimension() != null && mc.level.dimension().identifier() != null) {
+            return mc.level.dimension().identifier().toString();
         }
         return "unknown";
     }
 
     private Path resolveResumeCachePath() {
-        if (mc != null && mc.runDirectory != null) {
-            return mc.runDirectory.toPath().resolve("thm-tunnelminer-resume-cache.txt");
+        if (mc != null && mc.gameDirectory != null) {
+            return mc.gameDirectory.toPath().resolve("thm-tunnelminer-resume-cache.txt");
         }
         return Path.of("thm-tunnelminer-resume-cache.txt").toAbsolutePath();
     }
@@ -7875,12 +7885,12 @@ public class TunnelMinerModule extends Module {
             return;
         }
 
-        int age = mc.player.age;
+        int age = mc.player.tickCount;
         if (watchdogLastTelemetryAge == age) return;
         watchdogLastTelemetryAge = age;
 
-        int px = MathHelper.floor(mc.player.getX());
-        int pz = MathHelper.floor(mc.player.getZ());
+        int px = Mth.floor(mc.player.getX());
+        int pz = Mth.floor(mc.player.getZ());
         if (px == watchdogLastX && pz == watchdogLastZ) watchdogSamePosTicks++;
         else watchdogSamePosTicks = 0;
 
@@ -7894,17 +7904,17 @@ public class TunnelMinerModule extends Module {
     }
 
     private int countPendingStealthRestore(boolean allowNear) {
-        if (mc == null || mc.player == null || mc.world == null) return -1;
+        if (mc == null || mc.player == null || mc.level == null) return -1;
 
         boolean strictExactRestore = isStrictStealthExactRestoreEnabled();
-        int px = MathHelper.floor(mc.player.getX());
-        int pz = MathHelper.floor(mc.player.getZ());
+        int px = Mth.floor(mc.player.getX());
+        int pz = Mth.floor(mc.player.getZ());
         int count = 0;
 
         for (Map.Entry<BlockPos, BlockState> entry : stealthCache.entrySet()) {
             BlockPos pos = entry.getKey();
             BlockState original = entry.getValue();
-            BlockState current = mc.world.getBlockState(pos);
+            BlockState current = mc.level.getBlockState(pos);
 
             if (activeProbePositions.contains(pos)) continue;
             if (isLavaState(original)) continue;
@@ -7940,7 +7950,7 @@ public class TunnelMinerModule extends Module {
             Locale.ROOT,
             "%s,dir=%s,packet=%s,progress=%.3f,ready=%s",
             formatPos(block.blockPos),
-            block.direction == null ? "null" : block.direction.asString(),
+            block.direction == null ? "null" : block.direction.getSerializedName(),
             block.packet,
             progress,
             ready
@@ -7975,7 +7985,7 @@ public class TunnelMinerModule extends Module {
                 player = String.format(
                     Locale.ROOT,
                     "player=(%.3f,%.3f,%.3f),yaw=%.2f,pitch=%.2f",
-                    mc.player.getX(), mc.player.getY(), mc.player.getZ(), mc.player.getYaw(), mc.player.getPitch()
+                    mc.player.getX(), mc.player.getY(), mc.player.getZ(), mc.player.getYRot(), mc.player.getXRot()
                 );
             }
 
@@ -8031,7 +8041,7 @@ public class TunnelMinerModule extends Module {
                 player = String.format(
                     Locale.ROOT,
                     "player=(%.3f,%.3f,%.3f),yaw=%.2f,pitch=%.2f",
-                    mc.player.getX(), mc.player.getY(), mc.player.getZ(), mc.player.getYaw(), mc.player.getPitch()
+                    mc.player.getX(), mc.player.getY(), mc.player.getZ(), mc.player.getYRot(), mc.player.getXRot()
                 );
             }
             int pendingRestoreFar = -1;
@@ -8111,14 +8121,14 @@ public class TunnelMinerModule extends Module {
     }
 
     private void cachePendingRestoreCountsIfNeeded() {
-        if (mc == null || mc.player == null || mc.world == null) {
+        if (mc == null || mc.player == null || mc.level == null) {
             watchdogPendingCacheAge = Integer.MIN_VALUE;
             watchdogCachedPendingFar = -1;
             watchdogCachedPendingNear = -1;
             return;
         }
 
-        int age = mc.player.age;
+        int age = mc.player.tickCount;
         if (watchdogPendingCacheAge == age) return;
         watchdogPendingCacheAge = age;
         watchdogCachedPendingFar = countPendingStealthRestore(false);
@@ -8176,12 +8186,12 @@ public class TunnelMinerModule extends Module {
 
     private int watchdogBlocksLeft() {
         if (mc == null || mc.player == null) return -1;
-        return blocksLeftFrom(MathHelper.floor(mc.player.getX()), MathHelper.floor(mc.player.getZ()));
+        return blocksLeftFrom(Mth.floor(mc.player.getX()), Mth.floor(mc.player.getZ()));
     }
 
     private Path resolveWatchdogLogPath() {
-        if (mc != null && mc.runDirectory != null) {
-            return mc.runDirectory.toPath().resolve("thm-tunnelminer-watchdog.log");
+        if (mc != null && mc.gameDirectory != null) {
+            return mc.gameDirectory.toPath().resolve("thm-tunnelminer-watchdog.log");
         }
         return Path.of("thm-tunnelminer-watchdog.log").toAbsolutePath();
     }

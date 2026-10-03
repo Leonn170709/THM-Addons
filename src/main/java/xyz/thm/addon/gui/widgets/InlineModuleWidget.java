@@ -13,7 +13,7 @@ import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WCheckbox;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
-import net.minecraft.client.gui.Click;
+import net.minecraft.client.input.MouseButtonEvent;
 import xyz.thm.addon.mixin.accessor.WSectionAccessor;
 
 import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT;
@@ -115,7 +115,7 @@ public class InlineModuleWidget extends WSection {
         }
 
         @Override
-        public boolean onMouseClicked(Click click, boolean doubled) {
+        public boolean onMouseClicked(MouseButtonEvent click, boolean doubled) {
             if (!mouseOver || doubled) return false;
 
             int button = click.button();

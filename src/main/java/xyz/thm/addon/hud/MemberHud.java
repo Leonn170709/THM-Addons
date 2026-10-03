@@ -142,7 +142,7 @@ public class MemberHud extends HudElement {
         double textScale = scale.get();
 
         // Get all online players from tab list
-        List<String> onlinePlayers = new ArrayList<>(mc.player.networkHandler.getPlayerList().stream()
+        List<String> onlinePlayers = new ArrayList<>(mc.player.connection.getOnlinePlayers().stream()
             .map(playerInfo -> playerInfo.getProfile().name()).toList());
 
         // Group online usernames by their underlying member (multiple alts share the same Member instance)

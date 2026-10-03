@@ -7,9 +7,8 @@
 package xyz.thm.addon.utils;
 
 import meteordevelopment.meteorclient.settings.Setting;
-import net.minecraft.client.network.PlayerListEntry;
-import net.minecraft.text.Text;
-
+import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.network.chat.Component;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,9 +28,9 @@ public final class FastTab {
     public static Setting<Boolean> enabled;
     public static Setting<Boolean> heads;
 
-    private static final Map<UUID, Text> names = new HashMap<>();
+    private static final Map<UUID, Component> names = new HashMap<>();
     private static long namesAt;
-    private static List<PlayerListEntry> entries;
+    private static List<PlayerInfo> entries;
     private static long entriesAt;
 
     private FastTab() {}
@@ -48,11 +47,11 @@ public final class FastTab {
     }
 
     /** The cached entry list, or null when it is stale or the optimization is off. */
-    public static List<PlayerListEntry> entries() {
+    public static List<PlayerInfo> entries() {
         return on() && System.currentTimeMillis() - entriesAt <= TTL_MS ? entries : null;
     }
 
-    public static void storeEntries(List<PlayerListEntry> list) {
+    public static void storeEntries(List<PlayerInfo> list) {
         // our own cached list coming back out of the cancelled call - don't refresh the timestamp with it,
         // that would keep the cache alive forever
         if (list == entries) return;
@@ -61,7 +60,7 @@ public final class FastTab {
     }
 
     /** The cached name, or null when it is a miss and the caller has to build one. */
-    public static Text name(PlayerListEntry entry) {
+    public static Component name(PlayerInfo entry) {
         if (!on()) return null;
         long now = System.currentTimeMillis();
         if (now - namesAt > TTL_MS) {
@@ -71,7 +70,7 @@ public final class FastTab {
         return names.get(entry.getProfile().id());
     }
 
-    public static Text store(PlayerListEntry entry, Text name) {
+    public static Component store(PlayerInfo entry, Component name) {
         if (name != null && on()) names.put(entry.getProfile().id(), name);
         return name;
     }

@@ -15,8 +15,8 @@ import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.modules.HighwayBuilderTHM;
 import xyz.thm.addon.utils.TimeFormat;
@@ -112,8 +112,8 @@ public class HighwayHud extends HudElement {
         int echests = 0;
 
         // Player inventory (Hotbar + Main)
-        for (int i = 0; i < mc.player.getInventory().size(); i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+        for (int i = 0; i < mc.player.getInventory().getContainerSize(); i++) {
+            ItemStack stack = mc.player.getInventory().getItem(i);
 
             if (stack.isEmpty()) continue;
 

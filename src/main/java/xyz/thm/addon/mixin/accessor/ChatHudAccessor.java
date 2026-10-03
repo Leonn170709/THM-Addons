@@ -6,13 +6,13 @@
 
 package xyz.thm.addon.mixin.accessor;
 
-import net.minecraft.client.gui.hud.ChatHud;
-import net.minecraft.client.gui.hud.ChatHudLine;
+import net.minecraft.client.GuiMessage;
+import net.minecraft.client.gui.components.ChatComponent;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Invoker;
 
-@Mixin(ChatHud.class)
+@Mixin(ChatComponent.class)
 public interface ChatHudAccessor {
-    @Invoker("addMessage")
-    void thm$addMessage(ChatHudLine line);
+    @Invoker("addMessageToQueue")
+    void thm$addMessage(GuiMessage line);
 }

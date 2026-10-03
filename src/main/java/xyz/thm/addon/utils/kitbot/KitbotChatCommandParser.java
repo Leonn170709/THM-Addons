@@ -9,7 +9,7 @@ package xyz.thm.addon.utils.kitbot;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import meteordevelopment.meteorclient.MeteorClient;
-import net.minecraft.client.network.PlayerListEntry;
+import net.minecraft.client.multiplayer.PlayerInfo;
 import xyz.thm.addon.modules.KitbotFrontend;
 
 import java.util.*;
@@ -122,9 +122,9 @@ public final class KitbotChatCommandParser {
     }
 
     public static List<String> getOnlinePlayerNames() {
-        if (MeteorClient.mc == null || MeteorClient.mc.getNetworkHandler() == null) return List.of();
+        if (MeteorClient.mc == null || MeteorClient.mc.getConnection() == null) return List.of();
         List<String> names = new ArrayList<>();
-        for (PlayerListEntry entry : MeteorClient.mc.getNetworkHandler().getPlayerList()) {
+        for (PlayerInfo entry : MeteorClient.mc.getConnection().getOnlinePlayers()) {
             names.add(entry.getProfile().name());
         }
         return names;

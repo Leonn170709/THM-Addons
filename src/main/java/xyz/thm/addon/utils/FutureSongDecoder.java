@@ -12,7 +12,7 @@ import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.utils.notebot.decoder.SongDecoder;
 import meteordevelopment.meteorclient.utils.notebot.song.Note;
 import meteordevelopment.meteorclient.utils.notebot.song.Song;
-import net.minecraft.block.enums.NoteBlockInstrument;
+import net.minecraft.world.level.block.state.properties.NoteBlockInstrument;
 import org.apache.commons.io.FilenameUtils;
 import xyz.thm.addon.THMAddon;
 
@@ -56,7 +56,7 @@ public class FutureSongDecoder extends SongDecoder {
                 tick += (data[i + 1] & 0xFF) | (data[i + 2] & 0xFF) << 8;
                 i += 3;
             } else if (type < 0x40 && i + 1 < data.length) {
-                if (type < INSTRUMENTS.length && INSTRUMENTS[type].canBePitched()) {
+                if (type < INSTRUMENTS.length && INSTRUMENTS[type].isTunable()) {
                     notes.put(tick, new Note(INSTRUMENTS[type], data[i + 1] & 0xFF));
                 }
                 i += 2;

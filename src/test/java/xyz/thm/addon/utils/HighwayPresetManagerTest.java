@@ -8,13 +8,13 @@ package xyz.thm.addon.utils;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonParser;
-import net.minecraft.nbt.NbtCompound;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import net.minecraft.nbt.CompoundTag;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -22,14 +22,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class HighwayPresetManagerTest {
     @Test
     void presetJsonRoundTripsSettings() throws IOException {
-        NbtCompound settings = new NbtCompound();
+        CompoundTag settings = new CompoundTag();
         settings.putString("profile", "fast-paving");
         settings.putInt("placements", 7);
 
-        NbtCompound decoded = HighwayPresetManager.decode(HighwayPresetManager.encode(settings));
+        CompoundTag decoded = HighwayPresetManager.decode(HighwayPresetManager.encode(settings));
 
-        assertEquals("fast-paving", decoded.getString("profile", ""));
-        assertEquals(7, decoded.getInt("placements", 0));
+        assertEquals("fast-paving", decoded.getStringOr("profile", ""));
+        assertEquals(7, decoded.getIntOr("placements", 0));
     }
 
     @Test

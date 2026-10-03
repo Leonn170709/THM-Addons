@@ -16,13 +16,13 @@ import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.FallingBlockEntity;
-import net.minecraft.item.Item;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.item.FallingBlockEntity;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.AABB;
 import xyz.thm.addon.THMAddon;
 
 public class AntiConcrete extends Module {
@@ -95,7 +95,7 @@ public class AntiConcrete extends Module {
     @EventHandler
     public void onTick(TickEvent.Pre event) {
         // safety null checks
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
         // handle returning a swapped button
         if (waitingToReturn) {
@@ -134,9 +134,9 @@ public class AntiConcrete extends Module {
 
     // -------------------- Core Logic -------------------- //
     private void mineConcreteInside() {
-        BlockPos feet = mc.player.getBlockPos();
-        for (BlockPos pos : new BlockPos[]{feet, feet.up()}) {
-            if (!isFallingTrapBlock(mc.world.getBlockState(pos).getBlock())) continue;
+        BlockPos feet = mc.player.blockPosition();
+        for (BlockPos pos : new BlockPos[]{feet, feet.above()}) {
+            if (!isFallingTrapBlock(mc.level.getBlockState(pos).getBlock())) continue;
             // Speedmine's auto-rebreak re-mines the spot if more concrete lands
             if (!Speedmine.INSTANCE.isActive()) Speedmine.INSTANCE.toggle();
             Speedmine.INSTANCE.requestBreak(pos);
@@ -147,10 +147,10 @@ public class AntiConcrete extends Module {
         // don't spam placements
         if (placeCooldown > 0) return;
 
-        BlockPos currentPos = mc.player.getBlockPos();
+        BlockPos currentPos = mc.player.blockPosition();
 
         // don't place if there's already a button block or if there is no solid block to place onto
-        Block blockAt = mc.world.getBlockState(currentPos).getBlock();
+        Block blockAt = mc.level.getBlockState(currentPos).getBlock();
         if (isButtonBlock(blockAt)) return;
 
         // check if we can place at this position (BlockUtils.place will still try, but pre-check avoids waste)
@@ -186,7 +186,7 @@ public class AntiConcrete extends Module {
 
         // rotate only briefly — rotate to center of block (yaw/pitch)
         if (rotate.get()) {
-            Rotations.rotate(Rotations.getYaw(currentPos.toCenterPos()), Rotations.getPitch(currentPos.toCenterPos()));
+            Rotations.rotate(Rotations.getYaw(currentPos.getCenter()), Rotations.getPitch(currentPos.getCenter()));
         }
 
         // place and set cooldown to avoid placing every tick
@@ -201,18 +201,18 @@ public class AntiConcrete extends Module {
     }
 
     private boolean isConcreteAbove() {
-        BlockPos base = mc.player.getBlockPos();
+        BlockPos base = mc.player.blockPosition();
 
         for (int i = 1; i <= 3; i++) {
-            if (isFallingTrapBlock(mc.world.getBlockState(base.up(i)).getBlock())) return true;
+            if (isFallingTrapBlock(mc.level.getBlockState(base.above(i)).getBlock())) return true;
         }
 
-        Box box = new Box(
+        AABB box = new AABB(
             mc.player.getX() - 0.5, mc.player.getY() + 1, mc.player.getZ() - 0.5,
             mc.player.getX() + 0.5, mc.player.getY() + 4, mc.player.getZ() + 0.5
         );
 
-        for (Entity entity : mc.world.getOtherEntities(null, box)) {
+        for (Entity entity : mc.level.getEntities(null, box)) {
             if (entity instanceof FallingBlockEntity falling) {
                 if (isFallingTrapBlock(falling.getBlockState().getBlock())) return true;
             }

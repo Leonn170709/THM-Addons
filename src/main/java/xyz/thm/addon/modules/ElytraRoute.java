@@ -22,30 +22,30 @@ import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.SlotUtils;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.ShulkerBoxBlock;
-import net.minecraft.client.gui.screen.DisconnectedScreen;
-import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.ContainerComponent;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.entity.effect.StatusEffect;
-import net.minecraft.entity.effect.StatusEffectInstance;
-import net.minecraft.entity.effect.StatusEffects;
-import net.minecraft.item.BlockItem;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.text.Text;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.chunk.ChunkStatus;
+import net.minecraft.client.gui.screens.DisconnectedScreen;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.util.Mth;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.effect.MobEffect;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.InventoryManager;
 import xyz.thm.addon.utils.server.ServerReconnectService;
@@ -395,7 +395,7 @@ public class ElytraRoute extends Module {
     public void onActivate() {
         resetRuntime();
 
-        if (mc.player == null || mc.world == null) {
+        if (mc.player == null || mc.level == null) {
             error("Player or world was not available.");
             toggle();
             return;
@@ -456,7 +456,7 @@ public class ElytraRoute extends Module {
         handleAutoReconnectToggleTransitions();
         clearStaleDisconnectedScreenIfLiveConnected();
 
-        if (mc.player == null || mc.world == null) {
+        if (mc.player == null || mc.level == null) {
             releaseMovement();
             return;
         }
@@ -533,7 +533,7 @@ public class ElytraRoute extends Module {
     }
 
     private boolean shouldForceRouteFlightMovement() {
-        if (mc.player == null || mc.world == null) return false;
+        if (mc.player == null || mc.level == null) return false;
         if (!hasLiveServerConnection()) return false;
         if (routeStartPending || reconnectPaused || state != State.FLIGHT) return false;
         if (ServerStatusHandler.getInstance().getCommittedState() != ServerState.MAIN_SERVER) return false;
@@ -542,10 +542,10 @@ public class ElytraRoute extends Module {
 
     private void forceRouteFlightMovement() {
         ElytraFly elytraFly = Modules.get().get(ElytraFly.class);
-        mc.options.forwardKey.setPressed(true);
+        mc.options.keyUp.setDown(true);
 
-        if (shouldUseRouteBounceMode(elytraFly) && !mc.player.isGliding() && !mc.player.isOnGround()) {
-            mc.options.jumpKey.setPressed(true);
+        if (shouldUseRouteBounceMode(elytraFly) && !mc.player.isFallFlying() && !mc.player.onGround()) {
+            mc.options.keyJump.setDown(true);
             return;
         }
 
@@ -579,7 +579,7 @@ public class ElytraRoute extends Module {
     }
 
     private void startRouteFromCurrentMainServerState(String source, boolean initialActivation) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
         routeStartPending = false;
         reconnectPaused = false;
@@ -626,7 +626,7 @@ public class ElytraRoute extends Module {
             return;
         }
 
-        if (mc.player.isGliding()) {
+        if (mc.player.isFallFlying()) {
             enterFlightState();
         } else {
             state = State.TAKEOFF_AWAIT_GROUND;
@@ -709,7 +709,7 @@ public class ElytraRoute extends Module {
     }
 
     private void resumeRouteAfterReconnect(String source) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
         if (placedShulkerPos != null) {
             reconnectPaused = false;
@@ -754,7 +754,7 @@ public class ElytraRoute extends Module {
 
     private void closeHandledRestockScreenIfOpen() {
         if (!isRestockState(state)) return;
-        if (mc.currentScreen instanceof HandledScreen<?>) mc.currentScreen.close();
+        if (mc.screen instanceof AbstractContainerScreen<?>) mc.screen.onClose();
     }
 
     private void handleAutoReconnectToggleTransitions() {
@@ -779,15 +779,15 @@ public class ElytraRoute extends Module {
     private boolean hasLiveServerConnection() {
         return mc != null
             && mc.player != null
-            && mc.world != null
-            && mc.getNetworkHandler() != null
-            && mc.getNetworkHandler().getConnection() != null
-            && mc.getNetworkHandler().getConnection().isOpen();
+            && mc.level != null
+            && mc.getConnection() != null
+            && mc.getConnection().getConnection() != null
+            && mc.getConnection().getConnection().isConnected();
     }
 
     private void clearStaleDisconnectedScreenIfLiveConnected() {
         if (!hasLiveServerConnection()) return;
-        if (!(mc.currentScreen instanceof DisconnectedScreen)) return;
+        if (!(mc.screen instanceof DisconnectedScreen)) return;
         info("Clearing stale DisconnectedScreen while Elytra Route is live in-world.");
         mc.setScreen(null);
     }
@@ -811,7 +811,7 @@ public class ElytraRoute extends Module {
     }
 
     private void onReconnectMainServerReady(long cycleId, String contextTag, long armedAtMs, long detectedAtMs) {
-        if (mc != null && !mc.isOnThread()) {
+        if (mc != null && !mc.isSameThread()) {
             mc.execute(() -> onReconnectMainServerReady(cycleId, contextTag, armedAtMs, detectedAtMs));
             return;
         }
@@ -829,7 +829,7 @@ public class ElytraRoute extends Module {
         long armedAtMs,
         long failedAtMs
     ) {
-        if (mc != null && !mc.isOnThread()) {
+        if (mc != null && !mc.isSameThread()) {
             mc.execute(() -> onReconnectFailure(cycleId, reason, detail, contextTag, armedAtMs, failedAtMs));
             return;
         }
@@ -1175,11 +1175,11 @@ public class ElytraRoute extends Module {
         ElytraFly elytraFly = Modules.get().get(ElytraFly.class);
         if (isBounceElytraFly(elytraFly) && !bounceElytraFlyPaused) {
             configureBounceRouteMode(elytraFly, yaw);
-            if (mc.player != null) mc.player.setYaw(normalizeYaw(yaw));
+            if (mc.player != null) mc.player.setYRot(normalizeYaw(yaw));
             return;
         }
 
-        if (!ownRouteRotation(yaw) && mc.player != null) mc.player.setYaw(normalizeYaw(yaw));
+        if (!ownRouteRotation(yaw) && mc.player != null) mc.player.setYRot(normalizeYaw(yaw));
     }
 
     private boolean ownRouteRotation(float yaw) {
@@ -1222,13 +1222,13 @@ public class ElytraRoute extends Module {
         releaseMovement();
         restoreRotationSnapshot();
 
-        if (mc.player.isGliding()) {
+        if (mc.player.isFallFlying()) {
             takeoffFailures = 0;
             enterFlightState();
             return;
         }
 
-        if (!mc.player.isOnGround()) return;
+        if (!mc.player.onGround()) return;
 
         if (handleGroundedRouteInterruptBeforeTakeoff()) return;
 
@@ -1252,29 +1252,29 @@ public class ElytraRoute extends Module {
             return;
         }
 
-        mc.options.jumpKey.setPressed(true);
+        mc.options.keyJump.setDown(true);
         state = State.TAKEOFF_FIRST_JUMP;
         stateTicks = 0;
     }
 
     private void tickTakeoffFirstJump() {
-        mc.options.jumpKey.setPressed(stateTicks == 0);
+        mc.options.keyJump.setDown(stateTicks == 0);
         stateTicks++;
 
         if (stateTicks > 1) {
-            mc.options.jumpKey.setPressed(false);
+            mc.options.keyJump.setDown(false);
             state = State.TAKEOFF_SECOND_JUMP_WAIT;
             stateTicks = 0;
         }
     }
 
     private void tickTakeoffSecondJumpWait() {
-        mc.options.jumpKey.setPressed(false);
+        mc.options.keyJump.setDown(false);
         stateTicks++;
 
         if (stateTicks >= TAKEOFF_SECOND_JUMP_DELAY) {
             steerRouteYaw(computeBearingYaw());
-            mc.options.jumpKey.setPressed(true);
+            mc.options.keyJump.setDown(true);
             state = State.TAKEOFF_WAIT_GLIDE;
             stateTicks = 0;
         }
@@ -1282,17 +1282,17 @@ public class ElytraRoute extends Module {
 
     private void tickTakeoffWaitGlide() {
         steerRouteYaw(computeBearingYaw());
-        mc.options.jumpKey.setPressed(stateTicks == 0);
+        mc.options.keyJump.setDown(stateTicks == 0);
         stateTicks++;
 
-        if (mc.player.isGliding()) {
+        if (mc.player.isFallFlying()) {
             takeoffFailures = 0;
             enterFlightState();
             return;
         }
 
         if (stateTicks > TAKEOFF_GLIDE_TIMEOUT) {
-            mc.options.jumpKey.setPressed(false);
+            mc.options.keyJump.setDown(false);
             restoreRotationSnapshot();
             takeoffFailures++;
             if (takeoffFailures >= TAKEOFF_MAX_FAILURES) {
@@ -1310,8 +1310,8 @@ public class ElytraRoute extends Module {
         ElytraFly elytraFly = Modules.get().get(ElytraFly.class);
         boolean routeBounceMode = shouldUseRouteBounceMode(elytraFly);
 
-        if (!mc.player.isGliding()) {
-            if (routeBounceMode && !mc.player.isOnGround()) {
+        if (!mc.player.isFallFlying()) {
+            if (routeBounceMode && !mc.player.onGround()) {
                 if (!resumeBounceElytraFlyForFlight()) {
                     error("Unable to enable ElytraFly Bounce mode for flight.");
                     toggle();
@@ -1322,8 +1322,8 @@ public class ElytraRoute extends Module {
 
                 float yaw = computeBearingYaw();
                 steerRouteYaw(yaw);
-                mc.options.forwardKey.setPressed(true);
-                mc.options.jumpKey.setPressed(true);
+                mc.options.keyUp.setDown(true);
+                mc.options.keyJump.setDown(true);
                 return;
             }
 
@@ -1344,7 +1344,7 @@ public class ElytraRoute extends Module {
 
         float yaw = computeBearingYaw();
         steerRouteYaw(yaw);
-        mc.options.forwardKey.setPressed(true);
+        mc.options.keyUp.setDown(true);
         if (!isBounceElytraFly(elytraFly)) applyFlightAltitudeControl(false);
     }
 
@@ -1377,27 +1377,27 @@ public class ElytraRoute extends Module {
         stateTicks = 0;
         releaseMovement();
         pauseBounceElytraFlyForGroundControl();
-        if (reason == LandingReason.RESTOCK && mc.currentScreen != null) mc.currentScreen.close();
+        if (reason == LandingReason.RESTOCK && mc.screen != null) mc.screen.onClose();
     }
 
     private void tickLanding() {
         stopLandingHorizontalMovement();
 
-        if (mc.player.isGliding() && !areLandingChunksLoaded()) {
+        if (mc.player.isFallFlying() && !areLandingChunksLoaded()) {
             holdLandingForChunkLoad();
             warnLandingChunksUnloaded();
             return;
         }
 
         lastLandingChunkWarningAtMs = 0L;
-        mc.options.jumpKey.setPressed(false);
-        mc.options.sneakKey.setPressed(mc.player.isGliding());
+        mc.options.keyJump.setDown(false);
+        mc.options.keyShift.setDown(mc.player.isFallFlying());
 
-        if (mc.player.isGliding()) return;
+        if (mc.player.isFallFlying()) return;
 
-        mc.options.sneakKey.setPressed(false);
+        mc.options.keyShift.setDown(false);
         restoreRotationSnapshot();
-        if (!mc.player.isOnGround()) return;
+        if (!mc.player.onGround()) return;
 
         switch (landingReason) {
             case ARRIVAL -> state = State.ARRIVED_WAIT;
@@ -1411,32 +1411,32 @@ public class ElytraRoute extends Module {
     private void holdLandingForChunkLoad() {
         stopLandingHorizontalMovement();
         dampenLandingHorizontalVelocity();
-        mc.options.sneakKey.setPressed(false);
-        mc.options.jumpKey.setPressed(true);
+        mc.options.keyShift.setDown(false);
+        mc.options.keyJump.setDown(true);
     }
 
     private void stopLandingHorizontalMovement() {
-        mc.options.forwardKey.setPressed(false);
-        mc.options.backKey.setPressed(false);
-        mc.options.leftKey.setPressed(false);
-        mc.options.rightKey.setPressed(false);
+        mc.options.keyUp.setDown(false);
+        mc.options.keyDown.setDown(false);
+        mc.options.keyLeft.setDown(false);
+        mc.options.keyRight.setDown(false);
     }
 
     private void dampenLandingHorizontalVelocity() {
         if (mc.player == null) return;
-        Vec3d velocity = mc.player.getVelocity();
-        mc.player.setVelocity(velocity.x * 0.25, velocity.y, velocity.z * 0.25);
+        Vec3 velocity = mc.player.getDeltaMovement();
+        mc.player.setDeltaMovement(velocity.x * 0.25, velocity.y, velocity.z * 0.25);
     }
 
     private boolean areLandingChunksLoaded() {
-        if (mc.player == null || mc.world == null) return false;
+        if (mc.player == null || mc.level == null) return false;
 
         int centerChunkX = mc.player.getBlockX() >> 4;
         int centerChunkZ = mc.player.getBlockZ() >> 4;
 
         for (int x = -LANDING_CHUNK_LOAD_RADIUS; x <= LANDING_CHUNK_LOAD_RADIUS; x++) {
             for (int z = -LANDING_CHUNK_LOAD_RADIUS; z <= LANDING_CHUNK_LOAD_RADIUS; z++) {
-                if (mc.world.getChunkManager().getChunk(centerChunkX + x, centerChunkZ + z, ChunkStatus.FULL, false) == null) {
+                if (mc.level.getChunkSource().getChunk(centerChunkX + x, centerChunkZ + z, ChunkStatus.FULL, false) == null) {
                     return false;
                 }
             }
@@ -1650,7 +1650,7 @@ public class ElytraRoute extends Module {
             return;
         }
 
-        selectedRestockSourceFingerprint = fingerprintShulkerStack(mc.player.getInventory().getStack(restockSourceHotbarSlot));
+        selectedRestockSourceFingerprint = fingerprintShulkerStack(mc.player.getInventory().getItem(restockSourceHotbarSlot));
         sourceReadyRetries = 0;
         restockSourcePhase = RestockSourcePhase.PLACE;
         placeVerifiedRestockSource();
@@ -1664,22 +1664,22 @@ public class ElytraRoute extends Module {
         }
 
         if (selectedRestockSourceFingerprint == null) {
-            selectedRestockSourceFingerprint = fingerprintShulkerStack(mc.player.getInventory().getStack(restockSourceHotbarSlot));
+            selectedRestockSourceFingerprint = fingerprintShulkerStack(mc.player.getInventory().getItem(restockSourceHotbarSlot));
         }
 
-        BlockPos placePos = restockPad.containerBase.up();
+        BlockPos placePos = restockPad.containerBase.above();
         expectedShulkerCountAfterPickup = countInventoryShulkerBoxes();
         clearInvalidSourceTracking();
         invalidSourceOriginalHotbarSlot = restockSourceHotbarSlot;
 
-        boolean placed = BlockUtils.place(placePos, Hand.MAIN_HAND, restockSourceHotbarSlot, false, 0, true, true, true);
+        boolean placed = BlockUtils.place(placePos, InteractionHand.MAIN_HAND, restockSourceHotbarSlot, false, 0, true, true, true);
         if (!placed) {
             expectedShulkerCountAfterPickup = -1;
             handleRestockFailure(RestockFailureReason.PLACE_FAILED, "Failed to place the restock shulker.");
             return;
         }
 
-        placedShulkerPos = placePos.toImmutable();
+        placedShulkerPos = placePos.immutable();
         actionDelayTicks = inventoryDelay.get();
         currentSourceFailureTicks = 0;
         restockOpenedSourceValidated = false;
@@ -1694,15 +1694,15 @@ public class ElytraRoute extends Module {
 
         currentSourceFailureTicks++;
         if (currentSourceFailureTicks == 1) {
-            mc.interactionManager.interactBlock(
+            mc.gameMode.useItemOn(
                 mc.player,
-                Hand.MAIN_HAND,
-                new net.minecraft.util.hit.BlockHitResult(Vec3d.ofCenter(placedShulkerPos), net.minecraft.util.math.Direction.UP, placedShulkerPos, false)
+                InteractionHand.MAIN_HAND,
+                new net.minecraft.world.phys.BlockHitResult(Vec3.atCenterOf(placedShulkerPos), net.minecraft.core.Direction.UP, placedShulkerPos, false)
             );
             return;
         }
 
-        if (mc.currentScreen != null && mc.player.currentScreenHandler != null && mc.player.currentScreenHandler.slots.size() > PLAYER_INVENTORY_SLOTS) {
+        if (mc.screen != null && mc.player.containerMenu != null && mc.player.containerMenu.slots.size() > PLAYER_INVENTORY_SLOTS) {
             currentSourceFailureTicks = 0;
             actionDelayTicks = inventoryDelay.get();
             state = State.RESTOCK_LOOT;
@@ -1715,7 +1715,7 @@ public class ElytraRoute extends Module {
     }
 
     private void tickRestockLoot() {
-        if (mc.currentScreen == null || mc.player.currentScreenHandler == null) {
+        if (mc.screen == null || mc.player.containerMenu == null) {
             state = State.RESTOCK_CLOSE;
             return;
         }
@@ -1773,14 +1773,14 @@ public class ElytraRoute extends Module {
     }
 
     private void tickRestockClose() {
-        if (mc.player.currentScreenHandler != null && !mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
+        if (mc.player.containerMenu != null && !mc.player.containerMenu.getCarried().isEmpty()) {
             clearCursorAfterSwap();
             actionDelayTicks = inventoryDelay.get();
             return;
         }
 
-        if (mc.currentScreen != null) {
-            mc.currentScreen.close();
+        if (mc.screen != null) {
+            mc.screen.onClose();
             actionDelayTicks = inventoryDelay.get();
             return;
         }
@@ -1797,7 +1797,7 @@ public class ElytraRoute extends Module {
         }
 
         if (openedInvalidRestockSource
-            && ((mc.player.currentScreenHandler != null && !mc.player.currentScreenHandler.getCursorStack().isEmpty()) || mc.currentScreen != null)) {
+            && ((mc.player.containerMenu != null && !mc.player.containerMenu.getCarried().isEmpty()) || mc.screen != null)) {
             state = State.RESTOCK_CLOSE;
             return;
         }
@@ -1806,7 +1806,7 @@ public class ElytraRoute extends Module {
             invalidSourcePreBreakSnapshot = snapshotPlayerInventory();
         }
 
-        if (mc.world.getBlockState(placedShulkerPos).getBlock() instanceof ShulkerBoxBlock) {
+        if (mc.level.getBlockState(placedShulkerPos).getBlock() instanceof ShulkerBoxBlock) {
             BlockUtils.breakBlock(placedShulkerPos, true);
             return;
         }
@@ -1839,7 +1839,7 @@ public class ElytraRoute extends Module {
 
             if (pickupTarget == null || !pickupTarget.isAlive() || pickupTicks % SHULKER_PICKUP_REACQUIRE_INTERVAL == 0) {
                 pickupTarget = drops.stream()
-                    .min(Comparator.comparingDouble(entity -> mc.player.squaredDistanceTo(entity.getX(), entity.getY(), entity.getZ())))
+                    .min(Comparator.comparingDouble(entity -> mc.player.distanceToSqr(entity.getX(), entity.getY(), entity.getZ())))
                     .orElse(null);
             }
 
@@ -1878,7 +1878,7 @@ public class ElytraRoute extends Module {
         ItemStack[] afterPickup = snapshotPlayerInventory();
         int returnedSlot = findChangedShulkerSlot(invalidSourcePreBreakSnapshot, afterPickup, invalidOpenedSourceFingerprint, false);
         if (returnedSlot == -1 && invalidSourceOriginalHotbarSlot >= 0 && SlotUtils.isHotbar(invalidSourceOriginalHotbarSlot)) {
-            ItemStack originalSlotStack = mc.player.getInventory().getStack(invalidSourceOriginalHotbarSlot);
+            ItemStack originalSlotStack = mc.player.getInventory().getItem(invalidSourceOriginalHotbarSlot);
             if (isShulkerBox(originalSlotStack) && matchesShulkerFingerprint(originalSlotStack, invalidOpenedSourceFingerprint)) {
                 returnedSlot = invalidSourceOriginalHotbarSlot;
             }
@@ -2081,8 +2081,8 @@ public class ElytraRoute extends Module {
         String reason = "[ElytraRoute] Out of flight-ready elytras.";
         warning("Out of elytras. Disconnecting.");
         toggle();
-        if (mc.getNetworkHandler() != null) {
-            mc.getNetworkHandler().getConnection().disconnect(Text.literal(reason));
+        if (mc.getConnection() != null) {
+            mc.getConnection().getConnection().disconnect(Component.literal(reason));
         }
     }
 
@@ -2114,7 +2114,7 @@ public class ElytraRoute extends Module {
         AutoGap autoGap = Modules.get().get(AutoGap.class);
         if (autoGap == null || !autoGap.isActive() || mc.player == null) return false;
         if (autoGap.isEating()) return true;
-        return mc.player.isUsingItem() && isUsingGapLikeFood(mc.player.getActiveItem());
+        return mc.player.isUsingItem() && isUsingGapLikeFood(mc.player.getUseItem());
     }
 
     @SuppressWarnings("unchecked")
@@ -2155,7 +2155,7 @@ public class ElytraRoute extends Module {
     @SuppressWarnings("unchecked")
     private boolean shouldAutoGapForRegeneration(AutoGap autoGap) {
         Setting<Boolean> regenSetting = (Setting<Boolean>) autoGap.settings.get("potions-regeneration");
-        return regenSetting != null && regenSetting.get() && isPotionMissingOrExpiring(StatusEffects.REGENERATION, autoGap);
+        return regenSetting != null && regenSetting.get() && isPotionMissingOrExpiring(MobEffects.REGENERATION, autoGap);
     }
 
     @SuppressWarnings("unchecked")
@@ -2163,20 +2163,20 @@ public class ElytraRoute extends Module {
         if (!allowEgap) return false;
 
         Setting<Boolean> fireResSetting = (Setting<Boolean>) autoGap.settings.get("potions-fire-resistance");
-        if (fireResSetting != null && fireResSetting.get() && isPotionMissingOrExpiring(StatusEffects.FIRE_RESISTANCE, autoGap)) return true;
+        if (fireResSetting != null && fireResSetting.get() && isPotionMissingOrExpiring(MobEffects.FIRE_RESISTANCE, autoGap)) return true;
 
         Setting<Boolean> absorptionSetting = (Setting<Boolean>) autoGap.settings.get("potions-absorption");
-        return absorptionSetting != null && absorptionSetting.get() && isPotionMissingOrExpiring(StatusEffects.ABSORPTION, autoGap);
+        return absorptionSetting != null && absorptionSetting.get() && isPotionMissingOrExpiring(MobEffects.ABSORPTION, autoGap);
     }
 
     @SuppressWarnings("unchecked")
-    private boolean isPotionMissingOrExpiring(RegistryEntry<StatusEffect> effect, AutoGap autoGap) {
+    private boolean isPotionMissingOrExpiring(Holder<MobEffect> effect, AutoGap autoGap) {
         if (mc.player == null) return false;
 
         Setting<Boolean> beforeExpirySetting = (Setting<Boolean>) autoGap.settings.get("before-expiry");
         Setting<Integer> expiryThresholdSetting = autoGap.settings.get("expiry-threshold", Integer.class);
 
-        StatusEffectInstance instance = mc.player.getStatusEffect(effect);
+        MobEffectInstance instance = mc.player.getEffect(effect);
         if (instance == null) return true;
         return beforeExpirySetting != null
             && beforeExpirySetting.get()
@@ -2188,7 +2188,7 @@ public class ElytraRoute extends Module {
         if (mc.player == null) return false;
 
         for (int i = 0; i < 9; i++) {
-            Item item = mc.player.getInventory().getStack(i).getItem();
+            Item item = mc.player.getInventory().getItem(i).getItem();
             if (item == Items.ENCHANTED_GOLDEN_APPLE && allowEgap) return true;
             if (item == Items.GOLDEN_APPLE && !requiresEGap) return true;
         }
@@ -2204,14 +2204,14 @@ public class ElytraRoute extends Module {
 
     private boolean shouldPauseForActiveFoodUse() {
         boolean inventoryEating = InventoryManager.getInstance().isEating();
-        boolean playerUsingFood = mc.player.isUsingItem() && mc.player.getActiveItem().contains(DataComponentTypes.FOOD);
+        boolean playerUsingFood = mc.player.isUsingItem() && mc.player.getUseItem().has(DataComponents.FOOD);
         return inventoryEating || playerUsingFood;
     }
 
     private void applyFlightAltitudeControl(boolean landing) {
         if (landing) {
-            mc.options.jumpKey.setPressed(false);
-            mc.options.sneakKey.setPressed(mc.player.isGliding());
+            mc.options.keyJump.setDown(false);
+            mc.options.keyShift.setDown(mc.player.isFallFlying());
             return;
         }
 
@@ -2219,8 +2219,8 @@ public class ElytraRoute extends Module {
         boolean tooLow = playerY < flyYLevel.get() - 1;
         boolean tooHigh = playerY > flyYLevel.get() + 1;
 
-        mc.options.jumpKey.setPressed(tooLow);
-        mc.options.sneakKey.setPressed(tooHigh);
+        mc.options.keyJump.setDown(tooLow);
+        mc.options.keyShift.setDown(tooHigh);
     }
 
     private boolean needsFoodRestock() {
@@ -2290,7 +2290,7 @@ public class ElytraRoute extends Module {
     private void handleRestockFailure(RestockFailureReason reason, String message) {
         releaseMovement();
         restoreRotationSnapshot();
-        if (mc.currentScreen != null) mc.currentScreen.close();
+        if (mc.screen != null) mc.screen.onClose();
 
         if (reason != RestockFailureReason.PICKUP_FAILED && placedShulkerPos != null) {
             deferredRestockFailureReason = reason;
@@ -2359,7 +2359,7 @@ public class ElytraRoute extends Module {
     }
 
     private boolean sendHomeSave() {
-        if (!periodicHomeSave.get() || homeName.get().isBlank() || mc.player == null || mc.currentScreen != null || shouldPauseForEating()) return false;
+        if (!periodicHomeSave.get() || homeName.get().isBlank() || mc.player == null || mc.screen != null || shouldPauseForEating()) return false;
         ChatUtils.sendPlayerMsg("/sethome " + homeName.get());
         homeSaveNextAtMs = System.currentTimeMillis() + (homeSaveIntervalMinutes.get() * 60_000L);
         return true;
@@ -2380,16 +2380,16 @@ public class ElytraRoute extends Module {
     }
 
     private float normalizeYaw(float yaw) {
-        return MathHelper.wrapDegrees(yaw);
+        return Mth.wrapDegrees(yaw);
     }
 
     private void releaseMovement() {
-        mc.options.forwardKey.setPressed(false);
-        mc.options.backKey.setPressed(false);
-        mc.options.leftKey.setPressed(false);
-        mc.options.rightKey.setPressed(false);
-        mc.options.jumpKey.setPressed(false);
-        mc.options.sneakKey.setPressed(false);
+        mc.options.keyUp.setDown(false);
+        mc.options.keyDown.setDown(false);
+        mc.options.keyLeft.setDown(false);
+        mc.options.keyRight.setDown(false);
+        mc.options.keyJump.setDown(false);
+        mc.options.keyShift.setDown(false);
     }
 
     private void moveToward(double targetX, double targetZ, Runnable onArrival) {
@@ -2398,20 +2398,20 @@ public class ElytraRoute extends Module {
         double distSq = dx * dx + dz * dz;
 
         if (distSq < 0.04) {
-            mc.options.forwardKey.setPressed(false);
+            mc.options.keyUp.setDown(false);
             onArrival.run();
             return;
         }
 
         float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-        mc.player.setYaw(yaw);
-        mc.options.forwardKey.setPressed(true);
+        mc.player.setYRot(yaw);
+        mc.options.keyUp.setDown(true);
     }
 
     private int countConfiguredFoodItemsInInventory() {
         int count = 0;
         for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (isConfiguredFoodStack(stack)) count += stack.getCount();
         }
         return count;
@@ -2441,7 +2441,7 @@ public class ElytraRoute extends Module {
     private int countConfiguredFoodSlots() {
         int count = 0;
         for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (isConfiguredFoodStack(stack)) count++;
         }
         return count;
@@ -2450,7 +2450,7 @@ public class ElytraRoute extends Module {
     private int countEmptyLooseSlots() {
         int count = 0;
         for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
-            if (mc.player.getInventory().getStack(i).isEmpty()) count++;
+            if (mc.player.getInventory().getItem(i).isEmpty()) count++;
         }
         return count;
     }
@@ -2465,11 +2465,11 @@ public class ElytraRoute extends Module {
 
     private int countHudUsableElytras() {
         int count = 0;
-        ItemStack chest = mc.player.getEquippedStack(EquipmentSlot.CHEST);
+        ItemStack chest = mc.player.getItemBySlot(EquipmentSlot.CHEST);
         if (isHudUsableElytra(chest)) count++;
 
         for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
-            if (isHudUsableElytra(mc.player.getInventory().getStack(i))) count++;
+            if (isHudUsableElytra(mc.player.getInventory().getItem(i))) count++;
         }
 
         return count;
@@ -2477,11 +2477,11 @@ public class ElytraRoute extends Module {
 
     private int countTotalFlightReadyElytras() {
         int count = 0;
-        ItemStack chest = mc.player.getEquippedStack(EquipmentSlot.CHEST);
+        ItemStack chest = mc.player.getItemBySlot(EquipmentSlot.CHEST);
         if (isFlightReadyElytra(chest)) count++;
 
         for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
-            if (isFlightReadyElytra(mc.player.getInventory().getStack(i))) count++;
+            if (isFlightReadyElytra(mc.player.getInventory().getItem(i))) count++;
         }
 
         return count;
@@ -2490,7 +2490,7 @@ public class ElytraRoute extends Module {
     private int countLooseFlightReadyElytras() {
         int count = 0;
         for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
-            if (isFlightReadyElytra(mc.player.getInventory().getStack(i))) count++;
+            if (isFlightReadyElytra(mc.player.getInventory().getItem(i))) count++;
         }
         return count;
     }
@@ -2498,42 +2498,42 @@ public class ElytraRoute extends Module {
     private int countLooseReplaceableElytras() {
         int count = 0;
         for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
-            if (isReplaceableElytra(mc.player.getInventory().getStack(i))) count++;
+            if (isReplaceableElytra(mc.player.getInventory().getItem(i))) count++;
         }
         return count;
     }
 
     private boolean isHudUsableElytra(ItemStack stack) {
-        return stack != null && stack.isOf(Items.ELYTRA) && THMUtils.getDamage(stack) > 1.0;
+        return stack != null && stack.is(Items.ELYTRA) && THMUtils.getDamage(stack) > 1.0;
     }
 
     private boolean isFlightReadyElytra(ItemStack stack) {
-        if (stack == null || !stack.isOf(Items.ELYTRA)) return false;
+        if (stack == null || !stack.is(Items.ELYTRA)) return false;
 
         ElytraFly elytraFly = Modules.get().get(ElytraFly.class);
         if (elytraFly == null) return false;
 
-        int remaining = stack.getMaxDamage() - stack.getDamage();
+        int remaining = stack.getMaxDamage() - stack.getDamageValue();
         return remaining > elytraFly.replaceDurability.get();
     }
 
     private boolean isReplaceableElytra(ItemStack stack) {
-        return stack != null && stack.isOf(Items.ELYTRA) && !isFlightReadyElytra(stack);
+        return stack != null && stack.is(Items.ELYTRA) && !isFlightReadyElytra(stack);
     }
 
     private int getConfiguredFoodMaxStackSize() {
         if (!hasConfiguredFoodTypes()) return 0;
         Item foodItem = foodTypes.get().get(0);
-        return foodItem != null ? foodItem.getMaxCount() : 0;
+        return foodItem != null ? foodItem.getDefaultMaxStackSize() : 0;
     }
 
     private int countConfiguredFoodMergeCapacityInInventory() {
         int capacity = 0;
         for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (!isConfiguredFoodStack(stack)) continue;
 
-            capacity += Math.max(stack.getMaxCount() - stack.getCount(), 0);
+            capacity += Math.max(stack.getMaxStackSize() - stack.getCount(), 0);
         }
 
         return capacity;
@@ -2569,11 +2569,11 @@ public class ElytraRoute extends Module {
     private long getTotalFlightTimeSeconds() {
         long totalSeconds = 0;
 
-        ItemStack chest = mc.player.getEquippedStack(EquipmentSlot.CHEST);
+        ItemStack chest = mc.player.getItemBySlot(EquipmentSlot.CHEST);
         if (isHudUsableElytra(chest)) totalSeconds += flightTimeSecondsForStack(chest);
 
         for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (isHudUsableElytra(stack)) totalSeconds += flightTimeSecondsForStack(stack);
         }
 
@@ -2581,7 +2581,7 @@ public class ElytraRoute extends Module {
     }
 
     private long flightTimeSecondsForStack(ItemStack stack) {
-        return Math.max(stack.getMaxDamage() - stack.getDamage(), 0);
+        return Math.max(stack.getMaxDamage() - stack.getDamageValue(), 0);
     }
 
     private void resetRestockPadSearch() {
@@ -2593,7 +2593,7 @@ public class ElytraRoute extends Module {
 
     private RestockPad findNextRestockPad() {
         if (restockPadSearchAnchor == null) {
-            restockPadSearchAnchor = mc.player.getBlockPos().down().toImmutable();
+            restockPadSearchAnchor = mc.player.blockPosition().below().immutable();
             restockPadSearchRadius = 0;
             restockPadSearchX = restockPadSearchAnchor.getX();
             restockPadSearchZ = restockPadSearchAnchor.getZ();
@@ -2652,8 +2652,8 @@ public class ElytraRoute extends Module {
     }
 
     private boolean isValidPadBase(BlockPos pos) {
-        return mc.world.getBlockState(pos).isSolidBlock(mc.world, pos)
-            && mc.world.getBlockState(pos.up()).isAir();
+        return mc.level.getBlockState(pos).isRedstoneConductor(mc.level, pos)
+            && mc.level.getBlockState(pos.above()).isAir();
     }
 
     private double squaredHorizontalDistanceTo(BlockPos pos) {
@@ -2672,7 +2672,7 @@ public class ElytraRoute extends Module {
         int bestScore = Integer.MIN_VALUE;
 
         for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (!isShulkerBox(stack)) continue;
             if (isRestockSourceBlockedForKind(i, stack, primary)) continue;
 
@@ -2699,7 +2699,7 @@ public class ElytraRoute extends Module {
 
     private boolean isSelectedInventorySourceStillValid() {
         if (restockSourceInventorySlot < 0 || restockSourceInventorySlot >= PLAYER_INVENTORY_SLOTS) return false;
-        ItemStack stack = mc.player.getInventory().getStack(restockSourceInventorySlot);
+        ItemStack stack = mc.player.getInventory().getItem(restockSourceInventorySlot);
         return isValidRestockSourceForKind(restockSourceInventorySlot, stack, selectedRestockSourceKind);
     }
 
@@ -2719,7 +2719,7 @@ public class ElytraRoute extends Module {
     private boolean isSelectedRestockSourceReady() {
         if (!SlotUtils.isHotbar(restockSourceHotbarSlot)) return false;
         if (selectedRestockSourcePredicate == null) return false;
-        ItemStack stack = mc.player.getInventory().getStack(restockSourceHotbarSlot);
+        ItemStack stack = mc.player.getInventory().getItem(restockSourceHotbarSlot);
         if (isRestockSourceBlockedForKind(restockSourceHotbarSlot, stack, selectedRestockSourceKind)) return false;
         return selectedRestockSourcePredicate.test(stack);
     }
@@ -2735,7 +2735,7 @@ public class ElytraRoute extends Module {
 
     private boolean hasFlightReadyElytraShulkerInInventory() {
         for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (isValidRestockSourceForKind(i, stack, RestockKind.ELYTRA)) return true;
         }
 
@@ -2749,7 +2749,7 @@ public class ElytraRoute extends Module {
     private int countInventoryShulkerBoxes() {
         int count = 0;
         for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (isShulkerBox(stack)) count += Math.max(1, stack.getCount());
         }
         return count;
@@ -2757,11 +2757,11 @@ public class ElytraRoute extends Module {
 
     private int countConfiguredFoodInShulker(ItemStack shulker) {
         if (!isShulkerBox(shulker) || !hasConfiguredFoodTypes()) return 0;
-        ContainerComponent container = shulker.get(DataComponentTypes.CONTAINER);
+        ItemContainerContents container = shulker.get(DataComponents.CONTAINER);
         if (container == null) return 0;
 
         int count = 0;
-        for (ItemStack stack : container.iterateNonEmpty()) {
+        for (ItemStack stack : container.nonEmptyItems()) {
             if (isConfiguredFoodStack(stack)) count += stack.getCount();
         }
         return count;
@@ -2769,11 +2769,11 @@ public class ElytraRoute extends Module {
 
     private int countFlightReadyElytrasInShulker(ItemStack shulker) {
         if (!isShulkerBox(shulker)) return 0;
-        ContainerComponent container = shulker.get(DataComponentTypes.CONTAINER);
+        ItemContainerContents container = shulker.get(DataComponents.CONTAINER);
         if (container == null) return 0;
 
         int count = 0;
-        for (ItemStack stack : container.iterateNonEmpty()) {
+        for (ItemStack stack : container.nonEmptyItems()) {
             if (isFlightReadyElytra(stack)) count += Math.max(1, stack.getCount());
         }
         return count;
@@ -2793,7 +2793,7 @@ public class ElytraRoute extends Module {
 
     private boolean hasEmptyMainInventorySlot() {
         for (int i = 9; i < PLAYER_INVENTORY_SLOTS; i++) {
-            if (mc.player.getInventory().getStack(i).isEmpty()) return true;
+            if (mc.player.getInventory().getItem(i).isEmpty()) return true;
         }
         return false;
     }
@@ -2801,7 +2801,7 @@ public class ElytraRoute extends Module {
     private ItemStack[] snapshotPlayerInventory() {
         ItemStack[] snapshot = new ItemStack[PLAYER_INVENTORY_SLOTS];
         for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
-            snapshot[i] = mc.player.getInventory().getStack(i).copy();
+            snapshot[i] = mc.player.getInventory().getItem(i).copy();
         }
         return snapshot;
     }
@@ -2831,7 +2831,7 @@ public class ElytraRoute extends Module {
         int start = Math.max(0, startInclusive);
         int end = Math.min(PLAYER_INVENTORY_SLOTS, endExclusive);
         for (int i = start; i < end; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (matchesShulkerFingerprint(stack, fingerprint)) return i;
         }
 
@@ -2841,7 +2841,7 @@ public class ElytraRoute extends Module {
     private boolean sameSnapshotStack(ItemStack before, ItemStack after) {
         if (before == null || after == null) return before == after;
         if (before.isEmpty() || after.isEmpty()) return before.isEmpty() && after.isEmpty();
-        return before.getCount() == after.getCount() && ItemStack.areItemsAndComponentsEqual(before, after);
+        return before.getCount() == after.getCount() && ItemStack.isSameItemSameComponents(before, after);
     }
 
     private boolean matchesShulkerFingerprint(ItemStack stack, String fingerprint) {
@@ -2849,12 +2849,12 @@ public class ElytraRoute extends Module {
     }
 
     private String fingerprintOpenedRestockContainer() {
-        if (mc.player == null || mc.player.currentScreenHandler == null) return null;
+        if (mc.player == null || mc.player.containerMenu == null) return null;
 
         List<String> entries = new ArrayList<>();
         int containerSlots = getContainerSlotCount();
         for (int i = 0; i < containerSlots; i++) {
-            ItemStack stack = mc.player.currentScreenHandler.slots.get(i).getStack();
+            ItemStack stack = mc.player.containerMenu.slots.get(i).getItem();
             if (!stack.isEmpty()) entries.add(fingerprintContainedStack(stack));
         }
 
@@ -2865,14 +2865,14 @@ public class ElytraRoute extends Module {
         if (!isShulkerBox(shulker)) return "";
 
         List<String> entries = new ArrayList<>();
-        ContainerComponent container = shulker.get(DataComponentTypes.CONTAINER);
+        ItemContainerContents container = shulker.get(DataComponents.CONTAINER);
         if (container != null) {
-            for (ItemStack stack : container.iterateNonEmpty()) {
+            for (ItemStack stack : container.nonEmptyItems()) {
                 entries.add(fingerprintContainedStack(stack));
             }
         }
 
-        return buildShulkerFingerprint(Registries.ITEM.getId(shulker.getItem()).toString(), entries);
+        return buildShulkerFingerprint(BuiltInRegistries.ITEM.getKey(shulker.getItem()).toString(), entries);
     }
 
     private String buildShulkerFingerprint(String shulkerItemId, List<String> entries) {
@@ -2881,29 +2881,29 @@ public class ElytraRoute extends Module {
     }
 
     private String getPlacedShulkerItemId() {
-        if (mc.world != null && placedShulkerPos != null && mc.world.getBlockState(placedShulkerPos).getBlock() instanceof ShulkerBoxBlock block) {
-            return Registries.ITEM.getId(block.asItem()).toString();
+        if (mc.level != null && placedShulkerPos != null && mc.level.getBlockState(placedShulkerPos).getBlock() instanceof ShulkerBoxBlock block) {
+            return BuiltInRegistries.ITEM.getKey(block.asItem()).toString();
         }
 
         return "unknown";
     }
 
     private String fingerprintContainedStack(ItemStack stack) {
-        return Registries.ITEM.getId(stack.getItem())
+        return BuiltInRegistries.ITEM.getKey(stack.getItem())
             + "x" + stack.getCount()
-            + "d" + stack.getDamage()
+            + "d" + stack.getDamageValue()
             + "m" + stack.getMaxDamage();
     }
 
     private int findHotbarMoveTarget() {
         for (int i = 0; i < 9; i++) {
             if (isHotbarSlotBlockedForCurrentNeed(i)) continue;
-            if (mc.player.getInventory().getStack(i).isEmpty()) return i;
+            if (mc.player.getInventory().getItem(i).isEmpty()) return i;
         }
 
         for (int i = 0; i < 9; i++) {
             if (isHotbarSlotBlockedForCurrentNeed(i)) continue;
-            if (!isProtectedRestockHotbarStack(mc.player.getInventory().getStack(i))) return i;
+            if (!isProtectedRestockHotbarStack(mc.player.getInventory().getItem(i))) return i;
         }
 
         return -1;
@@ -2916,7 +2916,7 @@ public class ElytraRoute extends Module {
         if (primary == RestockKind.NONE) return -1;
 
         for (int i = 0; i < 9; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (!isShulkerBox(stack)) continue;
             if (isHelpfulRestockShulkerForKind(i, stack, primary)) continue;
             return i;
@@ -2927,7 +2927,7 @@ public class ElytraRoute extends Module {
 
     private int findValidHotbarRestockSourceSlot(RestockKind kind) {
         for (int i = 0; i < 9; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (isValidRestockSourceForKind(i, stack, kind)) return i;
         }
         return -1;
@@ -2954,17 +2954,17 @@ public class ElytraRoute extends Module {
 
     private boolean isProtectedRestockHotbarStack(ItemStack stack) {
         return isConfiguredFoodStack(stack)
-            || stack.contains(DataComponentTypes.FOOD)
+            || stack.has(DataComponents.FOOD)
             || isFlightReadyElytra(stack)
-            || stack.isOf(Items.ELYTRA)
-            || stack.contains(DataComponentTypes.EQUIPPABLE)
+            || stack.is(Items.ELYTRA)
+            || stack.has(DataComponents.EQUIPPABLE)
             || isWeaponStack(stack)
             || isToolStack(stack)
             || isShulkerBox(stack);
     }
 
     private boolean equipFlightReadyElytraForTakeoff() {
-        if (isFlightReadyElytra(mc.player.getEquippedStack(EquipmentSlot.CHEST))) return true;
+        if (isFlightReadyElytra(mc.player.getItemBySlot(EquipmentSlot.CHEST))) return true;
 
         int sourceSlot = findBestFlightReadyLooseElytraSlot();
         if (sourceSlot == -1) return false;
@@ -2984,17 +2984,17 @@ public class ElytraRoute extends Module {
     }
 
     private boolean hasElytraEquipped() {
-        return mc.player.getEquippedStack(EquipmentSlot.CHEST).isOf(Items.ELYTRA);
+        return mc.player.getItemBySlot(EquipmentSlot.CHEST).is(Items.ELYTRA);
     }
 
     private int findBestFlightReadyLooseElytraSlot() {
         int bestSlot = -1;
         int bestRemaining = -1;
         for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (!isFlightReadyElytra(stack)) continue;
 
-            int remaining = stack.getMaxDamage() - stack.getDamage();
+            int remaining = stack.getMaxDamage() - stack.getDamageValue();
             if (remaining > bestRemaining) {
                 bestRemaining = remaining;
                 bestSlot = i;
@@ -3005,14 +3005,14 @@ public class ElytraRoute extends Module {
 
     private int prepareHotbarSlotForTakeoffElytra() {
         for (int i = 0; i < 9; i++) {
-            if (mc.player.getInventory().getStack(i).isEmpty()) return i;
+            if (mc.player.getInventory().getItem(i).isEmpty()) return i;
         }
 
         int target = findTakeoffHotbarEvictionTarget(false);
         if (target == -1) target = findTakeoffHotbarEvictionTarget(true);
         if (target == -1) return -1;
 
-        if (!isProtectedTakeoffHotbarStack(mc.player.getInventory().getStack(target))) {
+        if (!isProtectedTakeoffHotbarStack(mc.player.getInventory().getItem(target))) {
             shiftClickHotbarItemOut(target);
         }
 
@@ -3023,7 +3023,7 @@ public class ElytraRoute extends Module {
         int selected = mc.player.getInventory().getSelectedSlot();
         for (int i = 0; i < 9; i++) {
             int slot = (selected + 1 + i) % 9;
-            ItemStack stack = mc.player.getInventory().getStack(slot);
+            ItemStack stack = mc.player.getInventory().getItem(slot);
             if (stack.isEmpty()) return slot;
             if (!allowProtected && isProtectedTakeoffHotbarStack(stack)) continue;
             return slot;
@@ -3033,10 +3033,10 @@ public class ElytraRoute extends Module {
 
     private boolean isProtectedTakeoffHotbarStack(ItemStack stack) {
         return isConfiguredFoodStack(stack)
-            || stack.contains(DataComponentTypes.FOOD)
+            || stack.has(DataComponents.FOOD)
             || isWeaponStack(stack)
-            || stack.isOf(Items.ELYTRA)
-            || stack.contains(DataComponentTypes.EQUIPPABLE)
+            || stack.is(Items.ELYTRA)
+            || stack.has(DataComponents.EQUIPPABLE)
             || isShulkerBox(stack);
     }
 
@@ -3089,19 +3089,19 @@ public class ElytraRoute extends Module {
     }
 
     private void shiftClickHotbarItemOut(int hotbarSlot) {
-        if (mc.player.getInventory().getStack(hotbarSlot).isEmpty()) return;
+        if (mc.player.getInventory().getItem(hotbarSlot).isEmpty()) return;
         InvUtils.shiftClick().slot(hotbarSlot);
         actionDelayTicks = Math.max(actionDelayTicks, inventoryDelay.get());
     }
 
     private boolean rightClickEquipHotbarElytra(int hotbarSlot) {
-        if (!SlotUtils.isHotbar(hotbarSlot) || !isFlightReadyElytra(mc.player.getInventory().getStack(hotbarSlot))) return false;
+        if (!SlotUtils.isHotbar(hotbarSlot) || !isFlightReadyElytra(mc.player.getInventory().getItem(hotbarSlot))) return false;
 
         int previousSlot = mc.player.getInventory().getSelectedSlot();
         if (!InvUtils.swap(hotbarSlot, true)) return false;
 
-        mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
-        mc.player.swingHand(Hand.MAIN_HAND);
+        mc.gameMode.useItem(mc.player, InteractionHand.MAIN_HAND);
+        mc.player.swing(InteractionHand.MAIN_HAND);
         actionDelayTicks = Math.max(actionDelayTicks, inventoryDelay.get());
         InvUtils.swapBack();
 
@@ -3109,12 +3109,12 @@ public class ElytraRoute extends Module {
             InvUtils.swap(previousSlot, false);
         }
 
-        return isFlightReadyElytra(mc.player.getEquippedStack(EquipmentSlot.CHEST));
+        return isFlightReadyElytra(mc.player.getItemBySlot(EquipmentSlot.CHEST));
     }
 
     private int getContainerSlotCount() {
-        if (mc.player == null || mc.player.currentScreenHandler == null) return 0;
-        return Math.max(0, mc.player.currentScreenHandler.slots.size() - PLAYER_INVENTORY_SLOTS);
+        if (mc.player == null || mc.player.containerMenu == null) return 0;
+        return Math.max(0, mc.player.containerMenu.slots.size() - PLAYER_INVENTORY_SLOTS);
     }
 
     private int findBestFlightReadyElytraContainerSlot() {
@@ -3122,10 +3122,10 @@ public class ElytraRoute extends Module {
         int bestRemaining = -1;
         int containerSlots = getContainerSlotCount();
         for (int i = 0; i < containerSlots; i++) {
-            ItemStack stack = mc.player.currentScreenHandler.slots.get(i).getStack();
+            ItemStack stack = mc.player.containerMenu.slots.get(i).getItem();
             if (!isFlightReadyElytra(stack)) continue;
 
-            int remaining = stack.getMaxDamage() - stack.getDamage();
+            int remaining = stack.getMaxDamage() - stack.getDamageValue();
             if (remaining > bestRemaining) {
                 bestRemaining = remaining;
                 bestSlot = i;
@@ -3139,7 +3139,7 @@ public class ElytraRoute extends Module {
         int bestCount = -1;
         int containerSlots = getContainerSlotCount();
         for (int i = 0; i < containerSlots; i++) {
-            ItemStack stack = mc.player.currentScreenHandler.slots.get(i).getStack();
+            ItemStack stack = mc.player.containerMenu.slots.get(i).getItem();
             if (!isConfiguredFoodStack(stack)) continue;
 
             if (stack.getCount() > bestCount) {
@@ -3152,7 +3152,7 @@ public class ElytraRoute extends Module {
 
     private int findReplaceableLooseElytraSlot() {
         for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
-            if (isReplaceableElytra(mc.player.getInventory().getStack(i))) return i;
+            if (isReplaceableElytra(mc.player.getInventory().getItem(i))) return i;
         }
         return -1;
     }
@@ -3260,24 +3260,24 @@ public class ElytraRoute extends Module {
 
     private void swapContainerElytraWithBrokenInventorySlot(int containerSlotId, int inventorySlotIndex) {
         int inventorySlotId = SlotUtils.indexToId(inventorySlotIndex);
-        int syncId = mc.player.currentScreenHandler.syncId;
+        int syncId = mc.player.containerMenu.containerId;
 
-        mc.interactionManager.clickSlot(syncId, containerSlotId, 0, SlotActionType.PICKUP, mc.player);
-        mc.interactionManager.clickSlot(syncId, inventorySlotId, 0, SlotActionType.PICKUP, mc.player);
-        mc.interactionManager.clickSlot(syncId, containerSlotId, 0, SlotActionType.PICKUP, mc.player);
+        mc.gameMode.handleInventoryMouseClick(syncId, containerSlotId, 0, ClickType.PICKUP, mc.player);
+        mc.gameMode.handleInventoryMouseClick(syncId, inventorySlotId, 0, ClickType.PICKUP, mc.player);
+        mc.gameMode.handleInventoryMouseClick(syncId, containerSlotId, 0, ClickType.PICKUP, mc.player);
     }
 
     private boolean repairWornElytraIfNeeded() {
-        ItemStack chest = mc.player.getEquippedStack(EquipmentSlot.CHEST);
+        ItemStack chest = mc.player.getItemBySlot(EquipmentSlot.CHEST);
         if (isFlightReadyElytra(chest)) return true;
 
         int bestSlot = -1;
         int bestRemaining = -1;
         for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (!isFlightReadyElytra(stack)) continue;
 
-            int remaining = stack.getMaxDamage() - stack.getDamage();
+            int remaining = stack.getMaxDamage() - stack.getDamageValue();
             if (remaining > bestRemaining) {
                 bestRemaining = remaining;
                 bestSlot = i;
@@ -3288,15 +3288,15 @@ public class ElytraRoute extends Module {
 
         THMUtils.fakeInventoryOpen(true);
         try {
-            int syncId = mc.player.currentScreenHandler.syncId;
+            int syncId = mc.player.containerMenu.containerId;
             int spareId = SlotUtils.indexToId(bestSlot);
             int chestId = SlotUtils.indexToId(CHEST_SLOT_INDEX);
 
-            mc.interactionManager.clickSlot(syncId, spareId, 0, SlotActionType.PICKUP, mc.player);
-            mc.interactionManager.clickSlot(syncId, chestId, 0, SlotActionType.PICKUP, mc.player);
-            mc.interactionManager.clickSlot(syncId, spareId, 0, SlotActionType.PICKUP, mc.player);
+            mc.gameMode.handleInventoryMouseClick(syncId, spareId, 0, ClickType.PICKUP, mc.player);
+            mc.gameMode.handleInventoryMouseClick(syncId, chestId, 0, ClickType.PICKUP, mc.player);
+            mc.gameMode.handleInventoryMouseClick(syncId, spareId, 0, ClickType.PICKUP, mc.player);
 
-            ItemStack cursor = mc.player.currentScreenHandler.getCursorStack();
+            ItemStack cursor = mc.player.containerMenu.getCarried();
             if (!cursor.isEmpty()) {
                 clearCursorAfterSwap();
             }
@@ -3306,7 +3306,7 @@ public class ElytraRoute extends Module {
             THMUtils.fakeInventoryOpen(false);
         }
 
-        return isFlightReadyElytra(mc.player.getEquippedStack(EquipmentSlot.CHEST)) || countTotalFlightReadyElytras() > 0;
+        return isFlightReadyElytra(mc.player.getItemBySlot(EquipmentSlot.CHEST)) || countTotalFlightReadyElytras() > 0;
     }
 
     private void clearCursorAfterSwap() {
@@ -3318,7 +3318,7 @@ public class ElytraRoute extends Module {
     }
 
     private boolean hasUnusableWornElytra() {
-        ItemStack chest = mc.player.getEquippedStack(EquipmentSlot.CHEST);
+        ItemStack chest = mc.player.getItemBySlot(EquipmentSlot.CHEST);
         return !isFlightReadyElytra(chest);
     }
 
@@ -3338,20 +3338,20 @@ public class ElytraRoute extends Module {
 
     private boolean hasFlightReadySpareInInventory() {
         for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
-            if (isFlightReadyElytra(mc.player.getInventory().getStack(i))) return true;
+            if (isFlightReadyElytra(mc.player.getInventory().getItem(i))) return true;
         }
 
         return false;
     }
 
     private List<ItemEntity> collectShulkerDrops() {
-        BlockPos center = placedShulkerPos != null ? placedShulkerPos : mc.player.getBlockPos();
-        Box area = new Box(center).expand(SHULKER_PICKUP_SEARCH_RADIUS, 2.0, SHULKER_PICKUP_SEARCH_RADIUS)
-            .union(mc.player.getBoundingBox().expand(SHULKER_PICKUP_SEARCH_RADIUS, 2.0, SHULKER_PICKUP_SEARCH_RADIUS));
-        return mc.world.getEntitiesByClass(
+        BlockPos center = placedShulkerPos != null ? placedShulkerPos : mc.player.blockPosition();
+        AABB area = new AABB(center).inflate(SHULKER_PICKUP_SEARCH_RADIUS, 2.0, SHULKER_PICKUP_SEARCH_RADIUS)
+            .minmax(mc.player.getBoundingBox().inflate(SHULKER_PICKUP_SEARCH_RADIUS, 2.0, SHULKER_PICKUP_SEARCH_RADIUS));
+        return mc.level.getEntitiesOfClass(
             ItemEntity.class,
             area,
-            entity -> entity != null && entity.isAlive() && isShulkerBox(entity.getStack())
+            entity -> entity != null && entity.isAlive() && isShulkerBox(entity.getItem())
         );
     }
 }

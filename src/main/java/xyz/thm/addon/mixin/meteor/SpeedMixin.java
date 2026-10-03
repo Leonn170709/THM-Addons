@@ -19,11 +19,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class SpeedMixin {
     @Inject(method = "onPlayerMove", at = @At("HEAD"), cancellable = true)
     private void thm$guardNullPlayerMove(PlayerMoveEvent event, CallbackInfo ci) {
-        if (MeteorClient.mc.player == null || MeteorClient.mc.world == null) ci.cancel();
+        if (MeteorClient.mc.player == null || MeteorClient.mc.level == null) ci.cancel();
     }
 
     @Inject(method = "onPreTick", at = @At("HEAD"), cancellable = true)
     private void thm$guardNullPreTick(TickEvent.Pre event, CallbackInfo ci) {
-        if (MeteorClient.mc.player == null || MeteorClient.mc.world == null) ci.cancel();
+        if (MeteorClient.mc.player == null || MeteorClient.mc.level == null) ci.cancel();
     }
 }

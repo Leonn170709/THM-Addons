@@ -9,9 +9,8 @@ package xyz.thm.addon.commands;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import meteordevelopment.meteorclient.commands.Command;
-import net.minecraft.client.network.PlayerListEntry;
-import net.minecraft.command.CommandSource;
-
+import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.commands.SharedSuggestionProvider;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
@@ -27,19 +26,19 @@ public class UUIDCommand extends Command {
     }
 
     private List<String> getTabPlayerNames() {
-        if (mc.getNetworkHandler() == null) return List.of();
-        return mc.getNetworkHandler().getPlayerList()
+        if (mc.getConnection() == null) return List.of();
+        return mc.getConnection().getOnlinePlayers()
             .stream()
             .map(e -> e.getProfile().name())
             .toList();
     }
 
     @Override
-    public void build(LiteralArgumentBuilder<CommandSource> builder) {
+    public void build(LiteralArgumentBuilder<SharedSuggestionProvider> builder) {
         // .uuid -> eigene UUID
         builder.executes(context -> {
             if (mc.player == null) return SINGLE_SUCCESS;
-            info("Your UUID is " + mc.player.getUuid().toString());
+            info("Your UUID is " + mc.player.getUUID().toString());
             return SINGLE_SUCCESS;
         });
 
@@ -56,9 +55,9 @@ public class UUIDCommand extends Command {
                     })
                     .executes(context -> {
                         String name = StringArgumentType.getString(context, "name");
-                        if (mc.getNetworkHandler() == null) return SINGLE_SUCCESS;
+                        if (mc.getConnection() == null) return SINGLE_SUCCESS;
 
-                        PlayerListEntry entry = mc.getNetworkHandler().getPlayerList()
+                        PlayerInfo entry = mc.getConnection().getOnlinePlayers()
                             .stream()
                             .filter(e -> e.getProfile().name().equalsIgnoreCase(name))
                             .findFirst()
@@ -77,12 +76,12 @@ public class UUIDCommand extends Command {
         // .uuid stats -> zaehlt cracked vs premium anhand der offline-UUID
         builder.then(
             literal("stats").executes(context -> {
-                if (mc.getNetworkHandler() == null) return SINGLE_SUCCESS;
+                if (mc.getConnection() == null) return SINGLE_SUCCESS;
 
                 int cracked = 0, premium = 0;
                 StringBuilder crackedNames = new StringBuilder();
 
-                for (PlayerListEntry entry : mc.getNetworkHandler().getPlayerList()) {
+                for (PlayerInfo entry : mc.getConnection().getOnlinePlayers()) {
                     String name = entry.getProfile().name();
                     if (offlineUuid(name).equals(entry.getProfile().id())) {
                         cracked++;
@@ -138,9 +137,9 @@ public class UUIDCommand extends Command {
                     })
                     .executes(context -> {
                         String name = StringArgumentType.getString(context, "name");
-                        if (mc.getNetworkHandler() == null) return SINGLE_SUCCESS;
+                        if (mc.getConnection() == null) return SINGLE_SUCCESS;
 
-                        PlayerListEntry entry = mc.getNetworkHandler().getPlayerList()
+                        PlayerInfo entry = mc.getConnection().getOnlinePlayers()
                             .stream()
                             .filter(e -> e.getProfile().name().equalsIgnoreCase(name))
                             .findFirst()

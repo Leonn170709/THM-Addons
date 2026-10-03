@@ -19,27 +19,32 @@ import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.ShapeContext;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.decoration.EndCrystalEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.BlockItem;
-import net.minecraft.item.Item;
-import net.minecraft.network.packet.BundlePacket;
-import net.minecraft.network.packet.Packet;
-import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
-import net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket;
-import net.minecraft.network.packet.s2c.play.EntitySpawnS2CPacket;
-import net.minecraft.network.packet.s2c.play.ExplosionS2CPacket;
-import net.minecraft.sound.SoundCategory;
-import net.minecraft.sound.SoundEvents;
-import net.minecraft.util.Hand;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.protocol.BundlePacket;
+import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.game.ClientboundAddEntityPacket;
+import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
+import net.minecraft.network.protocol.game.ClientboundExplodePacket;
+import net.minecraft.network.protocol.game.ServerboundInteractPacket;
+import net.minecraft.network.protocol.game.ServerboundSwingPacket;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.util.Mth;
 import net.minecraft.util.math.*;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.CollisionContext;
 import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.mixin.accessor.ExplosionS2CPacketAccessor;
@@ -306,7 +311,7 @@ public class SurroundPlus extends Module {
         surroundCache.clear();
         fallbackQueue.clear();
         if (mc.player == null) return;
-        initialPos = mc.player.getBlockPos();
+        initialPos = mc.player.blockPosition();
 
         if (centerMode.get() == CenterMode.Teleport) {
             PlayerUtils.centerPlayer();
@@ -315,22 +320,22 @@ public class SurroundPlus extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.world == null) return;
-        if (!multitask.get() && mc.player.isUsingItem() && mc.player.getActiveHand() == Hand.MAIN_HAND) return;
+        if (mc.player == null || mc.level == null) return;
+        if (!multitask.get() && mc.player.isUsingItem() && mc.player.getUsedItemHand() == InteractionHand.MAIN_HAND) return;
 
-        if ((disableOnJump.get() && mc.options.jumpKey.isPressed()) || (disableOnYChange.get() && mc.player.getY() != initialPos.getY())) {
+        if ((disableOnJump.get() && mc.options.keyJump.isDown()) || (disableOnYChange.get() && mc.player.getY() != initialPos.getY())) {
             toggle();
             return;
         }
 
-        if (onlyOnGround.get() && !mc.player.isOnGround()) return;
+        if (onlyOnGround.get() && !mc.player.onGround()) return;
 
         handleCentering();
 
         // Process fallback placements queued from the packet (Netty) thread — must run on main thread
         BlockPos fallback;
         while ((fallback = fallbackQueue.poll()) != null) {
-            FindItemResult fallbackItem = InvUtils.findInHotbar(itemStack -> blocks.get().contains(Block.getBlockFromItem(itemStack.getItem())));
+            FindItemResult fallbackItem = InvUtils.findInHotbar(itemStack -> blocks.get().contains(Block.byItem(itemStack.getItem())));
             if (fallbackItem.found()) placeBlock(fallback, fallbackItem);
         }
 
@@ -339,7 +344,7 @@ public class SurroundPlus extends Module {
             return;
         }
 
-        FindItemResult block = InvUtils.findInHotbar(itemStack -> blocks.get().contains(Block.getBlockFromItem(itemStack.getItem())));
+        FindItemResult block = InvUtils.findInHotbar(itemStack -> blocks.get().contains(Block.byItem(itemStack.getItem())));
         if (!block.found()) return;
 
         int placed = 0;
@@ -347,8 +352,8 @@ public class SurroundPlus extends Module {
 
         if (support.get()) {
             for (BlockPos inside : insideBlocks) {
-                BlockPos underPos = inside.down();
-                if (mc.world.getBlockState(underPos).isReplaceable()) {
+                BlockPos underPos = inside.below();
+                if (mc.level.getBlockState(underPos).canBeReplaced()) {
                     if (placed >= blocksPerTick.get()) break;
                     if (placeBlock(underPos, block)) {
                         placed++;
@@ -365,7 +370,7 @@ public class SurroundPlus extends Module {
         boolean allPlaced = true;
 
         for (BlockPos pos : surroundPositions) {
-            if (!mc.world.getBlockState(pos).isReplaceable()) continue;
+            if (!mc.level.getBlockState(pos).canBeReplaced()) continue;
             if (shiftDelay.get() > 0.0) {
                 Long last = packetPlacedAt.get(pos);
                 if (last != null && System.currentTimeMillis() - last < shiftDelay.get() * 50.0) continue;
@@ -374,8 +379,8 @@ public class SurroundPlus extends Module {
             // If support is enabled and the target block has no placeable side,
             // try to place a support block underneath first.
             if (support.get() && PlacementUtils.getPlaceSide(pos) == null) {
-                BlockPos supportPos = pos.down();
-                if (mc.world.getBlockState(supportPos).isReplaceable()) {
+                BlockPos supportPos = pos.below();
+                if (mc.level.getBlockState(supportPos).canBeReplaced()) {
                     if (placed >= blocksPerTick.get()) {
                         allPlaced = false;
                         break;
@@ -454,34 +459,34 @@ public class SurroundPlus extends Module {
     }
 
     private void setBlock(BlockPos pos, FindItemResult item) {
-        Item it = mc.player.getInventory().getStack(item.slot()).getItem();
+        Item it = mc.player.getInventory().getItem(item.slot()).getItem();
         if (!(it instanceof BlockItem block)) return;
 
-        mc.world.setBlockState(pos, block.getBlock().getDefaultState());
-        mc.world.playSound(mc.player, pos.getX(), pos.getY(), pos.getZ(), SoundEvents.BLOCK_STONE_PLACE, SoundCategory.BLOCKS, 1, 1);
+        mc.level.setBlockAndUpdate(pos, block.getBlock().defaultBlockState());
+        mc.level.playSound(mc.player, pos.getX(), pos.getY(), pos.getZ(), SoundEvents.STONE_PLACE, SoundSource.BLOCKS, 1, 1);
     }
 
     private void handleCentering() {
         if (centerMode.get() != CenterMode.NCP) return;
-        if (phased.get() && !mc.world.getBlockState(mc.player.getBlockPos()).isReplaceable()) return;
+        if (phased.get() && !mc.level.getBlockState(mc.player.blockPosition()).canBeReplaced()) return;
 
-        Vec3d centerPos = Vec3d.ofBottomCenter(mc.player.getBlockPos());
+        Vec3 centerPos = Vec3.atBottomCenterOf(mc.player.blockPosition());
         double xDiff = Math.abs(centerPos.x - mc.player.getX());
         double zDiff = Math.abs(centerPos.z - mc.player.getZ());
 
         if (xDiff <= 0.1 && zDiff <= 0.1) {
-            mc.player.setVelocity(0, mc.player.getVelocity().y, 0);
+            mc.player.setDeltaMovement(0, mc.player.getDeltaMovement().y, 0);
             return;
         }
 
         double motionX = (centerPos.x - mc.player.getX()) / 2.0;
         double motionZ = (centerPos.z - mc.player.getZ()) / 2.0;
 
-        mc.player.setVelocity(motionX, mc.player.getVelocity().y, motionZ);
+        mc.player.setDeltaMovement(motionX, mc.player.getDeltaMovement().y, motionZ);
     }
 
     private Set<BlockPos> getInsideBlocks() {
-        BlockPos base = mc.player.getBlockPos();
+        BlockPos base = mc.player.blockPosition();
         LinkedHashSet<BlockPos> inside = new LinkedHashSet<>();
 
         if (!extend.get()) {
@@ -492,7 +497,7 @@ public class SurroundPlus extends Module {
         int[] size = getSize(mc.player);
         for (int x = size[0]; x <= size[1]; x++) {
             for (int z = size[2]; z <= size[3]; z++) {
-                inside.add(base.add(x, 0, z));
+                inside.add(base.offset(x, 0, z));
             }
         }
 
@@ -517,28 +522,28 @@ public class SurroundPlus extends Module {
         if (headLevel.get()) {
             LinkedHashSet<BlockPos> head = new LinkedHashSet<>();
             for (BlockPos foot : footBlocks) {
-                BlockPos up = foot.up();
+                BlockPos up = foot.above();
                 head.add(up.north());
                 head.add(up.south());
                 head.add(up.east());
                 head.add(up.west());
             }
-            for (BlockPos foot : footBlocks) head.remove(foot.up());
+            for (BlockPos foot : footBlocks) head.remove(foot.above());
             surround.addAll(head);
         }
 
         if (coverHead.get()) {
-            for (BlockPos foot : footBlocks) surround.add(foot.up(2));
+            for (BlockPos foot : footBlocks) surround.add(foot.above(2));
         }
 
         if (mineExtend.get()) {
             LinkedHashSet<BlockPos> ext = new LinkedHashSet<>();
             for (BlockPos pos : new ArrayList<>(surround)) {
-                BlockState s = mc.world.getBlockState(pos);
-                if (s.isReplaceable()) continue;
-                if (s.getHardness(mc.world, pos) < 0) continue;
-                for (Direction d : Direction.Type.HORIZONTAL) {
-                    BlockPos e = pos.offset(d);
+                BlockState s = mc.level.getBlockState(pos);
+                if (s.canBeReplaced()) continue;
+                if (s.getDestroySpeed(mc.level, pos) < 0) continue;
+                for (Direction d : Direction.Plane.HORIZONTAL) {
+                    BlockPos e = pos.relative(d);
                     if (!footBlocks.contains(e) && !surround.contains(e)) ext.add(e);
                 }
             }
@@ -549,10 +554,10 @@ public class SurroundPlus extends Module {
 
     @EventHandler
     private void onPacketReceive(PacketEvent.Receive event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
         if (event.packet instanceof BundlePacket<?> bundle) {
-            for (Object sub : bundle.getPackets()) {
+            for (Object sub : bundle.subPackets()) {
                 if (sub instanceof Packet<?> p) handlePacket(p);
             }
         } else if (event.packet instanceof Packet<?> p) {
@@ -561,34 +566,34 @@ public class SurroundPlus extends Module {
     }
 
     private void handlePacket(Packet<?> packet) {
-        if (packet instanceof EntitySpawnS2CPacket p && desyncProtection.get() && p.getEntityType() == EntityType.END_CRYSTAL) {
-            BlockPos pos = BlockPos.ofFloored(p.getX(), p.getY(), p.getZ());
-            if (!mc.world.getBlockState(pos).isReplaceable()) mc.world.setBlockState(pos, Blocks.AIR.getDefaultState());
+        if (packet instanceof ClientboundAddEntityPacket p && desyncProtection.get() && p.getType() == EntityType.END_CRYSTAL) {
+            BlockPos pos = BlockPos.containing(p.getX(), p.getY(), p.getZ());
+            if (!mc.level.getBlockState(pos).canBeReplaced()) mc.level.setBlockAndUpdate(pos, Blocks.AIR.defaultBlockState());
         }
 
         if (timingMode.get() != TimingMode.Sequential) return;
 
-        if (packet instanceof BlockUpdateS2CPacket p) {
+        if (packet instanceof ClientboundBlockUpdatePacket p) {
             BlockPos pos = p.getPos();
             if (!surroundCache.contains(pos)) return;
-            BlockState state = p.getState();
-            if (state.isReplaceable() && mc.world.canPlace(Blocks.OBSIDIAN.getDefaultState(), pos, ShapeContext.absent())) {
+            BlockState state = p.getBlockState();
+            if (state.canBeReplaced() && mc.level.isUnobstructed(Blocks.OBSIDIAN.defaultBlockState(), pos, CollisionContext.empty())) {
                 placeFallbackDirect(pos);
-            } else if (!state.isReplaceable()) {
+            } else if (!state.canBeReplaced()) {
                 packetPlacedAt.remove(pos);
             }
             return;
         }
 
-        if (packet instanceof ExplosionS2CPacket p && prePlaceExplosion.get()) {
-            Vec3d c = ((ExplosionS2CPacketAccessor) (Object) p).getCenter();
-            BlockPos pos = BlockPos.ofFloored(c.x, c.y, c.z);
+        if (packet instanceof ClientboundExplodePacket p && prePlaceExplosion.get()) {
+            Vec3 c = ((ExplosionS2CPacketAccessor) (Object) p).getCenter();
+            BlockPos pos = BlockPos.containing(c.x, c.y, c.z);
             if (surroundCache.contains(pos)) placeFallbackDirect(pos);
             return;
         }
 
-        if (packet instanceof EntitySpawnS2CPacket p && prePlaceCrystalSpawn.get() && p.getEntityType() == EntityType.END_CRYSTAL) {
-            BlockPos pos = BlockPos.ofFloored(p.getX(), p.getY(), p.getZ());
+        if (packet instanceof ClientboundAddEntityPacket p && prePlaceCrystalSpawn.get() && p.getType() == EntityType.END_CRYSTAL) {
+            BlockPos pos = BlockPos.containing(p.getX(), p.getY(), p.getZ());
             if (surroundCache.contains(pos)) placeFallbackDirect(pos);
         }
     }
@@ -601,19 +606,19 @@ public class SurroundPlus extends Module {
 
     private void attackCrystals(List<BlockPos> positions) {
         for (BlockPos pos : positions) {
-            Entity crystal = mc.world.getOtherEntities(null, new Box(pos)).stream()
-                .filter(e -> e instanceof EndCrystalEntity)
+            Entity crystal = mc.level.getEntities(null, new AABB(pos)).stream()
+                .filter(e -> e instanceof EndCrystal)
                 .findFirst()
                 .orElse(null);
             if (crystal != null) {
-                mc.getNetworkHandler().sendPacket(PlayerInteractEntityC2SPacket.attack(crystal, mc.player.isSneaking()));
-                mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
+                mc.getConnection().send(ServerboundInteractPacket.createAttackPacket(crystal, mc.player.isShiftKeyDown()));
+                mc.getConnection().send(new ServerboundSwingPacket(InteractionHand.MAIN_HAND));
                 return;
             }
         }
     }
 
-    private int[] getSize(PlayerEntity player) {
+    private int[] getSize(Player player) {
         int[] size = new int[] {0, 0, 0, 0};
 
         double x = player.getX() - player.getBlockX();
@@ -637,7 +642,7 @@ public class SurroundPlus extends Module {
             double progress = 1.0;
             if (fade.get()) {
                 long alive = System.currentTimeMillis() - time;
-                progress = 1.0 - MathHelper.clamp((double) alive / (fadeTime.get() * 1000), 0.0, 1.0);
+                progress = 1.0 - Mth.clamp((double) alive / (fadeTime.get() * 1000), 0.0, 1.0);
             }
 
             RenderUtilsTHM.renderBlockFaded(event, pos, sideColor.get(), lineColor.get(), shapeMode.get(), progress);

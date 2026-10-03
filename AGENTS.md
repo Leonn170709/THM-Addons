@@ -10,9 +10,13 @@ This file provides guidance to Codex when working with code in this repository.
 
 ## What this is
 
-THM Addons is a **Meteor Client addon** (Fabric mod) for Minecraft 1.21.11 — highway automation,
+THM Addons is a **Meteor Client addon** (Fabric mod) being ported to Minecraft 26.2 — highway automation,
 travel, PvP, and QoL modules. It's not a standalone mod: it registers modules/HUDs/commands into
 Meteor Client via `MeteorAddon`, and several modules require Baritone to be present.
+
+The released 1.21.11 source is preserved on branch `1.21.11`. Branch `26.2` uses Mojang names,
+Java 25, Fabric Loader 0.19.5, Fabric API 0.161.0+26.2, and Meteor 26.2-SNAPSHOT. The port
+does not compile yet; fix the remaining Minecraft, Fabric, and Meteor API changes before publishing.
 
 ## Code comments & setting descriptions
 
@@ -23,7 +27,7 @@ why, or which other settings it interacts with. If it needs more than one senten
 
 ## Build & run
 
-- `./gradlew build` — full build, jar lands in `build/libs`.
+- `./gradlew build` — full build, jar lands in `build/libs` once the 26.2 port compiles.
 - `./gradlew runClient` — launch a dev client with the addon loaded (via Fabric Loom).
 - `./gradlew test` — JUnit 5 unit tests in `src/test/java` (also run by `build`). They run without
   a game instance: only test code that doesn't need Minecraft's bootstrap/registries (vanilla value
@@ -75,9 +79,8 @@ anything and hard-exits (`System.exit(1)`) if missing. The popup goes through `u
 which forks a second JVM running `Main` (Swing): the game's JVM is `-Djava.awt.headless=true`, so
 neither Swing nor Fabric Loader's own error window can open a window in it — Loader forks for the
 same reason. `TinyFileDialogs` is only the fallback (it shells out to zenity/kdialog on Linux and
-shows nothing when neither exists); last resort is the log plus stderr. Baritone-*dependent* modules (`THMHwyMonitor`,
-`HighwayTools`) are registered conditionally behind `BaritoneUtils.IS_AVAILABLE` rather than being
-a hard requirement — the addon still loads without Baritone, just with fewer modules.
+shows nothing when neither exists); last resort is the log plus stderr. Baritone is required at
+startup, so `THMHwyMonitor` and `HighwayTools` are registered without a separate availability check.
 
 **Package layout** (`src/main/java/xyz/thm/addon/`):
 - `modules/` — one class per Meteor `Module` (highway, PvP, utility, etc.). Follow the existing

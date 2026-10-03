@@ -10,7 +10,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import meteordevelopment.meteorclient.commands.Command;
 import meteordevelopment.meteorclient.systems.modules.Modules;
-import net.minecraft.command.CommandSource;
+import net.minecraft.commands.SharedSuggestionProvider;
 import xyz.thm.addon.modules.THMStashMover;
 
 public class THMStashMoverCommand extends Command {
@@ -19,7 +19,7 @@ public class THMStashMoverCommand extends Command {
     }
 
     @Override
-    public void build(LiteralArgumentBuilder<CommandSource> builder) {
+    public void build(LiteralArgumentBuilder<SharedSuggestionProvider> builder) {
         builder.then(literal("pair")
             .then(literal("list").executes(context -> {
                 THMStashMover module = module();

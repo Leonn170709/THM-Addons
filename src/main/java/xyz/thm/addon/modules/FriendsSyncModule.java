@@ -17,8 +17,8 @@ import meteordevelopment.meteorclient.systems.friends.Friends;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.gui.screen.ChatScreen;
-import net.minecraft.client.network.PlayerListEntry;
+import net.minecraft.client.gui.screens.ChatScreen;
+import net.minecraft.client.multiplayer.PlayerInfo;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.settings.StringMultiSelect;
 import xyz.thm.addon.utils.FriendClients;
@@ -114,8 +114,8 @@ public class FriendsSyncModule extends Module {
             return;
         }
 
-        if (mc.getNetworkHandler() != null) {
-            for (PlayerListEntry entry : mc.getNetworkHandler().getPlayerList()) {
+        if (mc.getConnection() != null) {
+            for (PlayerInfo entry : mc.getConnection().getOnlinePlayers()) {
                 String name = entry.getProfile().name();
                 knownPlayers.add(name);
                 handlePlayerJoin(name);
@@ -134,10 +134,10 @@ public class FriendsSyncModule extends Module {
     @EventHandler
     private void onTick(TickEvent.Post event) {
         if (syncMode.get() == SyncMode.File) return;
-        if (mc.player == null || mc.getNetworkHandler() == null) return;
+        if (mc.player == null || mc.getConnection() == null) return;
 
         Set<String> currentPlayers = new HashSet<>();
-        for (PlayerListEntry entry : mc.getNetworkHandler().getPlayerList()) {
+        for (PlayerInfo entry : mc.getConnection().getOnlinePlayers()) {
             currentPlayers.add(entry.getProfile().name());
         }
 
@@ -339,17 +339,17 @@ public class FriendsSyncModule extends Module {
     private static final class CommandSubmitter extends ChatScreen {
         private CommandSubmitter() { super("", false); }
 
-        static void submit(net.minecraft.client.MinecraftClient mc, String cmd) {
+        static void submit(net.minecraft.client.Minecraft mc, String cmd) {
             CommandSubmitter submitter = new CommandSubmitter();
             try {
-                java.lang.reflect.Field f = net.minecraft.client.gui.screen.Screen.class.getDeclaredField("client");
+                java.lang.reflect.Field f = net.minecraft.client.gui.screens.Screen.class.getDeclaredField("client");
                 f.setAccessible(true);
                 f.set(submitter, mc);
-                submitter.sendMessage(cmd, false);
+                submitter.handleChatInput(cmd, false);
             } catch (Exception e) {
                 // fallback: goes through Meteor's sendChatMessage hook
-                if (cmd.startsWith("/")) mc.player.networkHandler.sendChatCommand(cmd.substring(1));
-                else mc.player.networkHandler.sendChatMessage(cmd);
+                if (cmd.startsWith("/")) mc.player.connection.sendCommand(cmd.substring(1));
+                else mc.player.connection.sendChat(cmd);
             }
         }
     }

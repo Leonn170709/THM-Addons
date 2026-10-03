@@ -9,7 +9,7 @@ package xyz.thm.addon.mixin;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.render.FreeLook;
 import meteordevelopment.meteorclient.systems.modules.render.Freecam;
-import net.minecraft.client.render.Camera;
+import net.minecraft.client.Camera;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
@@ -20,8 +20,8 @@ import xyz.thm.addon.modules.THMHwyMonitor;
 
 @Mixin(Camera.class)
 public abstract class HighwayBuilderCameraMixin {
-    @Shadow private float yaw;
-    @Shadow private float pitch;
+    @Shadow private float yRot;
+    @Shadow private float xRot;
 
     @ModifyArgs(method = "update", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/render/Camera;setRotation(FF)V"))
     private void thm$lockCameraToFreelookState(Args args) {
@@ -38,7 +38,7 @@ public abstract class HighwayBuilderCameraMixin {
         if (freeLook != null && freeLook.isActive()) return;
 
         // Preserve camera rotation set by HighwayBuilder's freelook.
-        args.set(0, yaw);
-        args.set(1, pitch);
+        args.set(0, yRot);
+        args.set(1, xRot);
     }
 }

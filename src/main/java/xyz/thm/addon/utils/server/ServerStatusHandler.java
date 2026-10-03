@@ -6,18 +6,18 @@
 
 package xyz.thm.addon.utils.server;
 
-import net.minecraft.world.chunk.WorldChunk;
-import net.minecraft.world.chunk.ChunkSection;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.block.Blocks;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.gui.hud.MessageIndicator;
-import net.minecraft.client.network.PlayerListEntry;
-import net.minecraft.world.GameMode;
+import net.minecraft.client.GuiMessageTag;
+import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.THMUtils;
 
@@ -296,10 +296,10 @@ public final class ServerStatusHandler {
         }
     }
 
-    private static boolean isSystemIndicator(MessageIndicator indicator) {
+    private static boolean isSystemIndicator(GuiMessageTag indicator) {
         if (indicator == null) return false;
         try {
-            return indicator == MessageIndicator.system();
+            return indicator == GuiMessageTag.system();
         } catch (Throwable ignored) {
             return false;
         }
@@ -419,7 +419,7 @@ public final class ServerStatusHandler {
 
         // Deterministic commit policy: self PlayerListEntry gamemode and the live dimension are
         // authoritative. Trusted cracked-auth evidence only disambiguates Adventure + End.
-        GameMode gm = resolvePlayerListGameMode();
+        GameType gm = resolvePlayerListGameMode();
         if (gm == null) {
             score.reasons.add("strict:missing-player-list-gamemode");
             return score;
@@ -427,14 +427,14 @@ public final class ServerStatusHandler {
         String gmSource = "player-list";
 
         String dimensionId = "";
-        if (mc != null && mc.world != null && mc.world.getRegistryKey() != null) {
+        if (mc != null && mc.level != null && mc.level.dimension() != null) {
             try {
-                dimensionId = String.valueOf(mc.world.getRegistryKey().getValue());
+                dimensionId = String.valueOf(mc.level.dimension().identifier());
             } catch (Throwable ignored) {
             }
         }
 
-        boolean crackedAdventureEnd = gm == GameMode.ADVENTURE && "minecraft:the_end".equals(dimensionId);
+        boolean crackedAdventureEnd = gm == GameType.ADVENTURE && "minecraft:the_end".equals(dimensionId);
         boolean postLoginTeleported = hasMetPostLoginTeleportGate();
 
         if (crackedPromptSeenThisConnection && crackedAdventureEnd && !postLoginTeleported) {
@@ -453,7 +453,7 @@ public final class ServerStatusHandler {
 
         // Everyone is in adventure in the lobby, but the lobby world isn't always the overworld (custom
         // lobby worlds, the end). A portal in render distance is what makes it a lobby for us: that is what we path to.
-        if (gm == GameMode.ADVENTURE && netherPortalNearby()) {
+        if (gm == GameType.ADVENTURE && netherPortalNearby()) {
             score.lobby = 100;
             score.reasons.add("strict:gamemode:ADVENTURE+nether-portal-nearby+dimension:" + dimensionId + "->main-lobby+gm-source:" + gmSource);
             return score;
@@ -465,19 +465,19 @@ public final class ServerStatusHandler {
             return score;
         }
 
-        if (gm == GameMode.ADVENTURE && "minecraft:overworld".equals(dimensionId)) {
+        if (gm == GameType.ADVENTURE && "minecraft:overworld".equals(dimensionId)) {
             score.lobby = 100;
             score.reasons.add("strict:gamemode:ADVENTURE+dimension:overworld->main-lobby+gm-source:" + gmSource);
             return score;
         }
 
-        if (gm == GameMode.SPECTATOR) {
+        if (gm == GameType.SPECTATOR) {
             score.transfer = 100;
             score.reasons.add("strict:gamemode:SPECTATOR->transfer+gm-source:" + gmSource);
             return score;
         }
 
-        if (gm == GameMode.SURVIVAL) {
+        if (gm == GameType.SURVIVAL) {
             score.main = 100;
             score.reasons.add("strict:gamemode:SURVIVAL->main+gm-source:" + gmSource);
             return score;
@@ -486,7 +486,7 @@ public final class ServerStatusHandler {
         // ponytail: creative is never a lobby/transfer state, so it counts as the main server. Without this
         // it scores UNKNOWN and every server-state-gated module (HighwayBuilder) pauses forever. Creative
         // sessions are barred from reporting anything, so this can't be used to fake stats.
-        if (gm == GameMode.CREATIVE) {
+        if (gm == GameType.CREATIVE) {
             score.main = 100;
             score.reasons.add("strict:gamemode:CREATIVE->main+gm-source:" + gmSource);
             return score;
@@ -498,21 +498,21 @@ public final class ServerStatusHandler {
 
     /** Palette check of every chunk in render distance, so it stays cheap; rescanned once a second. */
     private boolean netherPortalNearby() {
-        if (mc == null || mc.world == null || mc.player == null) return false;
+        if (mc == null || mc.level == null || mc.player == null) return false;
 
         long now = System.currentTimeMillis();
         if (now - lastPortalScanAtMs < PORTAL_SCAN_INTERVAL_MS) return lastPortalNearby;
         lastPortalScanAtMs = now;
 
-        ChunkPos center = mc.player.getChunkPos();
-        int radius = mc.options.getClampedViewDistance();
+        ChunkPos center = mc.player.chunkPosition();
+        int radius = mc.options.getEffectiveRenderDistance();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
-                WorldChunk chunk = mc.world.getChunkManager().getWorldChunk(center.x + dx, center.z + dz);
+                LevelChunk chunk = mc.level.getChunkSource().getChunkNow(center.x + dx, center.z + dz);
                 if (chunk == null) continue;
-                for (ChunkSection section : chunk.getSectionArray()) {
-                    if (section == null || section.isEmpty()) continue;
-                    if (section.hasAny(state -> state.isOf(Blocks.NETHER_PORTAL))) {
+                for (LevelChunkSection section : chunk.getSections()) {
+                    if (section == null || section.hasOnlyAir()) continue;
+                    if (section.maybeHas(state -> state.is(Blocks.NETHER_PORTAL))) {
                         lastPortalNearby = true;
                         return true;
                     }
@@ -523,10 +523,10 @@ public final class ServerStatusHandler {
         return false;
     }
 
-    private GameMode resolvePlayerListGameMode() {
-        if (mc == null || mc.player == null || mc.getNetworkHandler() == null) return null;
+    private GameType resolvePlayerListGameMode() {
+        if (mc == null || mc.player == null || mc.getConnection() == null) return null;
         try {
-            PlayerListEntry selfEntry = mc.getNetworkHandler().getPlayerListEntry(mc.player.getUuid());
+            PlayerInfo selfEntry = mc.getConnection().getPlayerInfo(mc.player.getUUID());
             if (selfEntry == null) return null;
             return selfEntry.getGameMode();
         } catch (Throwable ignored) {

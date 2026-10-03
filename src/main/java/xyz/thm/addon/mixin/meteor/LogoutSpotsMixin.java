@@ -17,7 +17,7 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.render.LogoutSpots;
 import meteordevelopment.meteorclient.utils.render.WireframeEntityRenderer;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
-import net.minecraft.entity.EntityPose;
+import net.minecraft.world.entity.Pose;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -112,7 +112,7 @@ public abstract class LogoutSpotsMixin implements LogoutSpotsPlayers {
     private void thm$onRender3D(Render3DEvent event, CallbackInfo ci) {
         if (thm$improvedLogoutShape == null || !thm$improvedLogoutShape.get()) return;
 
-        if (mc.world == null) return;
+        if (mc.level == null) return;
 
         boolean renderedAny = false;
         Set<UUID> seen = new HashSet<>();
@@ -123,7 +123,7 @@ public abstract class LogoutSpotsMixin implements LogoutSpotsPlayers {
             UUID uuid = poseData.thm$getUuid();
             seen.add(uuid);
             SkinGhostPlayer ghost = thm$ghosts.computeIfAbsent(uuid, ignored ->
-                new SkinGhostPlayer(mc.world, new GameProfile(uuid, poseData.thm$getName()), poseData.thm$getSkin())
+                new SkinGhostPlayer(mc.level, new GameProfile(uuid, poseData.thm$getName()), poseData.thm$getSkin())
             );
 
             thm$applySnapshot(ghost, poseData);
@@ -146,7 +146,7 @@ public abstract class LogoutSpotsMixin implements LogoutSpotsPlayers {
 
         // The wireframe would trace the outer skin layer too, so only the skin render gets it.
         ghost.setModelParts(thm$renderSkin.get() ? poseData.thm$getModelParts() : 0);
-        ghost.refreshPositionAndAngles(x, y, z, poseData.thm$getYaw(), poseData.thm$getPitch());
+        ghost.snapTo(x, y, z, poseData.thm$getYaw(), poseData.thm$getPitch());
         EntityPositionAccessor entityPos = (EntityPositionAccessor) ghost;
         entityPos.thm$setLastX(x);
         entityPos.thm$setLastY(y);
@@ -158,15 +158,15 @@ public abstract class LogoutSpotsMixin implements LogoutSpotsPlayers {
         LivingEntityAccessor rot = (LivingEntityAccessor) ghost;
         rot.thm$setHeadYaw(poseData.thm$getHeadYaw());
         rot.thm$setLastHeadYaw(poseData.thm$getHeadYaw());
-        ghost.setBodyYaw(poseData.thm$getBodyYaw());
+        ghost.setYBodyRot(poseData.thm$getBodyYaw());
         rot.thm$setLastBodyYaw(poseData.thm$getBodyYaw());
-        ghost.setSneaking(poseData.thm$isSneaking());
+        ghost.setShiftKeyDown(poseData.thm$isSneaking());
 
         if (poseData.thm$isLowPose()) {
-            ghost.setPose(EntityPose.SWIMMING);
+            ghost.setPose(Pose.SWIMMING);
             ghost.setSwimming(true);
         } else {
-            ghost.setPose(poseData.thm$isSneaking() ? EntityPose.CROUCHING : EntityPose.STANDING);
+            ghost.setPose(poseData.thm$isSneaking() ? Pose.CROUCHING : Pose.STANDING);
             ghost.setSwimming(false);
         }
 

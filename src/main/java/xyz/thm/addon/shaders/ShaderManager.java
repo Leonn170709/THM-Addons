@@ -6,14 +6,14 @@
 
 package xyz.thm.addon.shaders;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.Identifier;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.system.THMSystem;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import net.minecraft.client.Minecraft;
+import net.minecraft.resources.Identifier;
 
 // Discovers the .fsh backgrounds shipped under assets/thm-addon/shaders and picks which
 // one is currently active, per THMSystem's main-menu shader settings.
@@ -28,8 +28,8 @@ public class ShaderManager {
         if (cached == null) {
             List<String> names = new ArrayList<>();
             try {
-                MinecraftClient.getInstance().getResourceManager()
-                    .findResources(BASE_PATH, id -> id.getNamespace().equals(THMAddon.MOD_ID) && id.getPath().endsWith(".fsh"))
+                Minecraft.getInstance().getResourceManager()
+                    .listResources(BASE_PATH, id -> id.getNamespace().equals(THMAddon.MOD_ID) && id.getPath().endsWith(".fsh"))
                     .keySet()
                     .forEach(id -> names.add(id.getPath().substring(BASE_PATH.length() + 1, id.getPath().length() - ".fsh".length())));
             } catch (Exception e) {
@@ -42,7 +42,7 @@ public class ShaderManager {
     }
 
     public static Identifier resourceId(String shaderName) {
-        return Identifier.of(THMAddon.MOD_ID, BASE_PATH + "/" + shaderName + ".fsh");
+        return Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, BASE_PATH + "/" + shaderName + ".fsh");
     }
 
     /** Re-rolls which shader is active. Called once per TitleScreen#init - i.e. each time the

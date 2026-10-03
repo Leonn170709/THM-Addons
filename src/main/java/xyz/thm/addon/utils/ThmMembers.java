@@ -10,8 +10,7 @@ import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.entity.player.PlayerEntity;
-
+import net.minecraft.world.entity.player.Player;
 import java.util.*;
 
 
@@ -217,7 +216,7 @@ public final class ThmMembers {
         return rankNorm.equals("ignore");
     }
 
-    public static synchronized boolean isThmMember(PlayerEntity player) {
+    public static synchronized boolean isThmMember(Player player) {
         if (player == null) return false;
         Member member = getMemberByMcName(player.getGameProfile().name());
         if (member == null) return false;

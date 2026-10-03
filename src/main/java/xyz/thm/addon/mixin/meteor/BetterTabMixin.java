@@ -12,10 +12,10 @@ import meteordevelopment.meteorclient.systems.friends.Friends;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.render.BetterTab;
-import net.minecraft.client.network.PlayerListEntry;
-import net.minecraft.text.MutableText;
-import net.minecraft.text.Text;
-import net.minecraft.text.TextColor;
+import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.TextColor;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -54,7 +54,7 @@ public class BetterTabMixin extends Module {
     }
 
     @Inject(method = "getPlayerName", at = @At("RETURN"), cancellable = true)
-    private void thmAddon$highlightThmMembers(PlayerListEntry entry, CallbackInfoReturnable<Text> cir) {
+    private void thmAddon$highlightThmMembers(PlayerInfo entry, CallbackInfoReturnable<Component> cir) {
         THMSystem system = THMSystem.get();
         if (system == null || !system.highlightInTab.get()) return;
 
@@ -81,7 +81,7 @@ public class BetterTabMixin extends Module {
 
         TextColor textColor = TextColor.fromRgb((color.r << 16) | (color.g << 8) | color.b);
 
-        Text original = cir.getReturnValue();
+        Component original = cir.getReturnValue();
         if (original == null) return;
 
         cir.setReturnValue(rebuildNode(original, textColor));
@@ -89,11 +89,11 @@ public class BetterTabMixin extends Module {
 
     // Recursively rebuilds the text tree, forcing our color on every node
     // while preserving structure (prefix/suffix siblings) and non-color styles.
-    private static MutableText rebuildNode(Text text, TextColor color) {
-        MutableText node = ((MutableText) text).copyContentOnly()
-            .styled(s -> s.withColor(color));
+    private static MutableComponent rebuildNode(Component text, TextColor color) {
+        MutableComponent node = ((MutableComponent) text).plainCopy()
+            .withStyle(s -> s.withColor(color));
 
-        for (Text sibling : text.getSiblings()) {
+        for (Component sibling : text.getSiblings()) {
             node.append(rebuildNode(sibling, color));
         }
 

@@ -36,15 +36,14 @@ repositories {
 dependencies {
     // Fabric
     minecraft(libs.minecraft)
-    mappings(variantOf(libs.yarn) { classifier("v2") })
-    modImplementation(libs.fabric.loader)
-    modImplementation(libs.fabric.api)
+    implementation(libs.fabric.loader)
+    implementation(libs.fabric.api)
 
     // Meteor
-    modImplementation(libs.meteor.client)
+    implementation(libs.meteor.client)
 
     // Baritone
-    modCompileOnly(libs.baritone)
+    compileOnly(libs.baritone)
 
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
@@ -188,12 +187,14 @@ tasks {
                     .start()
                 process.inputStream.bufferedReader().readLine()?.trim() ?: ""
             }),
-            "gh_branch" to (System.getenv("GITHUB_REF_NAME") ?: run {
-                val process = ProcessBuilder("git", "rev-parse", "--abbrev-ref", "HEAD")
-                    .directory(rootDir)
-                    .start()
-                process.inputStream.bufferedReader().readLine()?.trim() ?: ""
-            }),
+            "gh_branch" to (System.getenv("GITHUB_HEAD_REF")
+                ?: System.getenv("GITHUB_REF_NAME")?.takeIf { System.getenv("GITHUB_REF_TYPE") == "branch" }
+                ?: run {
+                    val process = ProcessBuilder("git", "branch", "--show-current")
+                        .directory(rootDir)
+                        .start()
+                    process.inputStream.bufferedReader().readLine()?.trim() ?: ""
+                }),
         )
 
         inputs.properties(propertyMap)
@@ -218,14 +219,15 @@ tasks {
     }
 
     java {
-        sourceCompatibility = JavaVersion.VERSION_21
-        targetCompatibility = JavaVersion.VERSION_21
+        toolchain.languageVersion = JavaLanguageVersion.of(25)
+        sourceCompatibility = JavaVersion.VERSION_25
+        targetCompatibility = JavaVersion.VERSION_25
     }
 
     withType<JavaCompile> {
         dependsOn(generateApiEndpoints)
         options.encoding = "UTF-8"
-        options.release = 21
+        options.release = 25
         options.isFork = true
         options.forkOptions.memoryMaximumSize = "3g"
 options.compilerArgs.add("-Xlint:deprecation")

@@ -6,9 +6,8 @@
 
 package xyz.thm.addon.utils.webp;
 
-import net.minecraft.client.texture.NativeImage;
 import xyz.thm.addon.THMAddon;
-
+import com.mojang.blaze3d.platform.NativeImage;
 import java.nio.ByteBuffer;
 
 /**
@@ -697,7 +696,7 @@ public final class Vp8LDecoder {
         NativeImage nativeImage = new NativeImage(target, image.width, image.height, false);
         for (int y = 0; y < image.height; y++) {
             for (int x = 0; x < image.width; x++) {
-                nativeImage.setColorArgb(x, y, image.argb[y * image.width + x]);
+                nativeImage.setPixel(x, y, image.argb[y * image.width + x]);
             }
         }
         return nativeImage;

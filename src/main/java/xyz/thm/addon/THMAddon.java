@@ -26,7 +26,7 @@ import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.metadata.ModMetadata;
 import net.minecraft.SharedConstants;
-import net.minecraft.item.Items;
+import net.minecraft.world.item.Items;
 import org.slf4j.Logger;
 import xyz.thm.addon.commands.*;
 import xyz.thm.addon.gui.themes.*;
@@ -58,8 +58,8 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
 
     static {METADATA = FabricLoader.getInstance().getModContainer(MOD_ID).orElseThrow().getMetadata();
         VERSION = METADATA.getVersion().getFriendlyString();
-        MAIN = new Category("THM Highway", Items.OBSIDIAN.getDefaultStack());
-        PVP = new Category("THM PVP", Items.END_CRYSTAL.getDefaultStack());}
+        MAIN = new Category("THM Highway", Items.OBSIDIAN.getDefaultInstance());
+        PVP = new Category("THM PVP", Items.END_CRYSTAL.getDefaultInstance());}
 
     public static File GetConfigFile(String key, String filename) {
         return new File(new File(new File(new File(MeteorClient.FOLDER, "thm"), key), Utils.getFileWorldName()), filename);
@@ -90,7 +90,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
 
         record ModOption(String modId, String displayName, String url) {}
         record RequiredMod(String groupName, String downloadUrl, ModOption... options) {}
-        String Version = SharedConstants.getGameVersion().name();
+        String Version = SharedConstants.getCurrentVersion().name();
 
         List<RequiredMod> required = List.of(
             new RequiredMod("Baritone",
@@ -272,8 +272,8 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
             .getModContainer("thm-addon")
             .get().getMetadata()
             .getCustomValue("github:branch")
-            .getAsString();
-        return new GithubRepo("Leonn170709", "THM-Addons", branch.isEmpty() ? "master" : branch.trim(), null);
+            .getAsString().trim();
+        return branch.isEmpty() ? null : new GithubRepo("Leonn170709", "THM-Addons", branch, null);
     }
 
     @Override
@@ -284,7 +284,6 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
             .get().getMetadata()
             .getCustomValue("github:sha")
             .getAsString();
-        LOG.info("Rejects version: {}", commit);
         return commit.isEmpty() ? null : commit.trim();
     }
 

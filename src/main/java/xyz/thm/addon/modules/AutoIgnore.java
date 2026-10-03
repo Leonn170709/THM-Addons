@@ -15,7 +15,7 @@ import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.network.ClientPlayNetworkHandler;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.ThmMembers;
 
@@ -86,7 +86,7 @@ public class AutoIgnore extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
         refreshTargets();
 
@@ -103,7 +103,7 @@ public class AutoIgnore extends Module {
         pendingNames.remove(target.normalized);
         if (ignoredNames.contains(target.normalized)) return;
 
-        ClientPlayNetworkHandler handler = mc.getNetworkHandler();
+        ClientPacketListener handler = mc.getConnection();
         if (handler == null) return;
 
         ChatUtils.sendPlayerMsg("/ignore " + target.displayName);

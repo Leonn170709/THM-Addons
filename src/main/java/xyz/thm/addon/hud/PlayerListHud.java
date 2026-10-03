@@ -13,7 +13,7 @@ import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.entity.EntityUtils;
 import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
-import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.world.entity.player.Player;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.TotemTracker;
 
@@ -118,11 +118,11 @@ public class PlayerListHud extends HudElement {
 
     @Override
     public void render(HudRenderer renderer) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
         double textScale = scale.get();
 
-        List<PlayerEntity> players = new ArrayList<>();
-        for (PlayerEntity player : mc.world.getPlayers()) {
+        List<Player> players = new ArrayList<>();
+        for (Player player : mc.level.players()) {
             if (!showSelf.get() && player == mc.player) continue;
             if (!EntityUtils.isInRenderDistance(player)) continue;
             players.add(player);
@@ -132,7 +132,7 @@ public class PlayerListHud extends HudElement {
         double screenY = y;
         double largestWidth = 0;
 
-        for (PlayerEntity player : players) {
+        for (Player player : players) {
             String name = player.getName().getString();
             String stats = buildStatsText(player);
 
@@ -155,7 +155,7 @@ public class PlayerListHud extends HudElement {
         setSize(largestWidth + 4, Math.max(screenY - y, 0) + 4);
     }
 
-    private String buildStatsText(PlayerEntity player) {
+    private String buildStatsText(Player player) {
         StringBuilder stats = new StringBuilder();
 
         if (showPing.get()) stats.append(" [").append(EntityUtils.getPing(player)).append("ms]");
@@ -167,7 +167,7 @@ public class PlayerListHud extends HudElement {
             int hp = Math.round(player.getHealth() + player.getAbsorptionAmount());
             stats.append(" hp:").append(hp);
         }
-        if (showArmor.get()) stats.append(" armor:").append(player.getArmor());
+        if (showArmor.get()) stats.append(" armor:").append(player.getArmorValue());
         if (showTotemPops.get()) stats.append(" totems:").append(TotemTracker.get(player));
 
         return stats.toString();

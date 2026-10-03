@@ -7,8 +7,8 @@
 package xyz.thm.addon.mixin.meteor;
 
 import meteordevelopment.meteorclient.systems.modules.combat.CrystalAura;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
@@ -28,6 +28,6 @@ public class CrystalAuraMixin {
         THMSystem system = THMSystem.get();
         if (system == null || !system.ignoreThmMembers.get()) return;
 
-        targets.removeIf(entity -> entity instanceof PlayerEntity player && ThmMembers.isThmMember(player));
+        targets.removeIf(entity -> entity instanceof Player player && ThmMembers.isThmMember(player));
     }
 }

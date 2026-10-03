@@ -20,19 +20,19 @@ import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.enchantment.Enchantments;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.shape.VoxelShape;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
 
@@ -146,7 +146,7 @@ public class BetterEchestFarmer extends Module {
     private enum State { Breaking, Placing }
     private State currentState;
 
-    private final VoxelShape SHAPE = Block.createCuboidShape(1.0D, 0.0D, 1.0D, 15.0D, 14.0D, 15.0D);
+    private final VoxelShape SHAPE = Block.box(1.0D, 0.0D, 1.0D, 15.0D, 14.0D, 15.0D);
     private BlockPos target;
     private int startCount;
     private boolean rebreakPrimed;
@@ -179,10 +179,10 @@ public class BetterEchestFarmer extends Module {
         else setTimer(1.0);
 
         if (target == null) {
-            HitResult hit = mc.player.raycast(4.5, 0, false);
+            HitResult hit = mc.player.pick(4.5, 0, false);
             if (hit.getType() == HitResult.Type.BLOCK) {
                 BlockPos hitPos = ((BlockHitResult) hit).getBlockPos();
-                target = mc.world.getBlockState(hitPos).isOf(Blocks.ENDER_CHEST) ? hitPos : hitPos.up();
+                target = mc.level.getBlockState(hitPos).is(Blocks.ENDER_CHEST) ? hitPos : hitPos.above();
             }
             else return;
         }
@@ -217,26 +217,26 @@ public class BetterEchestFarmer extends Module {
         if (instaMine.get()) {
             if (!rebreakPrimed) {
                 // Initial slow break
-                if (miningProgress == 0) sendPacket(new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, target, dir));
+                if (miningProgress == 0) sendPacket(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, target, dir));
 
-                miningProgress += mc.world.getBlockState(target).calcBlockBreakingDelta(mc.player, mc.world, target);
+                miningProgress += mc.level.getBlockState(target).getDestroyProgress(mc.player, mc.level, target);
 
                 if (miningProgress >= 1.0) {
-                    sendPacket(new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, target, dir));
+                    sendPacket(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, target, dir));
                     currentState = State.Placing; // Switch state immediately without waiting for server air
                 }
             } else {
                 // Instamine loop
                 if (rotate.get()) rotateTo(target);
-                sendPacket(new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, target, dir));
-                if (swing.get() && mc.player != null) mc.player.swingHand(Hand.MAIN_HAND);
+                sendPacket(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, target, dir));
+                if (swing.get() && mc.player != null) mc.player.swing(InteractionHand.MAIN_HAND);
 
                 currentState = State.Placing; // Transition immediately
                 delayTimer = packetDelay.get();
             }
         } else {
             // Normal mining still needs to check world state slightly to know when to stop
-            if (mc.world.getBlockState(target).isOf(Blocks.ENDER_CHEST)) {
+            if (mc.level.getBlockState(target).is(Blocks.ENDER_CHEST)) {
                 if (!silentSwap.get() && prevSlot != tool) InvUtils.swap(tool, true);
                 BlockUtils.breakBlock(target, swing.get());
             } else {
@@ -259,7 +259,7 @@ public class BetterEchestFarmer extends Module {
         int prevSlot = mc.player.getInventory().getSelectedSlot();
         int chestSlot = echest.slot();
         if (prevSlot != chestSlot) InvUtils.swap(chestSlot, false);
-        BlockUtils.place(target, Hand.MAIN_HAND, chestSlot, rotate.get(), 0, swing.get(), true, false);
+        BlockUtils.place(target, InteractionHand.MAIN_HAND, chestSlot, rotate.get(), 0, swing.get(), true, false);
         if (silentSwap.get() && prevSlot != chestSlot) InvUtils.swap(prevSlot, false);
 
         // Immediately ready the tool and move to next state
@@ -274,17 +274,17 @@ public class BetterEchestFarmer extends Module {
 
     // --- Helpers ---
 
-    private void sendPacket(net.minecraft.network.packet.Packet<?> packet) {
-        if (mc.getNetworkHandler() != null) mc.getNetworkHandler().sendPacket(packet);
+    private void sendPacket(net.minecraft.network.protocol.Packet<?> packet) {
+        if (mc.getConnection() != null) mc.getConnection().send(packet);
     }
 
     private int findBestTool() {
         double bestScore = -1;
         int bestSlot = -1;
         for (int i = 0; i < 9; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (Utils.hasEnchantment(stack, Enchantments.SILK_TOUCH)) continue;
-            double score = stack.getMiningSpeedMultiplier(Blocks.ENDER_CHEST.getDefaultState());
+            double score = stack.getDestroySpeed(Blocks.ENDER_CHEST.defaultBlockState());
             if (score > bestScore) {
                 bestScore = score;
                 bestSlot = i;
@@ -319,7 +319,7 @@ public class BetterEchestFarmer extends Module {
     @EventHandler
     private void onRender(Render3DEvent event) {
         if (target == null || !render.get()) return;
-        Box box = SHAPE.getBoundingBoxes().get(0);
+        AABB box = SHAPE.toAabbs().get(0);
         RenderUtilsTHM.renderBox(event, target.getX() + box.minX, target.getY() + box.minY, target.getZ() + box.minZ,
             target.getX() + box.maxX, target.getY() + box.maxY, target.getZ() + box.maxZ,
             sideColor.get(), lineColor.get(), ShapeMode.Both);

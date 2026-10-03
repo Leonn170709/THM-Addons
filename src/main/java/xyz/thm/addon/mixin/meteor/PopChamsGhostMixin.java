@@ -17,10 +17,10 @@ import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.render.PopChams;
 import meteordevelopment.meteorclient.utils.render.WireframeEntityRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.LimbAnimator;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.WalkAnimationState;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -84,33 +84,33 @@ public abstract class PopChamsGhostMixin implements GhostPose {
     }
 
     @Inject(method = "<init>", at = @At("TAIL"))
-    private void thm$capture(PopChams outer, PlayerEntity player, CallbackInfo ci) {
+    private void thm$capture(PopChams outer, Player player, CallbackInfo ci) {
         if (!thm$settings()) return;
 
         // Ghosts get a random profile, so point them at the popping player's list entry for their skin.
-        if (mc.getNetworkHandler() != null) {
-            ((AbstractClientPlayerEntityAccessor) this).meteor$setPlayerListEntry(mc.getNetworkHandler().getPlayerListEntry(player.getUuid()));
+        if (mc.getConnection() != null) {
+            ((AbstractClientPlayerEntityAccessor) this).meteor$setPlayerListEntry(mc.getConnection().getPlayerInfo(player.getUUID()));
         }
 
         // The wireframe would trace the outer skin layer too, so only the skin render gets it.
         if (thm$renderSkin.get()) {
-            ((PlayerEntity) (Object) this).getDataTracker().set(PlayerModelPartsAccessor.thm$getModelParts(),
-                player.getDataTracker().get(PlayerModelPartsAccessor.thm$getModelParts()));
+            ((Player) (Object) this).getEntityData().set(PlayerModelPartsAccessor.thm$getModelParts(),
+                player.getEntityData().get(PlayerModelPartsAccessor.thm$getModelParts()));
         }
 
         if (thm$captureLimbs.get()) {
-            LimbAnimator source = ((LivingEntityAccessor) player).thm$getLimbAnimator();
-            thm$limbPos = source.getAnimationProgress();
-            thm$limbAmplitude = source.getAmplitude(1);
+            WalkAnimationState source = ((LivingEntityAccessor) player).thm$getLimbAnimator();
+            thm$limbPos = source.position();
+            thm$limbAmplitude = source.speed(1);
         }
     }
 
     @Redirect(method = "render", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/mixininterface/IVec3d;meteor$setY"))
-    private Vec3d thm$rise(IVec3d pos, double y) {
+    private Vec3 thm$rise(IVec3d pos, double y) {
         if (!thm$settings()) return pos.meteor$setY(y);
 
         double next = Math.min(thm$risen + thm$riseSpeed.get() * Utils.frameTime, thm$riseHeight.get());
-        Vec3d result = pos.meteor$setY(((Entity) (Object) this).getY() + (next - thm$risen));
+        Vec3 result = pos.meteor$setY(((Entity) (Object) this).getY() + (next - thm$risen));
         thm$risen = next;
         return result;
     }

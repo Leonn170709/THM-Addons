@@ -6,8 +6,8 @@
 
 package xyz.thm.addon.mixin;
 
-import net.minecraft.client.render.GameRenderer;
-import net.minecraft.client.render.RenderTickCounter;
+import net.minecraft.client.DeltaTracker;
+import net.minecraft.client.renderer.GameRenderer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -23,8 +23,8 @@ import xyz.thm.addon.shaders.ShaderBackground;
  */
 @Mixin(GameRenderer.class)
 public abstract class ImHighMixin {
-    @Inject(method = "render(Lnet/minecraft/client/render/RenderTickCounter;Z)V", at = @At("TAIL"))
-    private void thm$imHigh(RenderTickCounter tickCounter, boolean tick, CallbackInfo ci) {
+    @Inject(method = "render(Lnet/minecraft/client/DeltaTracker;Z)V", at = @At("TAIL"))
+    private void thm$imHigh(DeltaTracker tickCounter, boolean tick, CallbackInfo ci) {
         if (ThmTheme.isHigh()) ShaderBackground.renderTrip(1.0f);
     }
 }

@@ -23,9 +23,9 @@ import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.world.TickRate;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 import xyz.thm.addon.THMAddon;
 
 import java.util.ArrayList;
@@ -124,7 +124,7 @@ public class HotbarManager extends Module {
             Item targetItem = itemSettings.get(i).get();
             if (targetItem == Items.AIR) continue;
 
-            Item slotItem = mc.player.getInventory().getStack(i).getItem();
+            Item slotItem = mc.player.getInventory().getItem(i).getItem();
             if (slotItem != Items.AIR && !replace.get()) continue;
             if (slotItem == targetItem) continue;
 
@@ -147,25 +147,25 @@ public class HotbarManager extends Module {
     private static void fillClearableItemSettingRow(GuiTheme theme, WTable table, ClearableItemSetting setting) {
         WHorizontalList list = table.add(theme.horizontalList()).expandX().widget();
 
-        WItem item = list.add(theme.item(setting.get().getDefaultStack())).widget();
+        WItem item = list.add(theme.item(setting.get().getDefaultInstance())).widget();
 
         WButton select = list.add(theme.button("Select")).widget();
         select.action = () -> {
             ItemSettingScreen screen = new ItemSettingScreen(theme, setting);
-            screen.onClosed(() -> item.set(setting.get().getDefaultStack()));
+            screen.onClosed(() -> item.set(setting.get().getDefaultInstance()));
             MeteorClient.mc.setScreen(screen);
         };
 
         WButton clear = list.add(theme.button("Clear")).widget();
         clear.action = () -> {
             setting.set(Items.AIR);
-            item.set(Items.AIR.getDefaultStack());
+            item.set(Items.AIR.getDefaultInstance());
         };
 
         WButton reset = table.add(theme.button(GuiRenderer.RESET)).widget();
         reset.action = () -> {
             setting.reset();
-            item.set(setting.get().getDefaultStack());
+            item.set(setting.get().getDefaultInstance());
         };
         reset.tooltip = "Reset";
     }
@@ -180,9 +180,9 @@ public class HotbarManager extends Module {
         }
 
         @Override
-        public Item load(NbtCompound tag) {
+        public Item load(CompoundTag tag) {
             if (tag.getList("value").isPresent()) {
-                String value = tag.getListOrEmpty("value").getString(0, "minecraft:air");
+                String value = tag.getListOrEmpty("value").getStringOr(0, "minecraft:air");
                 Item item = parseImpl(value);
                 setValue(item == null ? Items.AIR : item);
                 return get();
@@ -200,19 +200,19 @@ public class HotbarManager extends Module {
             value = item;
         }
 
-        private static class Builder extends SettingBuilder<Builder, Item, ClearableItemSetting> {
+        private static class Builder extends SettingBuilder<xyz.thm.addon.modules.HotbarManager.ClearableItemSetting.Builder, Item, ClearableItemSetting> {
             private Predicate<Item> filter;
 
             public Builder() {
                 super(Items.AIR);
             }
 
-            public Builder defaultValue(Item defaultValue) {
+            public xyz.thm.addon.modules.HotbarManager.ClearableItemSetting.Builder defaultValue(Item defaultValue) {
                 this.defaultValue = defaultValue == null ? Items.AIR : defaultValue;
                 return this;
             }
 
-            public Builder filter(Predicate<Item> filter) {
+            public xyz.thm.addon.modules.HotbarManager.ClearableItemSetting.Builder filter(Predicate<Item> filter) {
                 this.filter = filter;
                 return this;
             }

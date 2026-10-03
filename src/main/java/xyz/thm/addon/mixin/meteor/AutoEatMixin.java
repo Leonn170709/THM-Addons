@@ -11,8 +11,8 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.systems.modules.player.AutoEat;
 import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.item.ItemStack;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -67,9 +67,9 @@ public abstract class AutoEatMixin implements StuckEatingRetryBridge {
             bephax$changeSlot(slot);
         }
         invManager.setEating(true);
-        boolean shouldPressKey = mc.currentScreen == null;
+        boolean shouldPressKey = mc.screen == null;
         if (shouldPressKey) {
-            mc.options.useKey.setPressed(true);
+            mc.options.keyUse.setDown(true);
         }
         if (!mc.player.isUsingItem()) Utils.rightClick();
         eating = true;
@@ -85,12 +85,12 @@ public abstract class AutoEatMixin implements StuckEatingRetryBridge {
             return;
         }
         if (eating) {
-            boolean shouldPressKey = mc.currentScreen == null;
+            boolean shouldPressKey = mc.screen == null;
             if (mc.options != null) {
-                if (shouldPressKey && !mc.options.useKey.isPressed()) {
-                    mc.options.useKey.setPressed(true);
-                } else if (!shouldPressKey && mc.options.useKey.isPressed()) {
-                    mc.options.useKey.setPressed(false);
+                if (shouldPressKey && !mc.options.keyUse.isDown()) {
+                    mc.options.keyUse.setDown(true);
+                } else if (!shouldPressKey && mc.options.keyUse.isDown()) {
+                    mc.options.keyUse.setDown(false);
                 }
             }
         }
@@ -100,7 +100,7 @@ public abstract class AutoEatMixin implements StuckEatingRetryBridge {
         InventoryManager.getInstance().setEating(false);
         bephax$changeSlot(prevSlot);
         if (mc.options != null) {
-            mc.options.useKey.setPressed(false);
+            mc.options.keyUse.setDown(false);
         }
         if (pauseBaritone.get() && bephax$wasBaritone) {
             bephax$wasBaritone = false;
@@ -116,7 +116,7 @@ public abstract class AutoEatMixin implements StuckEatingRetryBridge {
         if (thm$hasEatingOwnership && !eating) stopEating();
         InventoryManager.getInstance().setEating(false);
         if (mc.options != null) {
-            mc.options.useKey.setPressed(false);
+            mc.options.keyUse.setDown(false);
         }
         if (pauseBaritone.get() && bephax$wasBaritone) {
             bephax$wasBaritone = false;
@@ -134,13 +134,13 @@ public abstract class AutoEatMixin implements StuckEatingRetryBridge {
         if (mc.player == null) return false;
         ItemStack stack;
         if (slot == 40) {
-            stack = mc.player.getOffHandStack();
+            stack = mc.player.getOffhandItem();
         } else if (slot >= 0 && slot < 9) {
-            stack = mc.player.getInventory().getStack(slot);
+            stack = mc.player.getInventory().getItem(slot);
         } else {
             return false;
         }
-        return !stack.isEmpty() && stack.get(DataComponentTypes.FOOD) != null;
+        return !stack.isEmpty() && stack.get(DataComponents.FOOD) != null;
     }
 
     @Override
@@ -183,7 +183,7 @@ public abstract class AutoEatMixin implements StuckEatingRetryBridge {
         if (thm$hasEatingOwnership || eating) stopEating();
         else {
             InventoryManager.getInstance().setEating(false);
-            if (mc.options != null) mc.options.useKey.setPressed(false);
+            if (mc.options != null) mc.options.keyUse.setDown(false);
         }
     }
 

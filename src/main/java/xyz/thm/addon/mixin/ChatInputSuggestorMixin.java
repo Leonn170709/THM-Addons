@@ -8,11 +8,6 @@ package xyz.thm.addon.mixin;
 
 import com.mojang.brigadier.ParseResults;
 import com.mojang.brigadier.suggestion.Suggestions;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.ChatInputSuggestor;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.client.network.ClientCommandSource;
-import net.minecraft.text.OrderedText;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -24,50 +19,55 @@ import xyz.thm.addon.utils.kitbot.KitbotChatRouter;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.CommandSuggestions;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.multiplayer.ClientSuggestionProvider;
+import net.minecraft.util.FormattedCharSequence;
 
-@Mixin(ChatInputSuggestor.class)
+@Mixin(CommandSuggestions.class)
 public abstract class ChatInputSuggestorMixin {
-    @Shadow @Final private MinecraftClient client;
-    @Shadow @Final private TextFieldWidget textField;
-    @Shadow private ParseResults<ClientCommandSource> parse;
+    @Shadow @Final private Minecraft minecraft;
+    @Shadow @Final private EditBox input;
+    @Shadow private ParseResults<ClientSuggestionProvider> currentParse;
     @Shadow private CompletableFuture<Suggestions> pendingSuggestions;
-    @Shadow private boolean windowActive;
-    @Shadow boolean completingSuggestions;
-    @Shadow @Final private List<OrderedText> messages;
+    @Shadow private boolean allowSuggestions;
+    @Shadow boolean keepSuggestions;
+    @Shadow @Final private List<FormattedCharSequence> commandUsage;
 
-    @Shadow public abstract void clearWindow();
-    @Shadow public abstract void show(boolean narrateFirstSuggestion);
+    @Shadow public abstract void hide();
+    @Shadow public abstract void showSuggestions(boolean narrateFirstSuggestion);
 
-    @Inject(method = "refresh", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "updateCommandInfo", at = @At("HEAD"), cancellable = true)
     private void thm$refreshKitbotSuggestions(CallbackInfo ci) {
         if (!KitbotChatRouter.isEnabled()) return;
 
-        String text = textField.getText();
+        String text = input.getValue();
         if (text == null || text.isEmpty() || text.charAt(0) != '$') return;
 
         ci.cancel();
 
-        parse = null;
-        if (!completingSuggestions) {
-            textField.setSuggestion(null);
-            clearWindow();
+        currentParse = null;
+        if (!keepSuggestions) {
+            input.setSuggestion(null);
+            hide();
         }
-        messages.clear();
+        commandUsage.clear();
 
         Suggestions suggestions = KitbotChatCommandParser.buildSuggestions(
             text,
-            textField.getCursor(),
+            input.getCursorPosition(),
             KitbotChatCommandParser.getOnlinePlayerNames()
         );
         pendingSuggestions = CompletableFuture.completedFuture(suggestions);
 
         if (suggestions.isEmpty()) {
-            clearWindow();
+            hide();
             return;
         }
 
-        if (windowActive && client.options.getAutoSuggestions().getValue()) {
-            show(false);
+        if (allowSuggestions && minecraft.options.autoSuggestions().get()) {
+            showSuggestions(false);
         }
     }
 }

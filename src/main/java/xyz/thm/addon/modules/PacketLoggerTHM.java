@@ -30,31 +30,40 @@ import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.SharedConstants;
-import net.minecraft.component.type.ItemEnchantmentsComponent;
-import net.minecraft.enchantment.Enchantment;
-import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NbtElement;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.NbtOps;
-import net.minecraft.network.packet.Packet;
-import net.minecraft.network.packet.BundlePacket;
-import net.minecraft.network.packet.BundleSplitterPacket;
-import net.minecraft.registry.DynamicRegistryManager;
+import net.minecraft.nbt.Tag;
+import net.minecraft.network.HashedStack;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.packet.c2s.play.*;
-import net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket;
-import net.minecraft.network.packet.s2c.play.PlayerActionResponseS2CPacket;
-import net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.RegistryKey;
-import net.minecraft.registry.RegistryOps;
-import net.minecraft.registry.RegistryWrapper;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.screen.sync.ItemStackHash;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.PlayerInput;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.network.protocol.BundleDelimiterPacket;
+import net.minecraft.network.protocol.BundlePacket;
+import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.game.ClientboundBlockChangedAckPacket;
+import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
+import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
+import net.minecraft.network.protocol.game.ServerboundContainerClickPacket;
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
+import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
+import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
+import net.minecraft.network.protocol.game.ServerboundPlayerInputPacket;
+import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
+import net.minecraft.network.protocol.game.ServerboundSwingPacket;
+import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
+import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.RegistryOps;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.entity.player.Input;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.enchantment.Enchantment;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.PacketFieldSerializer;
 
@@ -286,12 +295,12 @@ public class PacketLoggerTHM extends Module {
 
     private JsonObject buildStartRecord() {
         JsonObject record = baseRecord("start");
-        record.addProperty("username", mc.getSession().getUsername());
-        record.addProperty("singleplayer", mc.isInSingleplayer());
-        addNullableString(record, "server_address", mc.getCurrentServerEntry() != null ? mc.getCurrentServerEntry().address : null);
-        addNullableString(record, "dimension", mc.world != null ? mc.world.getRegistryKey().getValue().toString() : null);
+        record.addProperty("username", mc.getUser().getName());
+        record.addProperty("singleplayer", mc.isLocalServer());
+        addNullableString(record, "server_address", mc.getCurrentServer() != null ? mc.getCurrentServer().ip : null);
+        addNullableString(record, "dimension", mc.level != null ? mc.level.dimension().identifier().toString() : null);
         record.addProperty("addon_version", THMAddon.VERSION);
-        record.addProperty("game_version", SharedConstants.getGameVersion().name());
+        record.addProperty("game_version", SharedConstants.getCurrentVersion().name());
         record.add("settings", buildSettingsSnapshot());
         return record;
     }
@@ -316,7 +325,7 @@ public class PacketLoggerTHM extends Module {
         record.addProperty("ordinal", ordinal);
         record.addProperty("packet_class", packetClass.getName());
         record.addProperty("packet_name", PacketUtils.getName(packetClass));
-        record.addProperty("packet_type_id", packet.getPacketType().id().toString());
+        record.addProperty("packet_type_id", packet.type().id().toString());
 
         JsonObject fields;
         try {
@@ -335,14 +344,14 @@ public class PacketLoggerTHM extends Module {
             record.addProperty("all_fields_error", e.toString());
         }
 
-        DynamicRegistryManager registries = mc.getNetworkHandler() != null
-            ? mc.getNetworkHandler().getRegistryManager()
-            : DynamicRegistryManager.EMPTY;
+        RegistryAccess registries = mc.getConnection() != null
+            ? mc.getConnection().registryAccess()
+            : RegistryAccess.EMPTY;
         if (packet instanceof BundlePacket<?> bundle) {
             JsonArray payloads = new JsonArray();
-            for (Packet<?> child : bundle.getPackets()) {
+            for (Packet<?> child : bundle.subPackets()) {
                 JsonObject payload = new JsonObject();
-                payload.addProperty("packet_type_id", child.getPacketType().id().toString());
+                payload.addProperty("packet_type_id", child.type().id().toString());
                 try {
                     payload.addProperty("encoded_payload_hex", PacketFieldSerializer.encodePayload(child, registries));
                 } catch (Exception e) {
@@ -352,7 +361,7 @@ public class PacketLoggerTHM extends Module {
                 payloads.add(payload);
             }
             record.add("bundled_payloads", payloads);
-        } else if (packet instanceof BundleSplitterPacket<?>) {
+        } else if (packet instanceof BundleDelimiterPacket<?>) {
             record.addProperty("encoded_payload_hex", "");
         } else {
             try {
@@ -433,7 +442,7 @@ public class PacketLoggerTHM extends Module {
     private JsonObject serializePacket(Packet<?> packet) {
         JsonObject fields = new JsonObject();
 
-        if (packet instanceof PlayerActionC2SPacket p) {
+        if (packet instanceof ServerboundPlayerActionPacket p) {
             fields.addProperty("action", p.getAction().name());
             fields.add("block_pos", serializeBlockPos(p.getPos()));
             fields.addProperty("direction", p.getDirection().name());
@@ -441,101 +450,101 @@ public class PacketLoggerTHM extends Module {
             return fields;
         }
 
-        if (packet instanceof PlayerInteractBlockC2SPacket p) {
-            BlockHitResult hit = p.getBlockHitResult();
+        if (packet instanceof ServerboundUseItemOnPacket p) {
+            BlockHitResult hit = p.getHitResult();
             fields.addProperty("hand", p.getHand().name());
             fields.add("block_pos", serializeBlockPos(hit.getBlockPos()));
-            fields.addProperty("side", hit.getSide().name());
-            fields.add("hit_vec", serializeVec3d(hit.getPos()));
-            fields.addProperty("inside_block", hit.isInsideBlock());
+            fields.addProperty("side", hit.getDirection().name());
+            fields.add("hit_vec", serializeVec3d(hit.getLocation()));
+            fields.addProperty("inside_block", hit.isInside());
             fields.addProperty("sequence", p.getSequence());
             return fields;
         }
 
-        if (packet instanceof PlayerInteractItemC2SPacket p) {
+        if (packet instanceof ServerboundUseItemPacket p) {
             fields.addProperty("hand", p.getHand().name());
             fields.addProperty("sequence", p.getSequence());
-            fields.addProperty("yaw", p.getYaw());
-            fields.addProperty("pitch", p.getPitch());
+            fields.addProperty("yaw", p.getYRot());
+            fields.addProperty("pitch", p.getXRot());
             return fields;
         }
 
-        if (packet instanceof UpdateSelectedSlotC2SPacket p) {
-            fields.addProperty("slot", p.getSelectedSlot());
+        if (packet instanceof ServerboundSetCarriedItemPacket p) {
+            fields.addProperty("slot", p.getSlot());
             return fields;
         }
 
-        if (packet instanceof ClickSlotC2SPacket p) {
-            fields.addProperty("sync_id", p.syncId());
-            fields.addProperty("revision", p.revision());
-            fields.addProperty("slot", p.slot());
-            fields.addProperty("button", p.button());
-            fields.addProperty("action_type", p.actionType().name());
-            fields.add("cursor", serializeItemStackHash(p.cursor()));
-            fields.add("changed_stacks", serializeChangedStackHashes(p.modifiedStacks()));
+        if (packet instanceof ServerboundContainerClickPacket p) {
+            fields.addProperty("sync_id", p.containerId());
+            fields.addProperty("revision", p.stateId());
+            fields.addProperty("slot", p.slotNum());
+            fields.addProperty("button", p.buttonNum());
+            fields.addProperty("action_type", p.clickType().name());
+            fields.add("cursor", serializeItemStackHash(p.carriedItem()));
+            fields.add("changed_stacks", serializeChangedStackHashes(p.changedSlots()));
             return fields;
         }
 
-        if (packet instanceof HandSwingC2SPacket p) {
+        if (packet instanceof ServerboundSwingPacket p) {
             fields.addProperty("hand", p.getHand().name());
             return fields;
         }
 
-        if (packet instanceof PlayerMoveC2SPacket p) {
+        if (packet instanceof ServerboundMovePlayerPacket p) {
             fields.addProperty("subtype", getMoveSubtype(p));
-            fields.addProperty("changes_position", p.changesPosition());
-            fields.addProperty("changes_look", p.changesLook());
+            fields.addProperty("changes_position", p.hasPosition());
+            fields.addProperty("changes_look", p.hasRotation());
             fields.addProperty("on_ground", p.isOnGround());
             fields.addProperty("horizontal_collision", p.horizontalCollision());
-            if (p.changesPosition()) {
+            if (p.hasPosition()) {
                 fields.addProperty("x", p.getX(Double.NaN));
                 fields.addProperty("y", p.getY(Double.NaN));
                 fields.addProperty("z", p.getZ(Double.NaN));
             }
-            if (p.changesLook()) {
-                fields.addProperty("yaw", p.getYaw(Float.NaN));
-                fields.addProperty("pitch", p.getPitch(Float.NaN));
+            if (p.hasRotation()) {
+                fields.addProperty("yaw", p.getYRot(Float.NaN));
+                fields.addProperty("pitch", p.getXRot(Float.NaN));
             }
             return fields;
         }
 
-        if (packet instanceof PlayerInputC2SPacket p) {
-            PlayerInput input = p.input();
+        if (packet instanceof ServerboundPlayerInputPacket p) {
+            Input input = p.input();
             fields.addProperty("forward", input.forward());
             fields.addProperty("backward", input.backward());
             fields.addProperty("left", input.left());
             fields.addProperty("right", input.right());
             fields.addProperty("jump", input.jump());
-            fields.addProperty("sneak", input.sneak());
+            fields.addProperty("sneak", input.shift());
             fields.addProperty("sprint", input.sprint());
             return fields;
         }
 
-        if (packet instanceof ClientCommandC2SPacket p) {
-            fields.addProperty("mode", p.getMode().name());
-            fields.addProperty("entity_id", p.getEntityId());
-            fields.addProperty("mount_jump_height", p.getMountJumpHeight());
+        if (packet instanceof ServerboundPlayerCommandPacket p) {
+            fields.addProperty("mode", p.getAction().name());
+            fields.addProperty("entity_id", p.getId());
+            fields.addProperty("mount_jump_height", p.getData());
             return fields;
         }
 
-        if (packet instanceof ScreenHandlerSlotUpdateS2CPacket p) {
-            fields.addProperty("sync_id", p.getSyncId());
+        if (packet instanceof ClientboundContainerSetSlotPacket p) {
+            fields.addProperty("sync_id", p.getContainerId());
             fields.addProperty("slot", p.getSlot());
-            fields.addProperty("revision", p.getRevision());
-            fields.add("stack", serializeItemStack(p.getStack()));
+            fields.addProperty("revision", p.getStateId());
+            fields.add("stack", serializeItemStack(p.getItem()));
             return fields;
         }
 
-        if (packet instanceof BlockUpdateS2CPacket p) {
+        if (packet instanceof ClientboundBlockUpdatePacket p) {
             fields.add("block_pos", serializeBlockPos(p.getPos()));
             JsonObject state = new JsonObject();
-            state.addProperty("block_id", Registries.BLOCK.getId(p.getState().getBlock()).toString());
-            state.addProperty("state", p.getState().toString());
+            state.addProperty("block_id", BuiltInRegistries.BLOCK.getKey(p.getBlockState().getBlock()).toString());
+            state.addProperty("state", p.getBlockState().toString());
             fields.add("block_state", state);
             return fields;
         }
 
-        if (packet instanceof PlayerActionResponseS2CPacket p) {
+        if (packet instanceof ClientboundBlockChangedAckPacket p) {
             fields.addProperty("sequence", p.sequence());
             return fields;
         }
@@ -543,7 +552,7 @@ public class PacketLoggerTHM extends Module {
         return fields;
     }
 
-    private JsonArray serializeChangedStackHashes(Int2ObjectMap<ItemStackHash> modifiedStacks) {
+    private JsonArray serializeChangedStackHashes(Int2ObjectMap<HashedStack> modifiedStacks) {
         JsonArray stacks = new JsonArray();
         modifiedStacks.int2ObjectEntrySet().stream()
             .sorted(Comparator.comparingInt(Int2ObjectMap.Entry::getIntKey))
@@ -556,12 +565,12 @@ public class PacketLoggerTHM extends Module {
         return stacks;
     }
 
-    private JsonObject serializeItemStackHash(ItemStackHash stackHash) {
+    private JsonObject serializeItemStackHash(HashedStack stackHash) {
         JsonObject json = new JsonObject();
-        json.addProperty("empty", stackHash == null || stackHash == ItemStackHash.EMPTY);
-        if (stackHash == null || stackHash == ItemStackHash.EMPTY) return json;
+        json.addProperty("empty", stackHash == null || stackHash == HashedStack.EMPTY);
+        if (stackHash == null || stackHash == HashedStack.EMPTY) return json;
 
-        if (stackHash instanceof ItemStackHash.Impl impl) {
+        if (stackHash instanceof HashedStack.ActualItem impl) {
             json.addProperty("item_id", getRegistryEntryId(impl.item()));
             json.addProperty("count", impl.count());
             json.addProperty("components", String.valueOf(impl.components()));
@@ -577,21 +586,21 @@ public class PacketLoggerTHM extends Module {
         json.addProperty("empty", stack == null || stack.isEmpty());
         if (stack == null || stack.isEmpty()) return json;
 
-        json.addProperty("item_id", Registries.ITEM.getId(stack.getItem()).toString());
+        json.addProperty("item_id", BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
         json.addProperty("count", stack.getCount());
-        json.addProperty("damage", stack.getDamage());
+        json.addProperty("damage", stack.getDamageValue());
         json.addProperty("max_damage", stack.getMaxDamage());
-        json.addProperty("damageable", stack.isDamageable());
+        json.addProperty("damageable", stack.isDamageableItem());
 
-        Text customName = stack.getCustomName();
+        Component customName = stack.getCustomName();
         if (customName != null) json.addProperty("custom_name", customName.getString());
         else json.add("custom_name", JsonNull.INSTANCE);
 
         json.add("enchantments", serializeEnchantments(stack.getEnchantments()));
 
-        if (mc.world != null) {
-            RegistryWrapper.WrapperLookup lookup = (RegistryWrapper.WrapperLookup) mc.world.getRegistryManager();
-            NbtElement nbt = ItemStack.CODEC.encodeStart(RegistryOps.of(NbtOps.INSTANCE, lookup), stack).result().orElse(null);
+        if (mc.level != null) {
+            HolderLookup.Provider lookup = (HolderLookup.Provider) mc.level.registryAccess();
+            Tag nbt = ItemStack.CODEC.encodeStart(RegistryOps.create(NbtOps.INSTANCE, lookup), stack).result().orElse(null);
             if (nbt != null) json.addProperty("nbt_snbt", nbt.asString().orElse(""));
             else json.add("nbt_snbt", JsonNull.INSTANCE);
         } else {
@@ -601,11 +610,11 @@ public class PacketLoggerTHM extends Module {
         return json;
     }
 
-    private JsonArray serializeEnchantments(ItemEnchantmentsComponent enchantments) {
+    private JsonArray serializeEnchantments(ItemEnchantments enchantments) {
         JsonArray array = new JsonArray();
         List<JsonObject> entries = new ArrayList<>();
 
-        for (Object2IntMap.Entry<RegistryEntry<Enchantment>> entry : enchantments.getEnchantmentEntries()) {
+        for (Object2IntMap.Entry<Holder<Enchantment>> entry : enchantments.entrySet()) {
             JsonObject enchantment = new JsonObject();
             enchantment.addProperty("id", getEnchantmentId(entry.getKey()));
             enchantment.addProperty("level", entry.getIntValue());
@@ -619,16 +628,16 @@ public class PacketLoggerTHM extends Module {
         return array;
     }
 
-    private String getEnchantmentId(RegistryEntry<Enchantment> entry) {
-        return entry.getKey()
-            .map(RegistryKey::getValue)
+    private String getEnchantmentId(Holder<Enchantment> entry) {
+        return entry.unwrapKey()
+            .map(ResourceKey::identifier)
             .map(Identifier::toString)
             .orElse(entry.toString());
     }
 
-    private <T> String getRegistryEntryId(RegistryEntry<T> entry) {
-        return entry.getKey()
-            .map(RegistryKey::getValue)
+    private <T> String getRegistryEntryId(Holder<T> entry) {
+        return entry.unwrapKey()
+            .map(ResourceKey::identifier)
             .map(Identifier::toString)
             .orElse(entry.toString());
     }
@@ -641,7 +650,7 @@ public class PacketLoggerTHM extends Module {
         return json;
     }
 
-    private JsonObject serializeVec3d(Vec3d vec) {
+    private JsonObject serializeVec3d(Vec3 vec) {
         JsonObject json = new JsonObject();
         json.addProperty("x", vec.x);
         json.addProperty("y", vec.y);
@@ -649,11 +658,11 @@ public class PacketLoggerTHM extends Module {
         return json;
     }
 
-    private String getMoveSubtype(PlayerMoveC2SPacket packet) {
-        if (packet instanceof PlayerMoveC2SPacket.Full) return "full";
-        if (packet instanceof PlayerMoveC2SPacket.LookAndOnGround) return "look_and_on_ground";
-        if (packet instanceof PlayerMoveC2SPacket.PositionAndOnGround) return "position_and_on_ground";
-        if (packet instanceof PlayerMoveC2SPacket.OnGroundOnly) return "on_ground_only";
+    private String getMoveSubtype(ServerboundMovePlayerPacket packet) {
+        if (packet instanceof ServerboundMovePlayerPacket.PosRot) return "full";
+        if (packet instanceof ServerboundMovePlayerPacket.Rot) return "look_and_on_ground";
+        if (packet instanceof ServerboundMovePlayerPacket.Pos) return "position_and_on_ground";
+        if (packet instanceof ServerboundMovePlayerPacket.StatusOnly) return "on_ground_only";
         return "base";
     }
 

@@ -7,14 +7,13 @@
 package xyz.thm.addon.utils;
 
 import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 
 /**
  * Asks the server for the real state of blocks the client thinks are solid: the server answers every
@@ -27,7 +26,7 @@ public final class GhostBlockProbe {
     /** One use-on-block packet; the server replies for {@code pos} and {@code pos.offset(side)}. */
     public record Probe(BlockPos pos, Direction side) {
         public BlockPos other() {
-            return pos.offset(side);
+            return pos.relative(side);
         }
     }
 
@@ -44,7 +43,7 @@ public final class GhostBlockProbe {
     /** Pairs adjacent targets so one packet covers two of them. */
     public static List<Probe> plan(Collection<BlockPos> targets) {
         Set<BlockPos> left = new LinkedHashSet<>();
-        for (BlockPos pos : targets) left.add(pos.toImmutable());
+        for (BlockPos pos : targets) left.add(pos.immutable());
 
         List<Probe> probes = new ArrayList<>();
         while (!left.isEmpty()) {
@@ -52,7 +51,7 @@ public final class GhostBlockProbe {
             left.remove(pos);
             Direction side = Direction.UP;
             for (Direction d : Direction.values()) {
-                if (left.remove(pos.offset(d))) {
+                if (left.remove(pos.relative(d))) {
                     side = d;
                     break;
                 }
@@ -97,7 +96,7 @@ public final class GhostBlockProbe {
     public List<BlockPos> unanswered(long now) {
         List<BlockPos> out = new ArrayList<>(pending.size());
         for (var e : pending.long2LongEntrySet()) {
-            out.add(BlockPos.fromLong(e.getLongKey()));
+            out.add(BlockPos.of(e.getLongKey()));
             e.setValue(now);
         }
         return out;

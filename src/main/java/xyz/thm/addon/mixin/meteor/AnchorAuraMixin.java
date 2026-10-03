@@ -7,8 +7,8 @@
 package xyz.thm.addon.mixin.meteor;
 
 import meteordevelopment.meteorclient.systems.modules.combat.AnchorAura;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.player.Player;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
@@ -19,7 +19,7 @@ import xyz.thm.addon.utils.ThmMembers;
 
 @Mixin(value = AnchorAura.class, remap = false)
 public class AnchorAuraMixin {
-    @Shadow private PlayerEntity target;
+    @Shadow private Player target;
     @Shadow private BlockPos renderBlockPos;
 
     @Inject(method = "onTick", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/systems/modules/combat/AnchorAura;doAnchorAura()V"), cancellable = true)

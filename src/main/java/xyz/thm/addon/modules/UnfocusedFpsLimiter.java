@@ -13,9 +13,9 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.option.SimpleOption;
-import net.minecraft.sound.SoundCategory;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.OptionInstance;
+import net.minecraft.sounds.SoundSource;
 import xyz.thm.addon.THMAddon;
 
 import java.util.Objects;
@@ -60,54 +60,54 @@ public class UnfocusedFpsLimiter extends Module {
 
     @Override
     public void onActivate() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        originalFps = mc.options.getMaxFps().getValue();
+        Minecraft mc = Minecraft.getInstance();
+        originalFps = mc.options.framerateLimit().get();
         if (limitSound.get()) {
-            originalMasterVolume = mc.options.getSoundVolumeOption(SoundCategory.MASTER).getValue();
+            originalMasterVolume = mc.options.getSoundSourceOptionInstance(SoundSource.MASTER).get();
         }
     }
 
     @Override
     public void onDeactivate() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        mc.options.getMaxFps().setValue(originalFps);
+        Minecraft mc = Minecraft.getInstance();
+        mc.options.framerateLimit().set(originalFps);
         if (limitSound.get() && originalMasterVolume != null) {
-            mc.options.getSoundVolumeOption(SoundCategory.MASTER).setValue(originalMasterVolume);
+            mc.options.getSoundSourceOptionInstance(SoundSource.MASTER).set(originalMasterVolume);
         }
     }
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
-        MinecraftClient mc = MinecraftClient.getInstance();
+        Minecraft mc = Minecraft.getInstance();
 
         if (isWindowFocused()) {
             // Window Focused
-            if (mc.options.getMaxFps().getValue() != originalFps) {
-                mc.options.getMaxFps().setValue(originalFps);
+            if (mc.options.framerateLimit().get() != originalFps) {
+                mc.options.framerateLimit().set(originalFps);
             }
             if (limitSound.get() && originalMasterVolume != null) {
-                SimpleOption<Double> soundOption = mc.options.getSoundVolumeOption(SoundCategory.MASTER);
-                if (!soundOption.getValue().equals(originalMasterVolume)) {
-                    soundOption.setValue(originalMasterVolume);
+                OptionInstance<Double> soundOption = mc.options.getSoundSourceOptionInstance(SoundSource.MASTER);
+                if (!soundOption.get().equals(originalMasterVolume)) {
+                    soundOption.set(originalMasterVolume);
                 }
             }
         } else {
             // Window not focused
-            if (!Objects.equals(mc.options.getMaxFps().getValue(), unfocusedFps.get())) {
-                mc.options.getMaxFps().setValue(unfocusedFps.get());
+            if (!Objects.equals(mc.options.framerateLimit().get(), unfocusedFps.get())) {
+                mc.options.framerateLimit().set(unfocusedFps.get());
             }
             if (limitSound.get()) {
-                SimpleOption<Double> soundOption = mc.options.getSoundVolumeOption(SoundCategory.MASTER);
+                OptionInstance<Double> soundOption = mc.options.getSoundSourceOptionInstance(SoundSource.MASTER);
                 double targetVolume = soundVolume.get() / 100.0;
-                double currentVolume = soundOption.getValue();
+                double currentVolume = soundOption.get();
                 if (Math.abs(currentVolume - targetVolume) > 0.01) {
-                    soundOption.setValue(targetVolume);
+                    soundOption.set(targetVolume);
                 }
             }
         }
     }
 
     private boolean isWindowFocused() {
-        return MinecraftClient.getInstance().isWindowFocused();
+        return Minecraft.getInstance().isWindowActive();
     }
 }

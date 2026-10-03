@@ -19,23 +19,23 @@ import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.enchantment.Enchantments;
-import net.minecraft.entity.attribute.EntityAttributes;
-import net.minecraft.entity.effect.StatusEffectUtil;
-import net.minecraft.entity.effect.StatusEffects;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
-import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.world.WorldEvents;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
+import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
+import net.minecraft.network.protocol.game.ServerboundSwingPacket;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.effect.MobEffectUtil;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LevelEvent;
+import net.minecraft.world.level.block.state.BlockState;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.mixin.accessor.ClientPlayerInteractionManagerTHMAccessor;
 import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
@@ -310,10 +310,10 @@ public class Speedmine extends Module {
 
     @EventHandler
     private void onStartBreaking(StartBreakingBlockEvent event) {
-        if (mc.world == null || mc.player == null) return;
+        if (mc.level == null || mc.player == null) return;
         // Hands manual clicks straight back to vanilla — auto-mine owns the module
         if (autoMine.get() && autoMineOnly.get()) return;
-        BlockState state = mc.world.getBlockState(event.blockPos);
+        BlockState state = mc.level.getBlockState(event.blockPos);
         if (!BlockUtils.canBreak(event.blockPos, state)) return;
         if (outOfRange(event.blockPos)) return;
         event.cancel();
@@ -324,7 +324,7 @@ public class Speedmine extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.world == null || mc.player == null) return;
+        if (mc.level == null || mc.player == null) return;
 
         // The player picking a slot themselves resyncs the server to it, dropping our hold
         int clientSlot = ((PlayerInventoryAccessor) mc.player.getInventory()).getSelectedSlot();
@@ -339,8 +339,8 @@ public class Speedmine extends Module {
         if (lastBrokenPos != null
                 && autoRebreak.get()
                 && primary == null && secondary == null
-                && !mc.world.getBlockState(lastBrokenPos).isAir()) {
-            MineContext rebreakCtx = new MineContext(lastBrokenPos, mc.world.getBlockState(lastBrokenPos), false);
+                && !mc.level.getBlockState(lastBrokenPos).isAir()) {
+            MineContext rebreakCtx = new MineContext(lastBrokenPos, mc.level.getBlockState(lastBrokenPos), false);
             // Insta-break blocks need a START (server auto-completes); sendStopPacket is a no-op for them.
             // Non-insta blocks just need a bare STOP to trigger the server's pending completion.
             if (rebreakCtx.instaBreak) {
@@ -368,11 +368,11 @@ public class Speedmine extends Module {
 
     @EventHandler
     private void onRender(Render3DEvent event) {
-        if (mc.world == null || mc.player == null) return;
+        if (mc.level == null || mc.player == null) return;
 
         for (BlockPos pos : queue) renderBlock(event, pos);
         if (bedrockPos != null) {
-            RenderUtilsTHM.renderBlockShape(event, bedrockPos, mc.world.getBlockState(bedrockPos),
+            RenderUtilsTHM.renderBlockShape(event, bedrockPos, mc.level.getBlockState(bedrockPos),
                 RenderUtilsTHM.withAlpha(bedrockColor.get(), bedrockColor.get().a / 3),
                 bedrockColor.get(), bedrockShape.get());
         }
@@ -380,7 +380,7 @@ public class Speedmine extends Module {
         if (primary   != null) renderMineContext(event, primary);
 
         if (lastBrokenPos != null && autoRebreak.get()
-                && !mc.world.getBlockState(lastBrokenPos).isAir()) {
+                && !mc.level.getBlockState(lastBrokenPos).isAir()) {
             renderBlock(event, lastBrokenPos);
         }
     }
@@ -417,7 +417,7 @@ public class Speedmine extends Module {
     }
 
     private boolean shouldRemove(BlockPos pos) {
-        return mc.world.getBlockState(pos).isAir() || outOfRange(pos);
+        return mc.level.getBlockState(pos).isAir() || outOfRange(pos);
     }
 
     private void drainQueue() {
@@ -425,7 +425,7 @@ public class Speedmine extends Module {
 
         if (primary == null) {
             BlockPos   pos   = queue.pollFirst();
-            BlockState state = mc.world.getBlockState(pos);
+            BlockState state = mc.level.getBlockState(pos);
             equipBestTool(state);
             primary = new MineContext(pos, state, true);
             sendStart(primary);
@@ -433,7 +433,7 @@ public class Speedmine extends Module {
         } else if (doubleBreak.get() && secondary == null) {
             stopWithTool(primary, silentSwap.get());
             BlockPos   nextPos   = queue.pollFirst();
-            BlockState nextState = mc.world.getBlockState(nextPos);
+            BlockState nextState = mc.level.getBlockState(nextPos);
             secondary = new MineContext(primary.pos, primary.state, false);
             primary   = new MineContext(nextPos, nextState, true);
             sendStart(primary);
@@ -448,18 +448,18 @@ public class Speedmine extends Module {
         // Server mines with whatever it thinks we hold, so the tool goes in before the START
         if (silentSwap.get()) holdTool(ctx.startSlot);
         if (grimBypass.get()) {
-            sendSequencedAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, ctx.pos);
+            sendSequencedAction(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, ctx.pos);
         }
-        sendSequencedAction(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, ctx.pos);
+        sendSequencedAction(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, ctx.pos);
         // For true insta-break blocks (delta >= 1.0), the server accepts an immediate STOP
         // in the same tick — send it now to avoid a 50ms round-trip through the tick handler.
         if (ctx.instaBreak) {
-            sendSequencedAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, ctx.pos);
+            sendSequencedAction(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, ctx.pos);
         }
     }
 
     private void sendStopPacket(MineContext ctx, boolean silent) {
-        if (mc.world == null || mc.player == null) return;
+        if (mc.level == null || mc.player == null) return;
 
         if (silent) holdTool(ctx.startSlot);
         // Vanilla insta-break already sent its START+STOP in sendStart; the held tool is all it needs
@@ -471,22 +471,22 @@ public class Speedmine extends Module {
      * server resolves the break with that tool in hand. Always sends the STOP.
      */
     private void stopWithTool(MineContext ctx, boolean silent) {
-        if (mc.world == null || mc.player == null) return;
+        if (mc.level == null || mc.player == null) return;
 
         if (silent) holdTool(ctx.startSlot);
-        sendSequencedAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, ctx.pos);
+        sendSequencedAction(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, ctx.pos);
     }
 
     private void finishBreak(MineContext ctx, boolean silent) {
-        if (mc.world == null || mc.player == null) return;
+        if (mc.level == null || mc.player == null) return;
 
         sendStopPacket(ctx, silent);
 
         boolean clientRemove = (!validateBreak.get() && (removeSlowBlocks.get() || ctx.instaBreak || ctx.aboveThreshold))
                             || (instantClientRemove.get() && (ctx.instaBreak || ctx.aboveThreshold));
         if (clientRemove) {
-            mc.world.syncWorldEvent(WorldEvents.BLOCK_BROKEN, ctx.pos, Block.getRawIdFromState(ctx.state));
-            mc.world.setBlockState(ctx.pos, Blocks.AIR.getDefaultState(), 3);
+            mc.level.levelEvent(LevelEvent.PARTICLES_DESTROY_BLOCK, ctx.pos, Block.getId(ctx.state));
+            mc.level.setBlock(ctx.pos, Blocks.AIR.defaultBlockState(), 3);
         }
 
         lastBrokenPos = ctx.pos;
@@ -543,7 +543,7 @@ public class Speedmine extends Module {
         if (!targets.isEmpty()) queue.clear();
 
         for (BlockPos target : targets) {
-            if (mc.world.getBlockState(target).getBlock() == Blocks.BEDROCK) {
+            if (mc.level.getBlockState(target).getBlock() == Blocks.BEDROCK) {
                 // Bedrock is mined one at a time — it's a vanilla progress bar, not a packet break
                 if (bedrockPos == null) mineBedrock(target);
                 continue;
@@ -562,8 +562,8 @@ public class Speedmine extends Module {
 
     /** Every valid target around nearby enemies, nearest first. */
     private List<BlockPos> findAutoTargets() {
-        List<PlayerEntity> enemies = new ArrayList<>();
-        for (PlayerEntity player : mc.world.getPlayers()) {
+        List<Player> enemies = new ArrayList<>();
+        for (Player player : mc.level.players()) {
             if (player == mc.player || player.isSpectator()) continue;
             if (Friends.get().isFriend(player)) continue;
             if (THMSystem.get().ignoreThmMembers.get() && ThmMembers.isThmMember(player)) continue;
@@ -579,41 +579,41 @@ public class Speedmine extends Module {
         return targets;
     }
 
-    private List<BlockPos> collect(List<PlayerEntity> enemies, Function<PlayerEntity, List<BlockPos>> candidates) {
+    private List<BlockPos> collect(List<Player> enemies, Function<Player, List<BlockPos>> candidates) {
         List<BlockPos> out = new ArrayList<>();
-        for (PlayerEntity enemy : enemies) {
+        for (Player enemy : enemies) {
             for (BlockPos pos : candidates.apply(enemy)) {
                 if (pos != null && !outOfRange(pos) && !out.contains(pos)) out.add(pos);
             }
         }
         Comparator<BlockPos> byDistance =
-            Comparator.comparingDouble(pos -> mc.player.getEyePos().squaredDistanceTo(pos.toCenterPos()));
+            Comparator.comparingDouble(pos -> mc.player.getEyePosition().distanceToSqr(pos.getCenter()));
         // ponytail: absolute Y, not per-enemy feet level — right for one enemy, good enough for a pile of them
         out.sort(feetFirst.get() ? Comparator.comparingInt(BlockPos::getY).thenComparing(byDistance) : byDistance);
         return out;
     }
 
     /** Every block the enemy's hitbox overlaps. */
-    private List<BlockPos> phaseBlocks(PlayerEntity enemy) {
+    private List<BlockPos> phaseBlocks(Player enemy) {
         List<BlockPos> out = new ArrayList<>();
-        for (BlockPos pos : BlockPos.iterate(BlockPos.ofFloored(enemy.getBoundingBox().getMinPos()),
-                                             BlockPos.ofFloored(enemy.getBoundingBox().getMaxPos()))) {
-            if (mineable(pos)) out.add(pos.toImmutable());
+        for (BlockPos pos : BlockPos.betweenClosed(BlockPos.containing(enemy.getBoundingBox().getMinPosition()),
+                                             BlockPos.containing(enemy.getBoundingBox().getMaxPosition()))) {
+            if (mineable(pos)) out.add(pos.immutable());
         }
         return out;
     }
 
     /** Everything boxing the enemy in: surround ring, head-level ring, and the block above their head. */
-    private List<BlockPos> surroundBlocks(PlayerEntity enemy) {
+    private List<BlockPos> surroundBlocks(Player enemy) {
         BlockPos feet = feet(enemy);
         BlockPos head = new BlockPos(enemy.getBlockX(), (int) Math.floor(enemy.getBoundingBox().maxY), enemy.getBlockZ());
 
         List<BlockPos> out = new ArrayList<>();
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            out.add(feet.offset(dir));
-            out.add(head.offset(dir));
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            out.add(feet.relative(dir));
+            out.add(head.relative(dir));
         }
-        out.add(head.up());
+        out.add(head.above());
         return mineableOf(out.toArray(new BlockPos[0]));
     }
 
@@ -623,22 +623,22 @@ public class Speedmine extends Module {
         return out;
     }
 
-    private BlockPos feet(PlayerEntity enemy) {
+    private BlockPos feet(Player enemy) {
         return new BlockPos(enemy.getBlockX(), (int) Math.round(enemy.getY()), enemy.getBlockZ());
     }
 
     /** True if the block is inside or directly against our own hitbox — breaking it drops or exposes us. */
     private boolean touchesSelf(BlockPos pos) {
-        return mc.player.getBoundingBox().expand(1).intersects(
+        return mc.player.getBoundingBox().inflate(1).intersects(
             pos.getX(), pos.getY(), pos.getZ(), pos.getX() + 1, pos.getY() + 1, pos.getZ() + 1);
     }
 
     private boolean mineable(BlockPos pos) {
-        BlockState state = mc.world.getBlockState(pos);
+        BlockState state = mc.level.getBlockState(pos);
         if (state.isAir()) return false;
         if (neverMineOwn.get() && touchesSelf(pos)) return false;
         // Bedrock's hardness is -1, so BlockUtils.canBreak always rejects it — it has to be checked first
-        if (state.isOf(Blocks.BEDROCK)) return mineBedrock.get() && canSwing();
+        if (state.is(Blocks.BEDROCK)) return mineBedrock.get() && canSwing();
         return !bedrockOnly.get() && BlockUtils.canBreak(pos, state);
     }
 
@@ -651,7 +651,7 @@ public class Speedmine extends Module {
     private boolean canSwing() {
         PaketLimiter limiter = Modules.get().get(PaketLimiter.class);
         boolean blocked = limiter != null && limiter.isActive() && limiter.limit.get() != 0
-            && limiter.alwaysBlock.get().contains(HandSwingC2SPacket.class);
+            && limiter.alwaysBlock.get().contains(ServerboundSwingPacket.class);
         if (!blocked) {
             warnedSwingBlocked = false;
             return true;
@@ -672,13 +672,13 @@ public class Speedmine extends Module {
      * No tool swap — bedrock breaks at the same speed with anything, so whatever is held works.
      */
     private void mineBedrock(BlockPos pos) {
-        if (mc.interactionManager == null) return;
+        if (mc.gameMode == null) return;
 
         bedrockPos = pos;
         if (bedrockRotate.get()) lookAt(pos);
 
-        mc.interactionManager.updateBlockBreakingProgress(pos, RangeUtils.nearestFace(pos));
-        mc.player.swingHand(Hand.MAIN_HAND);
+        mc.gameMode.continueDestroyBlock(pos, RangeUtils.nearestFace(pos));
+        mc.player.swing(InteractionHand.MAIN_HAND);
     }
 
     // ── Silent tool hold ──────────────────────────────────────────────────────
@@ -707,16 +707,16 @@ public class Speedmine extends Module {
 
     // ── Sequenced packet helpers ──────────────────────────────────────────────
 
-    private void sendSequencedAction(PlayerActionC2SPacket.Action action, BlockPos pos) {
-        if (mc.interactionManager == null || mc.world == null) return;
-        ((ClientPlayerInteractionManagerTHMAccessor) mc.interactionManager)
-            .thm$sendSequencedPacket(mc.world, seq -> new PlayerActionC2SPacket(action, pos, Direction.DOWN, seq));
+    private void sendSequencedAction(ServerboundPlayerActionPacket.Action action, BlockPos pos) {
+        if (mc.gameMode == null || mc.level == null) return;
+        ((ClientPlayerInteractionManagerTHMAccessor) mc.gameMode)
+            .thm$sendSequencedPacket(mc.level, seq -> new ServerboundPlayerActionPacket(action, pos, Direction.DOWN, seq));
     }
 
     private void sendSequencedUpdateSlot(int slot) {
-        if (mc.interactionManager == null || mc.world == null || slot < 0) return;
-        ((ClientPlayerInteractionManagerTHMAccessor) mc.interactionManager)
-            .thm$sendSequencedPacket(mc.world, seq -> new UpdateSelectedSlotC2SPacket(slot));
+        if (mc.gameMode == null || mc.level == null || slot < 0) return;
+        ((ClientPlayerInteractionManagerTHMAccessor) mc.gameMode)
+            .thm$sendSequencedPacket(mc.level, seq -> new ServerboundSetCarriedItemPacket(slot));
     }
 
     // ── Tool selection ────────────────────────────────────────────────────────
@@ -734,7 +734,7 @@ public class Speedmine extends Module {
         int   best      = -1;
         float bestSpeed = -1;
         for (int i = 0; i < 9; i++) {
-            float s = mc.player.getInventory().getStack(i).getMiningSpeedMultiplier(state);
+            float s = mc.player.getInventory().getItem(i).getDestroySpeed(state);
             if (s > bestSpeed) { bestSpeed = s; best = i; }
         }
         return best;
@@ -743,8 +743,8 @@ public class Speedmine extends Module {
     // ── Util ─────────────────────────────────────────────────────────────────
 
     public void requestBreak(BlockPos pos) {
-        if (mc.world == null || mc.player == null) return;
-        BlockState state = mc.world.getBlockState(pos);
+        if (mc.level == null || mc.player == null) return;
+        BlockState state = mc.level.getBlockState(pos);
         if (state.isAir()) return;
         if (!isMining(pos)) handleBlockClick(pos, state);
     }
@@ -772,7 +772,7 @@ public class Speedmine extends Module {
     }
 
     private void renderBlock(Render3DEvent event, BlockPos pos) {
-        RenderUtilsTHM.renderBlockShape(event, pos, mc.world.getBlockState(pos),
+        RenderUtilsTHM.renderBlockShape(event, pos, mc.level.getBlockState(pos),
             renderColor.get(), renderColor.get(), ShapeMode.Lines);
     }
 
@@ -792,9 +792,9 @@ public class Speedmine extends Module {
         public boolean          active = true;
 
         public MineContext(BlockPos pos, BlockState state, boolean isPrimary) {
-            this.pos            = pos.toImmutable();
+            this.pos            = pos.immutable();
             this.state          = state;
-            this.hardness       = mc.world != null ? state.getHardness(mc.world, pos) : 0;
+            this.hardness       = mc.level != null ? state.getDestroySpeed(mc.level, pos) : 0;
             this.isPrimary      = isPrimary;
             this.startSlot      = findBestHotbarSlot(state);
             this.startMs        = System.currentTimeMillis();
@@ -804,7 +804,7 @@ public class Speedmine extends Module {
         }
 
         public double progress() {
-            if (mc.player == null || mc.world == null || hardness < 0) return 0;
+            if (mc.player == null || mc.level == null || hardness < 0) return 0;
             float perTick = calcDelta();
             if (perTick <= 0) return Double.MAX_VALUE;
             float elapsed = Math.max((System.currentTimeMillis() - startMs) / 50f + 1f, 1f);
@@ -813,20 +813,20 @@ public class Speedmine extends Module {
         }
 
         private float calcDelta() {
-            if (mc.player == null || mc.world == null) return 0;
+            if (mc.player == null || mc.level == null) return 0;
             if (hardness <= 0) return hardness == 0f ? Float.MAX_VALUE : 0f;
 
             int       bestSlot = findBestHotbarSlot(state);
-            ItemStack tool     = mc.player.getInventory().getStack(bestSlot < 0 ? 0 : bestSlot);
+            ItemStack tool     = mc.player.getInventory().getItem(bestSlot < 0 ? 0 : bestSlot);
 
-            int divisor = state.isToolRequired() && !tool.isSuitableFor(state) ? 100 : 30;
+            int divisor = state.requiresCorrectToolForDrops() && !tool.isCorrectToolForDrops(state) ? 100 : 30;
 
-            float speed = tool.getMiningSpeedMultiplier(state);
+            float speed = tool.getDestroySpeed(state);
 
             if (!tool.isEmpty() && speed > 1.0f) {
                 int effLevel = 0;
-                for (var entry : tool.getEnchantments().getEnchantmentEntries()) {
-                    if (entry.getKey().matchesKey(Enchantments.EFFICIENCY)) {
+                for (var entry : tool.getEnchantments().entrySet()) {
+                    if (entry.getKey().is(Enchantments.EFFICIENCY)) {
                         effLevel = entry.getIntValue();
                         break;
                     }
@@ -834,12 +834,12 @@ public class Speedmine extends Module {
                 if (effLevel > 0) speed += effLevel * effLevel + 1;
             }
 
-            if (StatusEffectUtil.hasHaste(mc.player)) {
-                speed *= 1.0f + (StatusEffectUtil.getHasteAmplifier(mc.player) + 1) * 0.2f;
+            if (MobEffectUtil.hasDigSpeed(mc.player)) {
+                speed *= 1.0f + (MobEffectUtil.getDigSpeedAmplification(mc.player) + 1) * 0.2f;
             }
 
-            if (mc.player.hasStatusEffect(StatusEffects.MINING_FATIGUE)) {
-                float penalty = switch (mc.player.getStatusEffect(StatusEffects.MINING_FATIGUE).getAmplifier()) {
+            if (mc.player.hasEffect(MobEffects.MINING_FATIGUE)) {
+                float penalty = switch (mc.player.getEffect(MobEffects.MINING_FATIGUE).getAmplifier()) {
                     case 0  -> 0.3f;
                     case 1  -> 0.09f;
                     case 2  -> 0.0027f;
@@ -848,11 +848,11 @@ public class Speedmine extends Module {
                 speed *= penalty;
             }
 
-            if (mc.player.isSubmergedIn(FluidTags.WATER)) {
-                speed *= (float) mc.player.getAttributeValue(EntityAttributes.SUBMERGED_MINING_SPEED);
+            if (mc.player.isEyeInFluid(FluidTags.WATER)) {
+                speed *= (float) mc.player.getAttributeValue(Attributes.SUBMERGED_MINING_SPEED);
             }
 
-            if (!mc.player.isOnGround()) speed /= 5.0f;
+            if (!mc.player.onGround()) speed /= 5.0f;
 
             return speed / hardness / divisor;
         }

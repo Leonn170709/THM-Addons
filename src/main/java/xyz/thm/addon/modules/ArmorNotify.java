@@ -12,8 +12,8 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.item.ItemStack;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.ItemStack;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.THMUtils;
 
@@ -53,10 +53,10 @@ public class ArmorNotify extends Module {
         double thresholdValue = threshold.get();
         assert mc.player != null;
 
-        ItemStack helmet = mc.player.getEquippedStack(EquipmentSlot.HEAD);
-        ItemStack chestplate = mc.player.getEquippedStack(EquipmentSlot.CHEST);
-        ItemStack leggings = mc.player.getEquippedStack(EquipmentSlot.LEGS);
-        ItemStack boots = mc.player.getEquippedStack(EquipmentSlot.FEET);
+        ItemStack helmet = mc.player.getItemBySlot(EquipmentSlot.HEAD);
+        ItemStack chestplate = mc.player.getItemBySlot(EquipmentSlot.CHEST);
+        ItemStack leggings = mc.player.getItemBySlot(EquipmentSlot.LEGS);
+        ItemStack boots = mc.player.getItemBySlot(EquipmentSlot.FEET);
 
         checkArmorPiece(helmet, "Your helmet dura is low!", thresholdValue, 0);
         checkArmorPiece(chestplate, "Your chestplate dura is low!", thresholdValue, 1);

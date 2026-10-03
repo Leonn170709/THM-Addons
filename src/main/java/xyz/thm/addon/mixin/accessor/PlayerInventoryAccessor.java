@@ -6,17 +6,17 @@
 
 package xyz.thm.addon.mixin.accessor;
 
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.collection.DefaultedList;
+import net.minecraft.core.NonNullList;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Accessor;
-@Mixin(PlayerInventory.class)
+@Mixin(Inventory.class)
 public interface PlayerInventoryAccessor {
-    @Accessor("selectedSlot")
+    @Accessor("selected")
     int getSelectedSlot();
-    @Accessor("selectedSlot")
+    @Accessor("selected")
     void setSelectedSlot(int slot);
-    @Accessor("main")
-    DefaultedList<ItemStack> getMain();
+    @Accessor("items")
+    NonNullList<ItemStack> getMain();
 }

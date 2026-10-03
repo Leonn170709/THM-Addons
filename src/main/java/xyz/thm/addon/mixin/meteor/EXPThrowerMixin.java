@@ -16,15 +16,15 @@ import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.meteorclient.utils.player.SlotUtils;
-import net.minecraft.component.EnchantmentEffectComponentTypes;
-import net.minecraft.enchantment.EnchantmentHelper;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.ExperienceOrbEntity;
-import net.minecraft.entity.projectile.thrown.ExperienceBottleEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.util.Hand;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.ExperienceOrb;
+import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownExperienceBottle;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.EnchantmentEffectComponents;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -79,7 +79,7 @@ public abstract class EXPThrowerMixin extends Module {
         ci.cancel();
 
         FindItemResult exp = thm$fromInventory.get()
-            ? InvUtils.find(stack -> stack.isOf(Items.EXPERIENCE_BOTTLE), SlotUtils.MAIN_START, SlotUtils.MAIN_END)
+            ? InvUtils.find(stack -> stack.is(Items.EXPERIENCE_BOTTLE), SlotUtils.MAIN_START, SlotUtils.MAIN_END)
             : null;
         if (exp == null || !exp.found()) {
             if (thm$autoRepair.get()) {
@@ -90,9 +90,9 @@ public abstract class EXPThrowerMixin extends Module {
         }
 
         int slot = exp.slot();
-        Rotations.rotate(mc.player.getYaw(), 90, () -> {
+        Rotations.rotate(mc.player.getYRot(), 90, () -> {
             InventoryManager.swapTo(slot, false, true);
-            mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
+            mc.gameMode.useItem(mc.player, InteractionHand.MAIN_HAND);
             InventoryManager.swapBack(false);
         });
     }
@@ -102,9 +102,9 @@ public abstract class EXPThrowerMixin extends Module {
         int missing = 0;
         for (EquipmentSlot slot : EquipmentSlot.VALUES) {
             if (slot.getType() != EquipmentSlot.Type.HUMANOID_ARMOR) continue;
-            ItemStack stack = mc.player.getEquippedStack(slot);
-            if (stack.isDamaged() && EnchantmentHelper.hasAnyEnchantmentsWith(stack, EnchantmentEffectComponentTypes.REPAIR_WITH_XP)) {
-                missing += stack.getDamage();
+            ItemStack stack = mc.player.getItemBySlot(slot);
+            if (stack.isDamaged() && EnchantmentHelper.has(stack, EnchantmentEffectComponents.REPAIR_WITH_XP)) {
+                missing += stack.getDamageValue();
             }
         }
         return missing;
@@ -114,9 +114,9 @@ public abstract class EXPThrowerMixin extends Module {
     @Unique
     private int thm$pendingRepair() {
         int pending = 0;
-        for (Entity e : mc.world.getOtherEntities(mc.player, mc.player.getBoundingBox().expand(8))) {
-            if (e instanceof ExperienceOrbEntity orb) pending += orb.getValue() * 2;
-            else if (e instanceof ExperienceBottleEntity) pending += 14;
+        for (Entity e : mc.level.getEntities(mc.player, mc.player.getBoundingBox().inflate(8))) {
+            if (e instanceof ExperienceOrb orb) pending += orb.getValue() * 2;
+            else if (e instanceof ThrownExperienceBottle) pending += 14;
         }
         return pending;
     }

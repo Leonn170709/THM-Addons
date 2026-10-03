@@ -6,7 +6,7 @@
 
 # THM Addons for Meteor Client
 
-THM Addons is a Meteor Client addon focused on highway automation, travel utilities, PvP tooling, and quality-of-life HUD widgets for Minecraft 1.21.11.
+THM Addons is a Meteor Client addon focused on highway automation, travel utilities, PvP tooling, and quality-of-life HUD widgets. The `26.2` branch is being ported to Minecraft 26.2; the latest released 1.21.11 code remains on the `1.21.11` branch.
 
 ## Highlights
 - Highway automation and monitoring with dedicated HUD support.
@@ -16,10 +16,10 @@ THM Addons is a Meteor Client addon focused on highway automation, travel utilit
 - [More Features](FEATURES.md)
 
 ## Requirements
-- Minecraft `1.21.11`
-- Fabric Loader `0.18.2`
-- Meteor Client `1.21.11-SNAPSHOT`
-- Java `21`
+- Minecraft `26.2`
+- Fabric Loader `0.19.5`
+- Meteor Client `26.2-SNAPSHOT`
+- Java `25`
 
 ## Installation
 1. Build the addon (see below) or obtain a prebuilt jar.
@@ -33,6 +33,8 @@ THM Addons is a Meteor Client addon focused on highway automation, travel utilit
    ./gradlew build
    ```
 3. The jar is created in `build/libs`.
+
+The 26.2 port is in progress. The dependency setup resolves, but the source does not yet compile against the new Minecraft and Meteor APIs.
 
 ## Features
 A full module-by-module overview is available in `FEATURES.md`.

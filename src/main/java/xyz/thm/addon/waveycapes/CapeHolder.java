@@ -6,7 +6,7 @@
 
 package xyz.thm.addon.waveycapes;
 
-import net.minecraft.entity.LivingEntity;
+import net.minecraft.world.entity.LivingEntity;
 import xyz.thm.addon.waveycapes.sim.BasicSimulation;
 import xyz.thm.addon.waveycapes.sim.StickSimulation3d;
 import xyz.thm.addon.waveycapes.util.Mth;
@@ -35,23 +35,23 @@ public interface CapeHolder {
         BasicSimulation simulation = getSimulation();
         if (simulation == null || simulation.empty()) return;
 
-        double xCloak = entity.lastX;
-        double zCloak = entity.lastZ;
+        double xCloak = entity.xo;
+        double zCloak = entity.zo;
 
         double d = xCloak - entity.getX();
         double m = zCloak - entity.getZ();
-        float n = entity.lastBodyYaw + (entity.bodyYaw - entity.lastBodyYaw);
+        float n = entity.yBodyRotO + (entity.yBodyRot - entity.yBodyRotO);
 
         double o = Mth.sin(n * 0.017453292F);
         double p = -Mth.cos(n * 0.017453292F);
 
         float heightMul = WaveyCapesConfig.heightMultiplier;
         float straveMul = WaveyCapesConfig.straveMultiplier;
-        if (entity.isSubmergedInWater()) heightMul *= 2;
+        if (entity.isUnderWater()) heightMul *= 2;
 
-        double fallHack = Mth.clamp((entity.lastY - entity.getY()) * 10, 0, 1);
+        double fallHack = Mth.clamp((entity.yo - entity.getY()) * 10, 0, 1);
 
-        simulation.setGravity(entity.isSubmergedInWater()
+        simulation.setGravity(entity.isUnderWater()
             ? WaveyCapesConfig.gravity / 10f
             : WaveyCapesConfig.gravity);
         simulation.setDamping(WaveyCapesConfig.damping);
@@ -61,24 +61,24 @@ public interface CapeHolder {
         Vector3 gravity = new Vector3(0, -1, 0);
 
         Vector2 strave = new Vector2(
-            (float) (entity.getX() - entity.lastX),
-            (float) (entity.getZ() - entity.lastZ));
-        strave.rotateDegrees(-entity.getYaw());
+            (float) (entity.getX() - entity.xo),
+            (float) (entity.getZ() - entity.zo));
+        strave.rotateDegrees(-entity.getYRot());
 
         double changeX = (d * o + m * p) + fallHack
-            + (entity.isSneaking() && !simulation.isSneaking() ? 3 : 0);
-        double changeY = ((entity.getY() - entity.lastY) * heightMul)
-            + (entity.isSneaking() && !simulation.isSneaking() ? 1 : 0);
+            + (entity.isShiftKeyDown() && !simulation.isSneaking() ? 3 : 0);
+        double changeY = ((entity.getY() - entity.yo) * heightMul)
+            + (entity.isShiftKeyDown() && !simulation.isSneaking() ? 1 : 0);
         double changeZ = -strave.x * straveMul;
 
-        simulation.setSneaking(entity.isSneaking());
+        simulation.setSneaking(entity.isShiftKeyDown());
         Vector3 change = new Vector3((float) changeX, (float) changeY, (float) changeZ);
 
         // With computeGravityVector on, the render layer sets the direction from the model's real
         // down vector, so the swim-pose approximation would only fight it.
         if (!WaveyCapesConfig.computeGravityVector) {
-            if (entity.isInSwimmingPose()) {
-                float rotation = entity.getPitch() + 90;
+            if (entity.isVisuallySwimming()) {
+                float rotation = entity.getXRot() + 90;
                 gravity.rotateDegrees(rotation);
                 change.rotateDegrees(rotation);
             }

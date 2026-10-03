@@ -17,15 +17,15 @@ import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.client.gui.screen.ingame.AnvilScreen;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.entity.decoration.EndCrystalEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
+import net.minecraft.client.gui.screens.inventory.AnvilScreen;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import xyz.thm.addon.THMAddon;
 
 public class AutoConcrete extends Module {
@@ -80,7 +80,7 @@ public class AutoConcrete extends Module {
         .build());
 
     // -------------------- State -------------------- //
-    private PlayerEntity target;
+    private Player target;
     private BlockPos basePos;
     private BlockPos[] concretePositions;
     private BlockPos lastTargetEntityPos;
@@ -115,7 +115,7 @@ public class AutoConcrete extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
         // cooldown always decrements regardless of pause
         if (cooldown > 0) {
@@ -125,7 +125,7 @@ public class AutoConcrete extends Module {
 
         // ----- Pause While Eating -----
         if (pauseWhileEating.get() && mc.player != null) {
-            boolean eatingNow = mc.player.isUsingItem() && isFood(mc.player.getActiveItem());
+            boolean eatingNow = mc.player.isUsingItem() && isFood(mc.player.getUseItem());
             if (eatingNow) {
                 wasEating = true;
                 return; // pause this tick
@@ -141,7 +141,7 @@ public class AutoConcrete extends Module {
             reset();
         }
 
-        BlockPos targetEntityPos = target.getBlockPos();
+        BlockPos targetEntityPos = target.blockPosition();
 
         if (onlyInHole.get() && !isInHole(targetEntityPos)) return;
 
@@ -151,15 +151,15 @@ public class AutoConcrete extends Module {
         }
         lastTargetEntityPos = targetEntityPos;
 
-        FindItemResult obsidian = InvUtils.findInHotbar(stack -> Block.getBlockFromItem(stack.getItem()) == Blocks.OBSIDIAN);
+        FindItemResult obsidian = InvUtils.findInHotbar(stack -> Block.byItem(stack.getItem()) == Blocks.OBSIDIAN);
         FindItemResult fallingBlock = InvUtils.findInHotbar(stack -> {
-            Block block = Block.getBlockFromItem(stack.getItem());
+            Block block = Block.byItem(stack.getItem());
             return block == Blocks.SAND
                 || block == Blocks.RED_SAND
                 || block == Blocks.GRAVEL
                 || block == Blocks.SUSPICIOUS_SAND
                 || block == Blocks.SUSPICIOUS_GRAVEL
-                || block.getTranslationKey().contains("concrete_powder");
+                || block.getDescriptionId().contains("concrete_powder");
         });
 
         if (!fallingBlock.found() || (!obsidian.found() && !airPlace.get())) return;
@@ -170,23 +170,23 @@ public class AutoConcrete extends Module {
 
         if (airPlace.get()) {
             for (int i = 0; i < concreteCount.get(); i++) {
-                concretePositions[i] = targetEntityPos.up(2 + i);
+                concretePositions[i] = targetEntityPos.above(2 + i);
             }
         } else if (placeSupport.get()) {
             if (placedDirection == null || basePos == null) {
-                for (Direction dir : Direction.Type.HORIZONTAL) {
-                    BlockPos side = targetEntityPos.offset(dir);
-                    if (!mc.world.getBlockState(side).isAir()) {
+                for (Direction dir : Direction.Plane.HORIZONTAL) {
+                    BlockPos side = targetEntityPos.relative(dir);
+                    if (!mc.level.getBlockState(side).isAir()) {
                         boolean clear = true;
                         for (int i = 0; i < currentPillarHeight; i++) {
-                            if (!mc.world.getBlockState(side.up(i + 1)).isReplaceable()) {
+                            if (!mc.level.getBlockState(side.above(i + 1)).canBeReplaced()) {
                                 clear = false;
                                 break;
                             }
                         }
                         if (clear) {
                             placedDirection = dir;
-                            basePos = side.up();
+                            basePos = side.above();
                             break;
                         }
                     }
@@ -197,8 +197,8 @@ public class AutoConcrete extends Module {
 
             boolean allPlaced = true;
             for (int i = 0; i < currentPillarHeight; i++) {
-                BlockPos pos = basePos.up(i);
-                if (!mc.world.getBlockState(pos).isOf(Blocks.OBSIDIAN)) {
+                BlockPos pos = basePos.above(i);
+                if (!mc.level.getBlockState(pos).is(Blocks.OBSIDIAN)) {
                     BlockUtils.place(pos, obsidian, rotate.get(), 0);
                     cooldown = pillarDelay.get();
                     allPlaced = false;
@@ -209,12 +209,12 @@ public class AutoConcrete extends Module {
             if (!allPlaced) return;
 
             for (int i = 0; i < concreteCount.get(); i++) {
-                concretePositions[i] = targetEntityPos.up(2 + i);
+                concretePositions[i] = targetEntityPos.above(2 + i);
             }
         }
 
         for (BlockPos pos : concretePositions) {
-            if (pos != null && mc.world.getBlockState(pos).isReplaceable()) {
+            if (pos != null && mc.level.getBlockState(pos).canBeReplaced()) {
                 BlockUtils.place(pos, fallingBlock, rotate.get(), 0);
             }
         }
@@ -225,15 +225,15 @@ public class AutoConcrete extends Module {
     }
 
     // -------------------- Helpers -------------------- //
-    private boolean isCrystalOnSurround(PlayerEntity target) {
-        BlockPos pos = target.getBlockPos();
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos surround = pos.offset(dir);
-            for (net.minecraft.entity.Entity entity : mc.world.getEntities()) {
-                if (entity instanceof EndCrystalEntity) {
+    private boolean isCrystalOnSurround(Player target) {
+        BlockPos pos = target.blockPosition();
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            BlockPos surround = pos.relative(dir);
+            for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+                if (entity instanceof EndCrystal) {
                     if (entity.getBoundingBox().intersects(
-                        surround.toCenterPos().add(-0.5, 0, -0.5),
-                        surround.toCenterPos().add(0.5, 2.5, 0.5))) {
+                        surround.getCenter().add(-0.5, 0, -0.5),
+                        surround.getCenter().add(0.5, 2.5, 0.5))) {
                         return true;
                     }
                 }
@@ -243,15 +243,15 @@ public class AutoConcrete extends Module {
     }
 
     private boolean isInHole(BlockPos pos) {
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            if (mc.world.getBlockState(pos.offset(dir)).isAir()) return false;
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            if (mc.level.getBlockState(pos.relative(dir)).isAir()) return false;
         }
         return true;
     }
 
     // Same helper signature/logic as in AutoMinePlus
     private boolean isFood(ItemStack stack) {
-        return stack != null && !stack.isEmpty() && stack.get(DataComponentTypes.FOOD) != null;
+        return stack != null && !stack.isEmpty() && stack.get(DataComponents.FOOD) != null;
     }
 
     @Override

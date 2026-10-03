@@ -12,8 +12,8 @@ import meteordevelopment.meteorclient.commands.Command;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
-import net.minecraft.command.CommandSource;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
+import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 
 public class DesyncCommand extends Command {
     private boolean desynced = false;
@@ -35,7 +35,7 @@ public class DesyncCommand extends Command {
     }
 
     @Override
-    public void build(LiteralArgumentBuilder<CommandSource> builder) {
+    public void build(LiteralArgumentBuilder<SharedSuggestionProvider> builder) {
         // .desync — toggles
         builder.executes(context -> {
             if (desynced) disable();
@@ -61,7 +61,7 @@ public class DesyncCommand extends Command {
     @EventHandler(priority = EventPriority.HIGHEST + 1)
     private void onSendPacket(PacketEvent.Send event) {
         if (!desynced) return;
-        if (event.packet instanceof PlayerMoveC2SPacket) {
+        if (event.packet instanceof ServerboundMovePlayerPacket) {
             event.cancel();
         }
     }

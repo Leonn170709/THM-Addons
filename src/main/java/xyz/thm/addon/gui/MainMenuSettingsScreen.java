@@ -6,11 +6,16 @@
 
 package xyz.thm.addon.gui;
 
-import net.minecraft.client.gui.Click;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.AbstractSliderButton;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Checkbox;
+import net.minecraft.client.gui.components.CycleButton;
+import net.minecraft.client.gui.components.StringWidget;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.widget.*;
-import net.minecraft.text.Text;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.network.chat.Component;
 import xyz.thm.addon.shaders.ShaderManager;
 import xyz.thm.addon.system.THMSystem;
 
@@ -44,7 +49,7 @@ public class MainMenuSettingsScreen extends Screen {
     private int shaderChoiceX, shaderChoiceY, shaderChoiceWidth = -1, shaderChoiceHeight;
 
     public MainMenuSettingsScreen(Screen parent) {
-        super(Text.literal("THM Menu"));
+        super(Component.literal("THM Menu"));
         this.parent = parent;
     }
 
@@ -76,7 +81,7 @@ public class MainMenuSettingsScreen extends Screen {
             v -> system.mainMenuParticles.set(v));
         y = addCheckbox("Random Shader", random, contentX, y, contentWidth, v -> {
             system.shaderRandom.set(v);
-            this.clearAndInit();
+            this.rebuildWidgets();
         });
 
         if (random) {
@@ -90,29 +95,29 @@ public class MainMenuSettingsScreen extends Screen {
         // Enters shader-only preview mode and drops back to the title screen (which strips its own
         // UI while previewMode is on). The exit ("Show UI") lives on the title screen since this
         // screen is hidden meanwhile - see TitleScreenMenuMixin.
-        ButtonWidget preview = this.addDrawableChild(ButtonWidget.builder(Text.literal("Preview Shader"), b -> {
+        Button preview = this.addRenderableWidget(Button.builder(Component.literal("Preview Shader"), b -> {
                 MainMenuFx.previewMode = true;
-                this.client.setScreen(parent);
+                this.minecraft.setScreen(parent);
             })
-            .dimensions(contentX, y, contentWidth, 20)
+            .bounds(contentX, y, contentWidth, 20)
             .build());
         ThmStyledButtons.mark(preview);
         y += ROW_HEIGHT;
 
-        ButtonWidget close = this.addDrawableChild(ButtonWidget.builder(Text.literal("Close"), b -> this.close())
-            .dimensions(contentX, y, contentWidth, 20)
+        Button close = this.addRenderableWidget(Button.builder(Component.literal("Close"), b -> this.onClose())
+            .bounds(contentX, y, contentWidth, 20)
             .build());
         ThmStyledButtons.mark(close);
     }
 
     private int addCheckbox(String label, boolean checked, int x, int y, int width, java.util.function.Consumer<Boolean> onChange) {
-        CheckboxWidget checkbox = CheckboxWidget.builder(Text.literal(label), this.textRenderer)
+        Checkbox checkbox = Checkbox.builder(Component.literal(label), this.font)
             .pos(x, y)
-            .checked(checked)
+            .selected(checked)
             .maxWidth(width)
-            .callback((cb, value) -> onChange.accept(value))
+            .onValueChange((cb, value) -> onChange.accept(value))
             .build();
-        this.addDrawableChild(checkbox);
+        this.addRenderableWidget(checkbox);
         return y + ROW_HEIGHT;
     }
 
@@ -124,10 +129,10 @@ public class MainMenuSettingsScreen extends Screen {
 
         // CyclingButtonWidget already composes "<optionText>: <value>" itself (build()'s
         // optionText param below) - a valueToText that also prepends "Shader: " doubles it up.
-        CyclingButtonWidget<String> widget = CyclingButtonWidget.builder(Text::literal, current)
-            .values(options)
-            .build(x, y, width, 20, Text.literal("Shader"), (btn, value) -> system.shaderChoice.set(value));
-        this.addDrawableChild(widget);
+        CycleButton<String> widget = CycleButton.builder(Component::literal, current)
+            .withValues(options)
+            .create(x, y, width, 20, Component.literal("Shader"), (btn, value) -> system.shaderChoice.set(value));
+        this.addRenderableWidget(widget);
         ThmStyledButtons.mark(widget);
 
         shaderChoiceX = x;
@@ -148,10 +153,10 @@ public class MainMenuSettingsScreen extends Screen {
     // (unlike the title screen's own window, it isn't a stand-in for the vanilla button layout),
     // so both just close it, same as the Close button below.
     @Override
-    public boolean mouseClicked(Click click, boolean doubled) {
+    public boolean mouseClicked(MouseButtonEvent click, boolean doubled) {
         if (MainMenuFx.isCloseButton(x1, y1, x2, y2, click.x(), click.y())
                 || MainMenuFx.isMinimizeButton(x1, y1, x2, y2, click.x(), click.y())) {
-            this.close();
+            this.onClose();
             return true;
         }
         if (shaderChoiceWidth > 0 && click.button() == GLFW_MOUSE_BUTTON_RIGHT
@@ -174,7 +179,7 @@ public class MainMenuSettingsScreen extends Screen {
         index = Math.floorMod(index + direction, options.size());
 
         system.shaderChoice.set(options.get(index));
-        this.clearAndInit();
+        this.rebuildWidgets();
     }
 
     private int gridRows() {
@@ -198,8 +203,8 @@ public class MainMenuSettingsScreen extends Screen {
     // Simple checkbox grid instead of a scrollable two-column picker - column count comes from
     // init() (widest that fits, then more columns until the window fits the screen height).
     private int addShaderPoolGrid(THMSystem system, int x, int y, int width) {
-        this.addDrawableChild(new TextWidget(x, y, width, 12,
-            Text.literal("Allowed shaders (none checked = allow all):"), this.textRenderer));
+        this.addRenderableWidget(new StringWidget(x, y, width, 12,
+            Component.literal("Allowed shaders (none checked = allow all):"), this.font));
         y += 12;
 
         Set<String> selected = system.shaderPool.get().selected();
@@ -211,16 +216,16 @@ public class MainMenuSettingsScreen extends Screen {
             int col = i % columns;
             int row = i / columns;
 
-            CheckboxWidget checkbox = CheckboxWidget.builder(Text.literal(shader), this.textRenderer)
+            Checkbox checkbox = Checkbox.builder(Component.literal(shader), this.font)
                 .pos(x + col * columnWidth, y + row * 14)
-                .checked(selected.contains(shader))
+                .selected(selected.contains(shader))
                 .maxWidth(columnWidth - 4)
-                .callback((cb, checked) -> {
+                .onValueChange((cb, checked) -> {
                     if (checked) selected.add(shader);
                     else selected.remove(shader);
                 })
                 .build();
-            this.addDrawableChild(checkbox);
+            this.addRenderableWidget(checkbox);
         }
 
         return y + gridRows() * 14 + 4;
@@ -228,10 +233,10 @@ public class MainMenuSettingsScreen extends Screen {
 
     private int addBlurSlider(THMSystem system, int x, int y, int width) {
         int initial = system.mainMenuBlur.get();
-        SliderWidget slider = new SliderWidget(x, y, width, 20, Text.literal("Blur: " + initial), initial / 100.0) {
+        AbstractSliderButton slider = new AbstractSliderButton(x, y, width, 20, Component.literal("Blur: " + initial), initial / 100.0) {
             @Override
             protected void updateMessage() {
-                this.setMessage(Text.literal("Blur: " + Math.round(this.value * 100)));
+                this.setMessage(Component.literal("Blur: " + Math.round(this.value * 100)));
             }
 
             @Override
@@ -239,24 +244,24 @@ public class MainMenuSettingsScreen extends Screen {
                 system.mainMenuBlur.set((int) Math.round(this.value * 100));
             }
         };
-        this.addDrawableChild(slider);
+        this.addRenderableWidget(slider);
         return y + ROW_HEIGHT;
     }
 
     @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float deltaTicks) {
-        MainMenuFx.renderChrome(context, this.textRenderer, x1, y1, x2, y2, "THM Menu");
+    public void render(GuiGraphics context, int mouseX, int mouseY, float deltaTicks) {
+        MainMenuFx.renderChrome(context, this.font, x1, y1, x2, y2, "THM Menu");
         super.render(context, mouseX, mouseY, deltaTicks);
     }
 
     @Override
-    public void renderBackground(DrawContext context, int mouseX, int mouseY, float deltaTicks) {
+    public void renderBackground(GuiGraphics context, int mouseX, int mouseY, float deltaTicks) {
         // Keep whatever's already drawn behind this screen (the title screen's own shader/
         // window) instead of vanilla's dirt/blur background.
     }
 
     @Override
-    public void close() {
-        this.client.setScreen(parent);
+    public void onClose() {
+        this.minecraft.setScreen(parent);
     }
 }

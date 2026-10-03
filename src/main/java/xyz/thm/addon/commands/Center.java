@@ -9,7 +9,7 @@ package xyz.thm.addon.commands;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import meteordevelopment.meteorclient.commands.Command;
 import meteordevelopment.meteorclient.utils.player.PlayerUtils;
-import net.minecraft.command.CommandSource;
+import net.minecraft.commands.SharedSuggestionProvider;
 
 public class Center extends Command {
     public Center() {
@@ -17,7 +17,7 @@ public class Center extends Command {
     }
 
     @Override
-    public void build(LiteralArgumentBuilder<CommandSource> builder) {
+    public void build(LiteralArgumentBuilder<SharedSuggestionProvider> builder) {
         builder.executes(context -> {
             PlayerUtils.centerPlayer();
             return SINGLE_SUCCESS;

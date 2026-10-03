@@ -15,7 +15,7 @@ import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
-import net.minecraft.client.network.PlayerListEntry;
+import net.minecraft.client.multiplayer.PlayerInfo;
 import xyz.thm.addon.THMAddon;
 
 import java.util.ArrayList;
@@ -59,7 +59,7 @@ public class OnlineFriendsList extends HudElement {
     }
     @Override
     public void render(HudRenderer renderer) {
-        if (mc.world == null || mc.getNetworkHandler() == null) {
+        if (mc.level == null || mc.getConnection() == null) {
             renderOffline(renderer);
             return;
         }
@@ -129,12 +129,12 @@ public class OnlineFriendsList extends HudElement {
     private List<String> getOnlineFriends() {
         List<String> onlineFriends = new ArrayList<>();
 
-        if (mc.getNetworkHandler() == null || mc.player == null) return onlineFriends;
+        if (mc.getConnection() == null || mc.player == null) return onlineFriends;
 
         // Get our own player name to exclude it
         String ourPlayerName = mc.player.getName().getString();
 
-        for (PlayerListEntry player : mc.getNetworkHandler().getPlayerList()) {
+        for (PlayerInfo player : mc.getConnection().getOnlinePlayers()) {
             String playerName = player.getProfile().name();
 
             // Skip ourselves and only include friends

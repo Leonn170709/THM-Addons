@@ -7,11 +7,11 @@
 package xyz.thm.addon.mixin.meteor;
 
 import meteordevelopment.meteorclient.systems.modules.render.LogoutSpots;
-import net.minecraft.client.network.AbstractClientPlayerEntity;
-import net.minecraft.entity.EntityPose;
-import net.minecraft.entity.player.SkinTextures;
-import net.minecraft.entity.LimbAnimator;
-import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.world.entity.Pose;
+import net.minecraft.world.entity.WalkAnimationState;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.player.PlayerSkin;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -32,7 +32,7 @@ public abstract class LogoutSpotsEntryPoseMixin implements LogoutSpotsPoseData {
     @Shadow @Final public UUID uuid;
 
     @Unique private String thm$name;
-    @Unique private SkinTextures thm$skin;
+    @Unique private PlayerSkin thm$skin;
     @Unique private byte thm$modelParts;
     @Unique private float thm$bodyYaw;
     @Unique private float thm$yaw;
@@ -44,20 +44,20 @@ public abstract class LogoutSpotsEntryPoseMixin implements LogoutSpotsPoseData {
     @Unique private boolean thm$lowPose;
 
     @Inject(method = "<init>", at = @At("TAIL"))
-    private void thm$capturePose(LogoutSpots outer, PlayerEntity entity, CallbackInfo ci) {
-        LimbAnimator limbAnimator = ((LivingEntityAccessor) entity).thm$getLimbAnimator();
+    private void thm$capturePose(LogoutSpots outer, Player entity, CallbackInfo ci) {
+        WalkAnimationState limbAnimator = ((LivingEntityAccessor) entity).thm$getLimbAnimator();
 
         thm$name = entity.getName().getString();
-        thm$skin = entity instanceof AbstractClientPlayerEntity clientPlayer ? clientPlayer.getSkin() : null;
-        thm$modelParts = entity.getDataTracker().get(PlayerModelPartsAccessor.thm$getModelParts());
-        thm$bodyYaw = entity.getBodyYaw();
-        thm$yaw = entity.getYaw();
-        thm$pitch = entity.getPitch();
-        thm$headYaw = entity.headYaw;
-        thm$limbPos = limbAnimator.getAnimationProgress();
-        thm$limbAmplitude = limbAnimator.getAmplitude(1);
-        thm$sneaking = entity.isSneaking();
-        thm$lowPose = entity.isCrawling() || entity.isSwimming() || entity.getPose() == EntityPose.SWIMMING;
+        thm$skin = entity instanceof AbstractClientPlayer clientPlayer ? clientPlayer.getSkin() : null;
+        thm$modelParts = entity.getEntityData().get(PlayerModelPartsAccessor.thm$getModelParts());
+        thm$bodyYaw = entity.getVisualRotationYInDegrees();
+        thm$yaw = entity.getYRot();
+        thm$pitch = entity.getXRot();
+        thm$headYaw = entity.yHeadRot;
+        thm$limbPos = limbAnimator.position();
+        thm$limbAmplitude = limbAnimator.speed(1);
+        thm$sneaking = entity.isShiftKeyDown();
+        thm$lowPose = entity.isVisuallyCrawling() || entity.isSwimming() || entity.getPose() == Pose.SWIMMING;
     }
 
     @Override
@@ -106,7 +106,7 @@ public abstract class LogoutSpotsEntryPoseMixin implements LogoutSpotsPoseData {
     }
 
     @Override
-    public SkinTextures thm$getSkin() {
+    public PlayerSkin thm$getSkin() {
         return thm$skin;
     }
 

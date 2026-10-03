@@ -7,29 +7,29 @@
 package xyz.thm.addon.utils.render;
 
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
-import net.minecraft.client.render.VertexConsumerProvider;
-import net.minecraft.client.render.command.OrderedRenderCommandQueue;
-import net.minecraft.client.render.command.OrderedRenderCommandQueueImpl;
-import net.minecraft.client.render.command.RenderDispatcher;
-import net.minecraft.client.render.entity.state.EntityRenderState;
-import net.minecraft.client.render.entity.state.PlayerEntityRenderState;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.entity.Entity;
-import net.minecraft.util.math.Vec3d;
-
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.SubmitNodeCollector;
+import net.minecraft.client.renderer.SubmitNodeStorage;
+import net.minecraft.client.renderer.entity.state.AvatarRenderState;
+import net.minecraft.client.renderer.entity.state.EntityRenderState;
+import net.minecraft.client.renderer.feature.FeatureRenderDispatcher;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.List;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 import static org.lwjgl.opengl.GL11.*;
 
+import com.mojang.blaze3d.vertex.PoseStack;
+
 /** Renders an entity with its real model and skin, like Meteor's WireframeEntityRenderer but textured. */
 public final class GhostRenderer {
     private record Ghost(Entity entity, double scale, float alpha, boolean cape) {}
 
     private static final List<Ghost> QUEUED = new ArrayList<>();
-    private static final OrderedRenderCommandQueueImpl QUEUE = new OrderedRenderCommandQueueImpl();
-    private static RenderDispatcher dispatcher;
+    private static final SubmitNodeStorage QUEUE = new SubmitNodeStorage();
+    private static FeatureRenderDispatcher dispatcher;
 
     /** Opacity of the ghost currently being drawn; 1 while anything else renders. */
     private static float alpha = 1;
@@ -54,29 +54,29 @@ public final class GhostRenderer {
     }
 
     /** Called from the vanilla entity pass; ghosts submitted during a frame show up in the next one. */
-    public static void drawQueued(MatrixStack matrices, OrderedRenderCommandQueue queue) {
+    public static void drawQueued(PoseStack matrices, SubmitNodeCollector queue) {
         if (QUEUED.isEmpty()) return;
 
-        Vec3d cam = mc.gameRenderer.getCamera().getCameraPos();
-        float tickDelta = mc.getRenderTickCounter().getTickProgress(false);
+        Vec3 cam = mc.gameRenderer.getMainCamera().position();
+        float tickDelta = mc.getDeltaTracker().getGameTimeDeltaPartialTick(false);
         for (Ghost ghost : QUEUED) draw(ghost.entity, ghost.scale, ghost.alpha, ghost.cape, cam.x, cam.y, cam.z, matrices, queue, tickDelta);
         QUEUED.clear();
     }
 
     /** Draws after the world with a depth offset, so solid blocks don't hide it either. */
     public static void renderThroughWalls(Render3DEvent event, Entity entity, double scale, float alpha, boolean cape) {
-        if (mc.world == null) return;
+        if (mc.level == null) return;
 
-        VertexConsumerProvider.Immediate immediate = mc.getBufferBuilders().getEntityVertexConsumers();
+        MultiBufferSource.BufferSource immediate = mc.renderBuffers().bufferSource();
         if (dispatcher == null) {
-            dispatcher = new RenderDispatcher(
+            dispatcher = new FeatureRenderDispatcher(
                 QUEUE,
-                mc.getBlockRenderManager(),
+                mc.getBlockRenderer(),
                 immediate,
                 mc.getAtlasManager(),
-                mc.getBufferBuilders().getOutlineVertexConsumers(),
-                mc.getBufferBuilders().getEffectVertexConsumers(),
-                mc.textRenderer
+                mc.renderBuffers().outlineBufferSource(),
+                mc.renderBuffers().crumblingBufferSource(),
+                mc.font
             );
         }
 
@@ -85,28 +85,28 @@ public final class GhostRenderer {
         // Same trick Meteor's chams uses: pull the depth towards the camera instead of turning depth testing off.
         glEnable(GL_POLYGON_OFFSET_FILL);
         glPolygonOffset(1, -1100000);
-        dispatcher.render();
+        dispatcher.renderAllFeatures();
         QUEUE.clear();
-        immediate.draw();
+        immediate.endBatch();
         glPolygonOffset(1, 1100000);
         glDisable(GL_POLYGON_OFFSET_FILL);
     }
 
-    private static void draw(Entity entity, double scale, float ghostAlpha, boolean cape, double camX, double camY, double camZ, MatrixStack matrices, OrderedRenderCommandQueue queue, float tickDelta) {
+    private static void draw(Entity entity, double scale, float ghostAlpha, boolean cape, double camX, double camY, double camZ, PoseStack matrices, SubmitNodeCollector queue, float tickDelta) {
         alpha = Math.clamp(ghostAlpha, 0f, 1f);
 
         try {
             // The dispatcher, not the renderer, is what tags the state with its entity - Meteor's Chams needs that tag.
-            EntityRenderState state = mc.getEntityRenderDispatcher().getAndUpdateRenderState(entity, tickDelta);
+            EntityRenderState state = mc.getEntityRenderDispatcher().extractEntity(entity, tickDelta);
 
             // The cape renders on its own opaque layer, so it does not fade with the rest.
-            if (!cape && state instanceof PlayerEntityRenderState player) player.capeVisible = false;
+            if (!cape && state instanceof AvatarRenderState player) player.showCape = false;
 
-            matrices.push();
+            matrices.pushPose();
             matrices.translate(entity.getX() - camX, entity.getY() - camY, entity.getZ() - camZ);
             matrices.scale((float) scale, (float) scale, (float) scale);
-            mc.getEntityRenderDispatcher().render(state, mc.gameRenderer.getEntityRenderStates().cameraRenderState, 0, 0, 0, matrices, queue);
-            matrices.pop();
+            mc.getEntityRenderDispatcher().submit(state, mc.gameRenderer.getLevelRenderState().cameraRenderState, 0, 0, 0, matrices, queue);
+            matrices.popPose();
         } finally {
             alpha = 1;
         }

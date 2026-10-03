@@ -6,10 +6,10 @@
 
 package xyz.thm.addon.mixin;
 
-import net.minecraft.client.Keyboard;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.input.KeyInput;
-import net.minecraft.client.util.InputUtil;
+import com.mojang.blaze3d.platform.InputConstants;
+import net.minecraft.client.KeyboardHandler;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.input.KeyEvent;
 import org.lwjgl.glfw.GLFW;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -17,13 +17,13 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import xyz.thm.addon.utils.ChunkResync;
 
-@Mixin(Keyboard.class)
+@Mixin(KeyboardHandler.class)
 public abstract class KeyboardMixin {
     /** F3+A+S resyncs chunks from the server; cancels vanilla's F3+S texture dump for that press. */
-    @Inject(method = "processF3", at = @At("HEAD"), cancellable = true)
-    private void thm$chunkResync(KeyInput input, CallbackInfoReturnable<Boolean> cir) {
+    @Inject(method = "handleDebugKeys", at = @At("HEAD"), cancellable = true)
+    private void thm$chunkResync(KeyEvent input, CallbackInfoReturnable<Boolean> cir) {
         if (input.key() != GLFW.GLFW_KEY_S) return;
-        if (!InputUtil.isKeyPressed(MinecraftClient.getInstance().getWindow(), GLFW.GLFW_KEY_A)) return;
+        if (!InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), GLFW.GLFW_KEY_A)) return;
         ChunkResync.trigger();
         cir.setReturnValue(true);
     }

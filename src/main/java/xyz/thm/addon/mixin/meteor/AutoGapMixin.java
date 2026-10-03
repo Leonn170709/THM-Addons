@@ -7,7 +7,7 @@
 package xyz.thm.addon.mixin.meteor;
 
 import meteordevelopment.meteorclient.systems.modules.player.AutoGap;
-import net.minecraft.item.ItemStack;
+import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -66,8 +66,8 @@ public abstract class AutoGapMixin implements StuckEatingRetryBridge {
     public boolean thm$hasValidCurrentEatingItem() {
         AutoGap autoGap = (AutoGap) (Object) this;
         if (!autoGap.isActive() || mc == null || mc.player == null) return false;
-        if (slot < 0 || slot >= mc.player.getInventory().getMainStacks().size()) return false;
-        return !isNotGapOrEGap(mc.player.getInventory().getStack(slot));
+        if (slot < 0 || slot >= mc.player.getInventory().getNonEquipmentItems().size()) return false;
+        return !isNotGapOrEGap(mc.player.getInventory().getItem(slot));
     }
 
     @Override

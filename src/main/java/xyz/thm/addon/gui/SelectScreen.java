@@ -1,3 +1,9 @@
+/*
+ * This file is part of THM Addons — https://github.com/Leonn170709/THM-Addons
+ * Copyright (c) THM Addons contributors. Credit the devs, keep the link.
+ * By using this code you agree to the license terms and to keep your repo public.
+ */
+
 package xyz.thm.addon.gui;
 
 import meteordevelopment.meteorclient.gui.GuiTheme;
@@ -62,7 +68,7 @@ public class SelectScreen<T> extends WindowScreen {
             WButton b = listWidget.add(theme.button(name)).expandX().widget();
             b.action = () -> {
                 onSelect.accept(opt);
-                close();
+                onClose();
             };
         }
         listWidget.invalidate();

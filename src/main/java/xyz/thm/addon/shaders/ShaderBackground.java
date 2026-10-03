@@ -9,17 +9,14 @@ package xyz.thm.addon.shaders;
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.pipeline.CompiledRenderPipeline;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.pipeline.RenderTarget;
+import com.mojang.blaze3d.platform.Window;
+import com.mojang.blaze3d.shaders.UniformType;
 import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.GpuDevice;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.GpuTextureView;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gl.Framebuffer;
-import net.minecraft.client.gl.RenderPipelines;
-import net.minecraft.client.gl.UniformType;
-import net.minecraft.client.util.Window;
-import net.minecraft.util.Identifier;
 import org.lwjgl.system.MemoryStack;
 import xyz.thm.addon.THMAddon;
 
@@ -27,6 +24,9 @@ import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.OptionalInt;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.resources.Identifier;
 
 // Renders the currently active .fsh background as the title screen's panorama replacement.
 // Unlike the raw-GL approach this replaced, this goes through Blaze3D's actual RenderPipeline/
@@ -37,7 +37,7 @@ import java.util.OptionalInt;
 // uniforms, since Blaze3D only supports whole-uniform-buffer bindings, not per-scalar
 // glUniform calls. Every shader was validated with glslangValidator before shipping.
 public class ShaderBackground {
-    private static final Identifier VERTEX_SHADER = Identifier.ofVanilla("core/screenquad");
+    private static final Identifier VERTEX_SHADER = Identifier.withDefaultNamespace("core/screenquad");
     private static final long UNIFORM_BUFFER_SIZE = 32L; // std140: float time, pad, vec2 mouse, vec2 resolution
 
     private static final long START_NANOS = System.nanoTime();
@@ -57,9 +57,9 @@ public class ShaderBackground {
             RenderPipeline pipeline = pipelineFor(name);
             if (pipeline == null) return false;
 
-            MinecraftClient mc = MinecraftClient.getInstance();
-            Framebuffer framebuffer = mc.getFramebuffer();
-            GpuTextureView colorView = framebuffer.getColorAttachmentView();
+            Minecraft mc = Minecraft.getInstance();
+            RenderTarget framebuffer = mc.getMainRenderTarget();
+            GpuTextureView colorView = framebuffer.getColorTextureView();
             if (colorView == null) return false;
 
             // Draw at reduced resolution and upscale - these shaders are per-pixel raymarchers/
@@ -73,7 +73,7 @@ public class ShaderBackground {
                 }
             }
 
-            drawInto(pipeline, colorView, framebuffer.textureWidth, framebuffer.textureHeight);
+            drawInto(pipeline, colorView, framebuffer.width, framebuffer.height);
             return true;
         } catch (Throwable t) {
             THMAddon.LOG.warn("[THM] Main-menu shader '{}' failed to render, disabling it", name, t);
@@ -124,10 +124,10 @@ public class ShaderBackground {
         if (valid.getOrDefault(name, true) == Boolean.FALSE) return null;
 
         return pipelines.computeIfAbsent(name, n -> {
-            RenderPipeline pipeline = RenderPipeline.builder(RenderPipelines.POST_EFFECT_PROCESSOR_SNIPPET)
-                .withLocation(Identifier.of(THMAddon.MOD_ID, "bg_" + n))
+            RenderPipeline pipeline = RenderPipeline.builder(RenderPipelines.POST_PROCESSING_SNIPPET)
+                .withLocation(Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, "bg_" + n))
                 .withVertexShader(VERTEX_SHADER)
-                .withFragmentShader(Identifier.of(THMAddon.MOD_ID, n))
+                .withFragmentShader(Identifier.fromNamespaceAndPath(THMAddon.MOD_ID, n))
                 .withUniform("ThmShaderData", UniformType.UNIFORM_BUFFER)
                 .build();
 
@@ -152,16 +152,16 @@ public class ShaderBackground {
             uniformBuffer = device.createBuffer(() -> "THM shader background", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, UNIFORM_BUFFER_SIZE);
         }
 
-        Window window = MinecraftClient.getInstance().getWindow();
-        float mouseScaleX = width / (float) window.getFramebufferWidth();
-        float mouseScaleY = height / (float) window.getFramebufferHeight();
+        Window window = Minecraft.getInstance().getWindow();
+        float mouseScaleX = width / (float) window.getWidth();
+        float mouseScaleY = height / (float) window.getHeight();
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             ByteBuffer data = stack.calloc((int) UNIFORM_BUFFER_SIZE);
             float time = (System.nanoTime() - START_NANOS) / 1_000_000_000f;
             data.putFloat(0, time);
-            data.putFloat(8, (float) MinecraftClient.getInstance().mouse.getX() * mouseScaleX);
-            data.putFloat(12, height - (float) MinecraftClient.getInstance().mouse.getY() * mouseScaleY);
+            data.putFloat(8, (float) Minecraft.getInstance().mouseHandler.xpos() * mouseScaleX);
+            data.putFloat(12, height - (float) Minecraft.getInstance().mouseHandler.ypos() * mouseScaleY);
             data.putFloat(16, (float) width);
             data.putFloat(20, (float) height);
             encoder.writeToBuffer(uniformBuffer.slice(), data);

@@ -15,15 +15,15 @@ import meteordevelopment.meteorclient.systems.modules.misc.Notebot;
 import meteordevelopment.meteorclient.utils.notebot.song.Note;
 import meteordevelopment.meteorclient.utils.notebot.song.Song;
 import meteordevelopment.meteorclient.utils.player.Rotations;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
+import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -76,10 +76,10 @@ public abstract class NotebotMixin extends Module {
     @Inject(method = "tuneBlocks", at = @At("HEAD"), cancellable = true)
     private void thm$tuneBlocks(CallbackInfo ci) {
         ci.cancel();
-        if (mc.world == null || mc.player == null) return;
+        if (mc.level == null || mc.player == null) return;
         // Server skips NoteBlock#onUse while sneaking with an item and uses the item instead.
-        if (mc.player.shouldCancelInteraction()) return;
-        if (swingArm.get()) mc.player.swingHand(Hand.MAIN_HAND);
+        if (mc.player.isSecondaryUseActive()) return;
+        if (swingArm.get()) mc.player.swing(InteractionHand.MAIN_HAND);
 
         int iterations = 0;
         Iterator<Map.Entry<BlockPos, Integer>> iterator = tuneHits.entrySet().iterator();
@@ -111,34 +111,34 @@ public abstract class NotebotMixin extends Module {
         if (first == null) return;
 
         // START_DESTROY_BLOCK insta-mines the noteblock with an Efficiency IV+ axe or Haste.
-        BlockState state = mc.world.getBlockState(first);
-        if (state.isOf(Blocks.NOTE_BLOCK) && state.calcBlockBreakingDelta(mc.player, mc.world, first) >= 1) {
+        BlockState state = mc.level.getBlockState(first);
+        if (state.is(Blocks.NOTE_BLOCK) && state.getDestroyProgress(mc.player, mc.level, first) >= 1) {
             error("Your held item would break the noteblocks. Switch items and resume.");
             pause();
             return;
         }
 
         if (autoRotate.get()) Rotations.rotate(Rotations.getYaw(first), Rotations.getPitch(first));
-        if (swingArm.get()) mc.player.swingHand(Hand.MAIN_HAND);
+        if (swingArm.get()) mc.player.swing(InteractionHand.MAIN_HAND);
 
         for (Note note : notes) {
             BlockPos pos = noteBlockPositions.get(note);
             if (pos == null) continue;
-            thm$send(seq -> new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, Direction.DOWN, seq));
+            thm$send(seq -> new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, pos, Direction.DOWN, seq));
             if (!polyphonic.get()) break;
         }
     }
 
     @Unique
     private void thm$tune(BlockPos pos, int hits) {
-        BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(pos), Direction.DOWN, pos, false);
-        for (int i = 0; i < hits; i++) thm$send(seq -> new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, hit, seq));
+        BlockHitResult hit = new BlockHitResult(Vec3.atCenterOf(pos), Direction.DOWN, pos, false);
+        for (int i = 0; i < hits; i++) thm$send(seq -> new ServerboundUseItemOnPacket(InteractionHand.MAIN_HAND, hit, seq));
         anyNoteblockTuned = true;
     }
 
     @Unique
-    private void thm$send(net.minecraft.client.network.SequencedPacketCreator creator) {
-        if (mc.interactionManager == null || mc.world == null) return;
-        ((ClientPlayerInteractionManagerTHMAccessor) mc.interactionManager).thm$sendSequencedPacket(mc.world, creator);
+    private void thm$send(net.minecraft.client.multiplayer.prediction.PredictiveAction creator) {
+        if (mc.gameMode == null || mc.level == null) return;
+        ((ClientPlayerInteractionManagerTHMAccessor) mc.gameMode).thm$sendSequencedPacket(mc.level, creator);
     }
 }

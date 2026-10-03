@@ -15,11 +15,11 @@ import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.notebot.song.Note;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.enums.NoteBlockInstrument;
-import net.minecraft.network.packet.s2c.play.PlaySoundS2CPacket;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.protocol.game.ClientboundSoundPacket;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.properties.NoteBlockInstrument;
 import xyz.thm.addon.THMAddon;
 
 import java.io.ByteArrayOutputStream;
@@ -34,7 +34,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static net.minecraft.block.enums.NoteBlockInstrument.*;
+import static net.minecraft.world.level.block.state.properties.NoteBlockInstrument.*;
 
 public class NotebotStealer extends Module {
     private static final long TICK_NANOS = 50_000_000L;
@@ -50,7 +50,7 @@ public class NotebotStealer extends Module {
     private static final Map<Identifier, NoteBlockInstrument> BY_SOUND = new HashMap<>();
 
     static {
-        for (NoteBlockInstrument instrument : NBS_INSTRUMENTS) BY_SOUND.put(instrument.getSound().value().id(), instrument);
+        for (NoteBlockInstrument instrument : NBS_INSTRUMENTS) BY_SOUND.put(instrument.getSoundEvent().value().location(), instrument);
     }
 
     private final Map<BlockPos, Note> lastHeard = new HashMap<>();
@@ -87,8 +87,8 @@ public class NotebotStealer extends Module {
 
     @EventHandler
     private void onPacket(PacketEvent.Receive event) {
-        if (!(event.packet instanceof PlaySoundS2CPacket packet)) return;
-        NoteBlockInstrument instrument = BY_SOUND.get(packet.getSound().value().id());
+        if (!(event.packet instanceof ClientboundSoundPacket packet)) return;
+        NoteBlockInstrument instrument = BY_SOUND.get(packet.getSound().value().location());
         if (instrument == null) return;
         int level = Math.round((float) (12 * Math.log(packet.getPitch()) / Math.log(2))) + 12;
         if (level < 0 || level > 24) return;
@@ -96,15 +96,15 @@ public class NotebotStealer extends Module {
         // Timestamped on the netty thread so the hop to the client thread doesn't skew timing.
         long now = System.nanoTime();
         Note note = new Note(instrument, level);
-        BlockPos pos = BlockPos.ofFloored(packet.getX(), packet.getY(), packet.getZ());
+        BlockPos pos = BlockPos.containing(packet.getX(), packet.getY(), packet.getZ());
         mc.execute(() -> onNote(note, pos, now));
     }
 
     private void onNote(Note note, BlockPos pos, long now) {
-        if (mc.world == null) return;
+        if (mc.level == null) return;
         // A noteblock changing pitch is being tuned, so the song before it is over.
         // Plugin-played songs have no noteblock at the sound position and only split on silence.
-        if (mc.world.getBlockState(pos).isOf(Blocks.NOTE_BLOCK)) {
+        if (mc.level.getBlockState(pos).is(Blocks.NOTE_BLOCK)) {
             Note previous = lastHeard.put(pos, note);
             if (previous != null && !previous.equals(note)) {
                 save();

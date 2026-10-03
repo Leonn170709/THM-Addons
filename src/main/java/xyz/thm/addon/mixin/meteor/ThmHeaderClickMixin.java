@@ -7,9 +7,9 @@
 package xyz.thm.addon.mixin.meteor;
 
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.Click;
-import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -28,13 +28,13 @@ import xyz.thm.addon.gui.themes.ThmTheme;
 @Mixin(targets = "meteordevelopment.meteorclient.gui.widgets.containers.WWindow$WHeader", remap = false)
 public abstract class ThmHeaderClickMixin {
     @Inject(method = "onMouseClicked", at = @At("HEAD"), cancellable = true)
-    private void thm$closeOnGlyph(Click click, boolean doubled, CallbackInfoReturnable<Boolean> cir) {
+    private void thm$closeOnGlyph(MouseButtonEvent click, boolean doubled, CallbackInfoReturnable<Boolean> cir) {
         WWidget self = (WWidget) (Object) this;
         if (!(self.theme instanceof ThmTheme) || !ThmChrome.settingsWindow()) return;
 
         if (ThmChrome.closeGlyphHit(click.x(), click.y())) {
-            Screen screen = MinecraftClient.getInstance().currentScreen;
-            if (screen != null) screen.close();
+            Screen screen = Minecraft.getInstance().screen;
+            if (screen != null) screen.onClose();
             cir.setReturnValue(true);
         }
     }

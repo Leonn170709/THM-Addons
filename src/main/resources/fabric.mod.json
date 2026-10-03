@@ -39,16 +39,16 @@
       "links": {
         "modmenu.discord": "https://discord.gg/thm"
       }
-    },
-    "depends": {
-      "java": ">=21",
-      "minecraft": "1.21.11",
-      "meteor-client": ">=1.21.11- <1.21.12-",
-      "fabric-api": "*"
-    },
-    "suggests": {
-      "baritone": "*",
-      "baritone-meteor": "*"
     }
+  },
+  "depends": {
+    "java": ">=25",
+    "minecraft": "26.2",
+    "meteor-client": ">=26.2- <26.3-",
+    "fabric-api": "*"
+  },
+  "suggests": {
+    "baritone": "*",
+    "baritone-meteor": "*"
   }
 }

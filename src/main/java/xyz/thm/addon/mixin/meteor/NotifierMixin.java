@@ -12,9 +12,9 @@ import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.misc.Notifier;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -38,26 +38,26 @@ public abstract class NotifierMixin {
         );
     }
 
-    @Redirect(method = {"onEntityAdded", "onEntityRemoved", "onReceivePacket", "onTick"}, at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/utils/player/ChatUtils;sendMsg(ILnet/minecraft/util/Formatting;Ljava/lang/String;[Ljava/lang/Object;)V"))
-    private void thm$redirectChatSend(int id, Formatting color, String message, Object... args) {
+    @Redirect(method = {"onEntityAdded", "onEntityRemoved", "onReceivePacket", "onTick"}, at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/utils/player/ChatUtils;sendMsg(ILnet/minecraft/ChatFormatting;Ljava/lang/String;[Ljava/lang/Object;)V"))
+    private void thm$redirectChatSend(int id, ChatFormatting color, String message, Object... args) {
         ChatUtils.sendMsg(id, color, message, args);
         thm$notifyDesktop(String.format(message, args));
     }
 
-    @Redirect(method = "onTick", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/utils/player/ChatUtils;sendMsg(Lnet/minecraft/text/Text;)V"))
-    private void thm$redirectChatSendText(Text message) {
+    @Redirect(method = "onTick", at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/utils/player/ChatUtils;sendMsg(Lnet/minecraft/network/chat/Component;)V"))
+    private void thm$redirectChatSendText(Component message) {
         ChatUtils.sendMsg(message);
         thm$notifyDesktop(message);
     }
 
-    @Redirect(method = "onTick", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/network/ClientPlayerEntity;sendMessage(Lnet/minecraft/text/Text;Z)V"))
-    private void thm$redirectSendMessage(ClientPlayerEntity player, Text message, boolean actionBar) {
-        player.sendMessage(message, actionBar);
+    @Redirect(method = "onTick", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;displayClientMessage(Lnet/minecraft/network/chat/Component;Z)V"))
+    private void thm$redirectSendMessage(LocalPlayer player, Component message, boolean actionBar) {
+        player.displayClientMessage(message, actionBar);
         thm$notifyDesktop(message);
     }
 
-    @Redirect(method = {"onEntityAdded", "onEntityRemoved"}, at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/systems/modules/misc/Notifier;info(Lnet/minecraft/text/Text;)V"))
-    private void thm$redirectInfoText(Notifier self, Text message) {
+    @Redirect(method = {"onEntityAdded", "onEntityRemoved"}, at = @At(value = "INVOKE", target = "Lmeteordevelopment/meteorclient/systems/modules/misc/Notifier;info(Lnet/minecraft/network/chat/Component;)V"))
+    private void thm$redirectInfoText(Notifier self, Component message) {
         ((Module) (Object) self).info(message);
         thm$notifyDesktop(message);
     }
@@ -69,7 +69,7 @@ public abstract class NotifierMixin {
     }
 
     @Unique
-    private void thm$notifyDesktop(Text message) {
+    private void thm$notifyDesktop(Component message) {
         if (message == null) return;
         thm$notifyDesktop(message.getString());
     }

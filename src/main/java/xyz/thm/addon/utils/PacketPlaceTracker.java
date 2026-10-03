@@ -13,18 +13,17 @@ import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
-import net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket;
-import net.minecraft.network.packet.s2c.play.ChunkDeltaUpdateS2CPacket;
-import net.minecraft.registry.tag.ItemTags;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
+import net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket;
+import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -63,9 +62,9 @@ public final class PacketPlaceTracker {
     }
 
     public static void markSent(BlockPos pos, int resendTicks) {
-        if (mc.world == null) return;
+        if (mc.level == null) return;
         long key = pos.asLong();
-        INSTANCE.sentAt.put(key, mc.world.getTime());
+        INSTANCE.sentAt.put(key, mc.level.getGameTime());
         INSTANCE.resendTicks.put(key, Math.max(1, resendTicks));
         INSTANCE.listening = true;
     }
@@ -81,29 +80,29 @@ public final class PacketPlaceTracker {
     @EventHandler
     private void onReceive(PacketEvent.Receive event) {
         if (!listening) return;
-        if (event.packet instanceof BlockUpdateS2CPacket update) {
+        if (event.packet instanceof ClientboundBlockUpdatePacket update) {
             answered.add(update.getPos().asLong());
-        } else if (event.packet instanceof ChunkDeltaUpdateS2CPacket delta) {
-            delta.visitUpdates((pos, state) -> answered.add(pos.asLong()));
+        } else if (event.packet instanceof ClientboundSectionBlocksUpdatePacket delta) {
+            delta.runUpdates((pos, state) -> answered.add(pos.asLong()));
         }
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         for (Long pos; (pos = answered.poll()) != null; ) forget(pos);
-        if (sentAt.isEmpty() || mc.world == null || mc.player == null) {
+        if (sentAt.isEmpty() || mc.level == null || mc.player == null) {
             listening = !sentAt.isEmpty();
             return;
         }
 
-        long now = mc.world.getTime();
+        long now = mc.level.getGameTime();
         List<BlockPos> ask = null;
         var it = sentAt.long2LongEntrySet().fastIterator();
         while (it.hasNext()) {
             var entry = it.next();
             long key = entry.getLongKey();
-            BlockPos pos = BlockPos.fromLong(key);
-            if (!mc.world.getBlockState(pos).isReplaceable()) {
+            BlockPos pos = BlockPos.of(key);
+            if (!mc.level.getBlockState(pos).canBeReplaced()) {
                 it.remove();
                 resendTicks.remove(key);
                 continue;
@@ -142,25 +141,25 @@ public final class PacketPlaceTracker {
      * hit block and the block on the hit side, so two neighbours share one packet.
      */
     public static void sendProbes(Collection<BlockPos> targets) {
-        Hand hand = inertHand();
-        if (hand == null || mc.getNetworkHandler() == null) return;
+        InteractionHand hand = inertHand();
+        if (hand == null || mc.getConnection() == null) return;
         for (GhostBlockProbe.Probe probe : GhostBlockProbe.plan(targets)) {
             Direction side = probe.side();
-            Vec3d hit = Vec3d.ofCenter(probe.pos()).add(side.getOffsetX() * 0.5, side.getOffsetY() * 0.5, side.getOffsetZ() * 0.5);
+            Vec3 hit = Vec3.atCenterOf(probe.pos()).add(side.getStepX() * 0.5, side.getStepY() * 0.5, side.getStepZ() * 0.5);
             // Sequence 0 is never a pending client prediction, so the ack changes nothing client-side.
-            mc.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(hand, new BlockHitResult(hit, side, probe.pos(), false), 0));
+            mc.getConnection().send(new ServerboundUseItemOnPacket(hand, new BlockHitResult(hit, side, probe.pos(), false), 0));
         }
     }
 
     /** A hand whose item does nothing when used on a block, so a probe can't place or strip anything. */
-    public static Hand inertHand() {
+    public static InteractionHand inertHand() {
         if (mc.player == null) return null;
-        if (isInert(mc.player.getOffHandStack())) return Hand.OFF_HAND;
-        if (isInert(mc.player.getMainHandStack())) return Hand.MAIN_HAND;
+        if (isInert(mc.player.getOffhandItem())) return InteractionHand.OFF_HAND;
+        if (isInert(mc.player.getMainHandItem())) return InteractionHand.MAIN_HAND;
         return null;
     }
 
     private static boolean isInert(ItemStack stack) {
-        return stack.isEmpty() || stack.isIn(ItemTags.PICKAXES) || stack.isOf(Items.TOTEM_OF_UNDYING);
+        return stack.isEmpty() || stack.is(ItemTags.PICKAXES) || stack.is(Items.TOTEM_OF_UNDYING);
     }
 }
