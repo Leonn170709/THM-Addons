@@ -5,7 +5,7 @@
 #
 
 [versions]
-mod-version = "0.3.0-SNAPSHOT"
+mod-version = "0.3.0"
 
 # Fabric (https://fabricmc.net/develop)
 minecraft = "26.2"
