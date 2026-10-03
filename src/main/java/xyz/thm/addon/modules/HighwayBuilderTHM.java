@@ -7583,22 +7583,19 @@ public class HighwayBuilderTHM extends Module {
         syncNoSwapAutoTotem();
 
         // About to die: a totem takes the offhand over obsidian.
-        HighwayOffhandPolicy.Target target = HighwayOffhandPolicy.target(
-            noSwapShouldHoldTotem(), isRestockEnclosureOffhandState(state), wantsEnderChestOffhand(),
-            restockTask.isSequenceActive() || isRestockState(state));
-        if (target == HighwayOffhandPolicy.Target.Totem) {
+        if (noSwapShouldHoldTotem()) {
             if (mc.player.getOffhandItem().getItem() != Items.TOTEM_OF_UNDYING) {
                 FindItemResult totem = InvUtils.find(Items.TOTEM_OF_UNDYING);
                 if (totem.found()) moveLoadoutToOffhand(totem.slot());
             }
-        } else if (target == HighwayOffhandPolicy.Target.Enclosure) {
+        } else if (isRestockEnclosureOffhandState(state)) {
             findRestockEnclosureNetherrackSlot();
-        } else if (target == HighwayOffhandPolicy.Target.EnderChest) {
+        } else if (wantsEnderChestOffhand()) {
             if (!offhandHoldsEnderChest()) {
                 FindItemResult chest = InvUtils.find(stack -> stack.getItem() == Items.ENDER_CHEST, 0, 35);
                 if (chest.found()) moveLoadoutToOffhand(chest.slot());
             }
-        } else if (target == HighwayOffhandPolicy.Target.BuildingBlock) {
+        } else if (!restockTask.isSequenceActive() && !isRestockState(state)) {
             ItemStack offhand = mc.player.getOffhandItem();
             if (!offhandHoldsPlaceable()) {
                 // Fill the offhand (search hotbar + main inv, i.e. not the offhand slot itself).

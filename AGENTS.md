@@ -20,6 +20,8 @@ builds and passes automated checks. In-game feature parity and both graphics bac
 
 ## Code comments & setting descriptions
 
+Keep simple decision chains in the module. Do not extract helper classes solely to unit-test them.
+
 Keep both as short as possible. A comment states the one non-obvious fact (a constraint, a
 gotcha) and stops — no rationale essay, no restating what the code already says. A `Setting`
 `.description(...)` is a short user-facing label, not documentation — say what it does, not how,

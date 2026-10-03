@@ -13,7 +13,7 @@ Goal: preserve the released 1.21.11 modules, commands, HUDs, settings, and behav
 ## To do
 
 - [x] Preserve the 1.21.11 release and work on branch `26.2`.
-- [x] Port the 0.2.9 offhand EChest restock hotfix and its ownership regression tests.
+- [x] Port the 0.2.9 offhand EChest restock hotfix.
 - [x] Update Minecraft, Fabric, Meteor, Loom, and Java; use Mojang names.
 - [x] Port inventory clicks to `ContainerInput` and `handleContainerInput`.
 - [x] Port shared Minecraft, Fabric, and Meteor APIs; make main and test sources compile.
@@ -37,7 +37,7 @@ remaining gameplay and rendering checks below.
 | Check | Result on 2026-10-03 | Evidence |
 | --- | --- | --- |
 | `compileJava`, `compileTestJava` | Passed | Java 25, Minecraft 26.2, Meteor 26.2-SNAPSHOT. |
-| `test` | Passed, 275 tests | Existing behavior tests, migration/pipeline/mixin checks, 75 shader tests, and 3 offhand ownership regressions. |
+| `test` | Passed, 272 tests | Existing behavior tests, migration/pipeline/mixin checks, and 75 shader tests. |
 | `build` | Passed | `build/libs/THM-Addons-0.3.0.jar`. |
 | Shader tests | Passed, 75 tests | 35 complete programs across both backends; 4 negative syntax/linker cases and an unused-sampler regression. Background SPIR-V must contain no unbound texture resources. |
 | Registration and setting names | Unchanged | 41 registered modules, 6 commands, 15 HUDs, 8 themes; 824 setting-name occurrences compared with `1.21.11`. |
@@ -95,6 +95,7 @@ Record each rendering result separately for OpenGL and Vulkan; confirm the activ
 
 ## Progress log
 
+- 2026-10-03: Inlined the offhand ownership decisions in HighwayBuilder and removed the policy class and its three tests. The restock guard and atomic swaps remain. Clean builds pass 193 tests on 1.21.11 and 272 on 26.2; gameplay verification remains open.
 - 2026-10-03: Ported the 0.2.9 offhand EChest hotfix. Restock recovery preserves offhand supplies; chest/totem/tool moves use cursor-free swaps, HotbarManager preserves occupied cursors, and echest mining rejects unsuitable tools. Build and 275 tests pass. The 1.21.11 release build passes 196 tests. The reported gameplay scenario still needs an in-game check; graphics paths are unchanged.
 - 2026-10-03: Established the 26.2 dependency and Mojang-name baseline. Compilation failed; raw OpenGL ghost rendering required replacement.
 - 2026-10-03: Ported seven inventory click call sites. Compilation still reported 389 other errors.
