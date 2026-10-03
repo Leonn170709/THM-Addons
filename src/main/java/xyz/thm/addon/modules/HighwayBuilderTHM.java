@@ -7416,10 +7416,8 @@ public class HighwayBuilderTHM extends Module {
 
         int selected = mc.player.getInventory().getSelectedSlot();
         boolean swapped = false;
-        // The server reads the held item for the break, so hold the pickaxe. With offhand-build it
-        // never left the main hand.
-        if (!placedFromOffhand && !mc.player.getInventory().getStack(selected).isIn(ItemTags.PICKAXES)) {
-            FindItemResult pick = InvUtils.findInHotbar(stack -> stack.isIn(ItemTags.PICKAXES));
+        if (!passesEChestMiningPickaxeGuard(mc.player.getInventory().getStack(selected))) {
+            FindItemResult pick = InvUtils.findInHotbar(this::passesEChestMiningPickaxeGuard);
             if (!pick.found() || !pick.isHotbar()) return;
             InvUtils.swap(pick.slot(), false);
             swapped = true;
@@ -7558,37 +7556,58 @@ public class HighwayBuilderTHM extends Module {
         syncNoSwapAutoTotem();
 
         // About to die: a totem takes the offhand over obsidian.
-        if (noSwapShouldHoldTotem()) {
+        HighwayOffhandPolicy.Target target = HighwayOffhandPolicy.target(
+            noSwapShouldHoldTotem(), isRestockEnclosureOffhandState(state), wantsEnderChestOffhand(),
+            restockTask.isSequenceActive() || isRestockState(state));
+        if (target == HighwayOffhandPolicy.Target.Totem) {
             if (mc.player.getOffHandStack().getItem() != Items.TOTEM_OF_UNDYING) {
                 FindItemResult totem = InvUtils.find(Items.TOTEM_OF_UNDYING);
-                if (totem.found()) InvUtils.move().from(totem.slot()).toOffhand();
+                if (totem.found()) moveLoadoutToOffhand(totem.slot());
             }
-        } else if (isRestockEnclosureOffhandState(state)) {
+        } else if (target == HighwayOffhandPolicy.Target.Enclosure) {
             findRestockEnclosureNetherrackSlot();
-        } else if (wantsEnderChestOffhand()) {
+        } else if (target == HighwayOffhandPolicy.Target.EnderChest) {
             if (!offhandHoldsEnderChest()) {
                 FindItemResult chest = InvUtils.find(stack -> stack.getItem() == Items.ENDER_CHEST, 0, 35);
-                if (chest.found()) InvUtils.move().from(chest.slot()).toOffhand();
+                if (chest.found()) moveLoadoutToOffhand(chest.slot());
             }
-        } else {
+        } else if (target == HighwayOffhandPolicy.Target.BuildingBlock) {
             ItemStack offhand = mc.player.getOffHandStack();
             if (!offhandHoldsPlaceable()) {
                 // Fill the offhand (search hotbar + main inv, i.e. not the offhand slot itself).
                 FindItemResult obby = InvUtils.find(this::isPlaceableBlockStack, 0, 35);
-                if (obby.found()) InvUtils.move().from(obby.slot()).toOffhand();
+                if (obby.found()) moveLoadoutToOffhand(obby.slot());
             } else if (offhand.getCount() <= OFFHAND_BLOCK_TOPUP_AT && offhand.getCount() < offhand.getMaxCount()) {
                 // Top up a partial stack instead of waiting for it to run out. Same item only:
                 // InvUtils.move() is a two-click pickup/place, which merges matching stacks but
                 // *swaps* different ones — pulling netherrack onto offhand obsidian would park the
                 // obsidian back in the inventory.
                 FindItemResult more = InvUtils.find(s -> s.getItem() == offhand.getItem(), 0, 35);
-                if (more.found()) InvUtils.move().from(more.slot()).toOffhand();
+                if (more.found()) moveLoadoutToOffhand(more.slot());
             }
 
             restockOffhandBlocksIfLow();
         }
 
         ensurePickaxeInMainHand();
+    }
+
+    private boolean moveLoadoutToOffhand(int slot) {
+        if (slot < 0 || slot >= 36 || mc.interactionManager == null) return false;
+        int slotId = SlotUtils.indexToId(slot);
+        if (slotId < 0) return false;
+        ItemStack source = mc.player.getInventory().getStack(slot);
+        ItemStack offhand = mc.player.getOffHandStack();
+        if (!source.isEmpty() && ItemStack.areItemsAndComponentsEqual(source, offhand)) {
+            if (mc.player.currentScreenHandler != mc.player.playerScreenHandler
+                || !mc.player.currentScreenHandler.getCursorStack().isEmpty()) return false;
+            InvUtils.move().from(slot).toOffhand();
+        } else {
+            // SWAP needs neither cursor clicks nor a spare inventory slot.
+            mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId,
+                slotId, SlotUtils.OFFHAND, SlotActionType.SWAP, mc.player);
+        }
+        return true;
     }
 
     private boolean isRestockEnclosureOffhandState(State candidate) {
@@ -7613,9 +7632,9 @@ public class HighwayBuilderTHM extends Module {
         FindItemResult netherrack = InvUtils.find(stack -> stack.isOf(Items.NETHERRACK), 0, 35);
         if (!netherrack.found()) return -1;
 
+        if (!moveLoadoutToOffhand(netherrack.slot())) return -1;
         restockEnclosureOffhandActive = true;
         restockEnclosureOffhandSwapSlot = netherrack.slot();
-        InvUtils.move().from(netherrack.slot()).toOffhand();
         return mc.player.getOffHandStack().isOf(Items.NETHERRACK) ? SlotUtils.OFFHAND : -1;
     }
 
@@ -7627,13 +7646,7 @@ public class HighwayBuilderTHM extends Module {
         }
 
         if (restockEnclosureOffhandSwapSlot >= 0) {
-            if (mc.player.getInventory().getStack(restockEnclosureOffhandSwapSlot).isEmpty()) {
-                if (!mc.player.getOffHandStack().isEmpty()) {
-                    InvUtils.move().fromOffhand().to(restockEnclosureOffhandSwapSlot);
-                }
-            } else {
-                InvUtils.move().from(restockEnclosureOffhandSwapSlot).toOffhand();
-            }
+            moveLoadoutToOffhand(restockEnclosureOffhandSwapSlot);
         }
 
         restockEnclosureOffhandActive = false;
@@ -7675,13 +7688,15 @@ public class HighwayBuilderTHM extends Module {
     }
 
     private void ensurePickaxeInMainHand() {
+        Predicate<ItemStack> usable = wantsEnderChestOffhand()
+            ? this::passesEChestMiningPickaxeGuard : s -> s.isIn(ItemTags.PICKAXES);
         int sel = mc.player.getInventory().getSelectedSlot();
-        if (mc.player.getInventory().getStack(sel).isIn(ItemTags.PICKAXES)) return;
-        FindItemResult pick = InvUtils.findInHotbar(s -> s.isIn(ItemTags.PICKAXES));
+        if (usable.test(mc.player.getInventory().getStack(sel))) return;
+        FindItemResult pick = InvUtils.findInHotbar(usable);
         if (pick.found() && pick.isHotbar()) {
             InvUtils.swap(pick.slot(), false);
         } else {
-            int moved = State.Forward.findAndMoveToHotbar(this, s -> s.isIn(ItemTags.PICKAXES), false);
+            int moved = State.Forward.findAndMoveToHotbar(this, usable, false);
             if (moved != -1) InvUtils.swap(moved, false);
         }
     }
@@ -14757,6 +14772,9 @@ public class HighwayBuilderTHM extends Module {
                     ItemStack itemStack = b.mc.player.getInventory().getStack(i);
                     if (itemStack.getItem() == Items.OBSIDIAN) obsidianCount += itemStack.getCount();
                 }
+                if (b.mc.player.getOffHandStack().isOf(Items.OBSIDIAN)) {
+                    obsidianCount += b.mc.player.getOffHandStack().getCount();
+                }
 
                 if (obsidianCount > lastObservedObsidianCount) {
                     b.restockWatchdog.markProgress("mine-echests-obsidian-progress");
@@ -14946,6 +14964,7 @@ public class HighwayBuilderTHM extends Module {
                     // Place ender chest. With offhand-build they sit in the offhand, which the inventory
                     // search never looks at: without this the phase sees none and ends without placing.
                     boolean fromOffhand = b.noSwapLoadout.get() && b.offhandHoldsEnderChest();
+                    if (b.noSwapLoadout.get() && !fromOffhand) return;
                     int slot = fromOffhand ? SlotUtils.OFFHAND : findAndMoveToHotbar(b, itemStack -> itemStack.getItem() == Items.ENDER_CHEST);
                     RestockTask.RestockSession session = b.restockTask.getSession();
                     int minimumRemainingEChests = session != null ? session.saveEchestsReserve : b.saveEchests.get();
@@ -18284,9 +18303,7 @@ public class HighwayBuilderTHM extends Module {
             if (b.restockDebugLog.get()) {
                 b.restockDebug("findAndMoveToHotbar moving inventory slot %d into hotbar slot %d.", slot, hotbarSlot);
             }
-            InvUtils.move().from(slot).toHotbar(hotbarSlot);
-            if (!b.clearCursorStackToEmptySlot("findAndMoveToHotbar") && !b.dropCursorStackIfSafe("findAndMoveToHotbar")) {
-            }
+            if (!swapInventoryToHotbar(b, slot, hotbarSlot)) return -1;
 
             return hotbarSlot;
         }
@@ -18353,10 +18370,7 @@ public class HighwayBuilderTHM extends Module {
                 );
             }
 
-            InvUtils.move().from(slot).toHotbar(hotbarSlot);
-            if (!b.clearCursorStackToEmptySlot("findPreferredTrashBlockToHotbar")
-                && !b.dropCursorStackIfSafe("findPreferredTrashBlockToHotbar")) {
-            }
+            if (!swapInventoryToHotbar(b, slot, hotbarSlot)) return -1;
 
             return hotbarSlot;
         }
@@ -18385,7 +18399,7 @@ public class HighwayBuilderTHM extends Module {
                 }
             }
 
-            if (bestSlot == -1) return b.mc.player.getInventory().getSelectedSlot();
+            if (bestSlot == -1) return noSilkTouch ? -1 : b.mc.player.getInventory().getSelectedSlot();
 
             ItemStack bestStack = b.mc.player.getInventory().getStack(bestSlot);
             if (bestStack.isIn(ItemTags.PICKAXES)) {
@@ -18429,11 +18443,17 @@ public class HighwayBuilderTHM extends Module {
                     blockState.getBlock()
                 );
             }
-            InvUtils.move().from(bestSlot).toHotbar(hotbarSlot);
-            if (!b.clearCursorStackToEmptySlot("findAndMoveBestToolToHotbar") && !b.dropCursorStackIfSafe("findAndMoveBestToolToHotbar")) {
-            }
+            if (!swapInventoryToHotbar(b, bestSlot, hotbarSlot)) return -1;
 
             return hotbarSlot;
+        }
+
+        private boolean swapInventoryToHotbar(HighwayBuilderTHM b, int source, int hotbarSlot) {
+            int slotId = SlotUtils.indexToId(source);
+            if (slotId < 0 || hotbarSlot < 0 || hotbarSlot > 8) return false;
+            b.mc.interactionManager.clickSlot(b.mc.player.currentScreenHandler.syncId,
+                slotId, hotbarSlot, SlotActionType.SWAP, b.mc.player);
+            return true;
         }
 
         protected int findBlocksToPlace(HighwayBuilderTHM b) {

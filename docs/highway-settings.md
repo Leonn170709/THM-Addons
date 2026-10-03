@@ -34,6 +34,9 @@ The tabbed HighwayBuilder screen can also save the current settings as a named c
 
 Restock and KitBot enclosures use Netherrack. With `offhand-build`, it is temporarily moved into the offhand and the previous item is restored afterwards; otherwise it is moved to the hotbar and placed with the normal main-hand swap. Enclosure blocks are placed normally, one at a time, even when Packet Build is enabled.
 
+Offhand restocks keep their supplies through recovery instead of refilling with obsidian. Chest,
+totem and tool swaps work with a full inventory, including `minimum-empty-slots` set to `0`.
+
 ## Quick Cheat Sheet
 
 ### Basic Highway Shape
