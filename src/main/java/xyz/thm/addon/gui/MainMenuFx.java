@@ -11,7 +11,13 @@ import xyz.thm.addon.system.THMSystem;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Comparator;
 import java.util.Random;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.PlainTextButton;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.resources.language.I18n;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.util.ARGB;
@@ -79,6 +85,59 @@ public class MainMenuFx {
         };
     }
 
+    /** Run after screen initialization so other mods' buttons are included. */
+    public static void layoutTitleButtons(Screen screen) {
+        if (!THMSystem.get().mainMenuWindow.get() || previewMode) return;
+        int[] bounds = windowBounds(screen.width, screen.height);
+        int centerX = screen.width / 2;
+        int top = bounds[1] + (bounds[3] - bounds[1]) / 4 + 38;
+        List<AbstractWidget> icons = new ArrayList<>();
+        List<AbstractWidget> extraButtons = new ArrayList<>();
+        int sidebarX = bounds[0] + 10;
+        int sidebarWidth = Math.clamp(centerX - 100 - sidebarX - 10, 48, 110);
+        for (var child : screen.children()) {
+            if (!(child instanceof AbstractWidget widget)) continue;
+            String label = widget.getMessage().getString();
+            if (label.equals("THM Menu")) {
+                widget.setPosition(sidebarX, bounds[3] - 28);
+                widget.setWidth(sidebarWidth);
+            } else if (label.equals(I18n.get("menu.singleplayer")) || label.equals(I18n.get("menu.playdemo"))) {
+                widget.setPosition(centerX - 100, top);
+            } else if (label.equals(I18n.get("menu.multiplayer")) || label.equals(I18n.get("menu.resetdemo"))) {
+                widget.setPosition(centerX - 100, top + 24);
+            } else if (label.equals(I18n.get("menu.online"))) {
+                widget.setPosition(centerX - 100, top + 48);
+            } else if (label.equals(I18n.get("menu.options"))) {
+                widget.setPosition(centerX - 100, top + 96);
+            } else if (label.equals(I18n.get("menu.quit"))) {
+                widget.setPosition(centerX + 2, top + 96);
+            } else {
+                if (widget instanceof Button && !(widget instanceof PlainTextButton) && widget.visible) {
+                    if (widget.getWidth() <= 40 || label.equals(I18n.get("options.language")) || label.equals(I18n.get("options.accessibility"))
+                        || label.equals(I18n.get("gui.friends.open"))) icons.add(widget);
+                    else if (!label.equals("Show UI")) extraButtons.add(widget);
+                }
+                continue;
+            }
+            ThmStyledButtons.mark(widget);
+        }
+        extraButtons.sort(Comparator.comparingInt(widget -> widget.getMessage().getString().equalsIgnoreCase("Boze") ? 0 : 1));
+        int extraY = bounds[1] + 20;
+        for (AbstractWidget widget : extraButtons) {
+            if (widget.getWidth() > 40) widget.setWidth(sidebarWidth);
+            widget.setPosition(sidebarX + (sidebarWidth - widget.getWidth()) / 2, extraY);
+            ThmStyledButtons.mark(widget);
+            extraY += Math.max(20, widget.getHeight()) + 4;
+        }
+        int totalWidth = icons.stream().mapToInt(AbstractWidget::getWidth).sum() + Math.max(0, icons.size() - 1) * 4;
+        int x = centerX - totalWidth / 2;
+        for (AbstractWidget icon : icons) {
+            icon.setPosition(x, top + 72);
+            ThmStyledButtons.mark(icon);
+            x += icon.getWidth() + 4;
+        }
+    }
+
     /** Window frame + big title - draw this BEFORE the screen's buttons so they sit on top of it. */
     public static void renderWindow(GuiGraphicsExtractor context, Font tr, int screenWidth, int screenHeight) {
         if (!THMSystem.get().mainMenuWindow.get()) return;
@@ -118,8 +177,9 @@ public class MainMenuFx {
         context.fill(x1 + 1, y1 + 1, x2 - 1, y2 - 1, fill);
 
         int color = active ? 0xffffffff : 0xffa0a0a0;
-        int textWidth = tr.width(text);
-        context.text(tr, text, x1 + (x2 - x1) / 2 - textWidth / 2, y1 + (y2 - y1) / 2 - 4, color);
+        String label = tr.plainSubstrByWidth(text, Math.max(0, x2 - x1 - 8));
+        int textWidth = tr.width(label);
+        context.text(tr, label, x1 + (x2 - x1) / 2 - textWidth / 2, y1 + (y2 - y1) / 2 - 4, color);
     }
 
     // Found it: both earlier attempts here passed 0xffffff as the text color, which is only

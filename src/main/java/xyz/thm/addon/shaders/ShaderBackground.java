@@ -40,39 +40,39 @@ public class ShaderBackground {
     private static boolean blurBroken;
     private static boolean scaledBroken;
     private static boolean tripBroken;
-    private record BlurRegion(int x1, int y1, int x2, int y2, int strength) {}
-    private static BlurRegion requestedBlur;
-
-    // Title-screen extraction precedes drawing its panorama.
-    public static void requestBlurredRegion(int x1, int y1, int x2, int y2, int strength) {
-        requestedBlur = new BlurRegion(x1, y1, x2, y2, strength);
-    }
-
-    public static void renderRequestedBlur() {
-        BlurRegion region = requestedBlur;
-        requestedBlur = null;
-        if (region != null) renderBlurredRegion(region.x1, region.y1, region.x2, region.y2, region.strength);
-    }
+    private static String renderStatus = "not called";
 
     /** @return true if a shader was drawn (caller should skip the vanilla panorama). */
     public static boolean render() {
         String name = ShaderManager.active();
-        if (name == null) return false;
+        if (name == null) {
+            renderStatus = "no active shader";
+            return false;
+        }
 
         try {
             RenderPipeline pipeline = pipelineFor(name);
-            if (pipeline == null) return false;
+            if (pipeline == null) {
+                renderStatus = "pipeline unavailable or disabled after failure";
+                return false;
+            }
 
             Minecraft mc = Minecraft.getInstance();
             RenderTarget framebuffer = mc.gameRenderer.mainRenderTarget();
             GpuTextureView colorView = framebuffer.getColorTextureView();
-            if (colorView == null) return false;
+            if (colorView == null) {
+                renderStatus = "framebuffer color attachment unavailable";
+                return false;
+            }
 
             // Draw at reduced resolution and upscale - these shaders are per-pixel raymarchers/
             // noise fields and are by far the most expensive thing in a menu frame at native res.
             if (!scaledBroken) {
                 try {
-                    if (BlurBackground.renderScaled(pipeline)) return true;
+                    if (BlurBackground.renderScaled(pipeline)) {
+                        renderStatus = "drawn at scaled resolution";
+                        return true;
+                    }
                 } catch (Throwable t) {
                     THMAddon.LOG.warn("[THM] Scaled shader draw failed, falling back to full resolution", t);
                     scaledBroken = true;
@@ -80,12 +80,18 @@ public class ShaderBackground {
             }
 
             drawInto(pipeline, colorView, framebuffer.width, framebuffer.height);
+            renderStatus = "drawn at full resolution";
             return true;
         } catch (Throwable t) {
             THMAddon.LOG.warn("[THM] Main-menu shader '{}' failed to render, disabling it", name, t);
             valid.put(name, false);
+            renderStatus = "draw failed; shader disabled";
             return false;
         }
+    }
+
+    public static String renderStatus() {
+        return renderStatus;
     }
 
     /**
@@ -145,6 +151,7 @@ public class ShaderBackground {
             }
 
             valid.put(n, true);
+            THMAddon.LOG.info("[THM/Menu] Shader pipeline compiled; shader={}, backend={}", n, RenderSystem.getDevice().getDeviceInfo().backendName());
             return pipeline;
         });
     }

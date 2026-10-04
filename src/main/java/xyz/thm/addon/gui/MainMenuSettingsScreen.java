@@ -18,6 +18,7 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 import xyz.thm.addon.shaders.ShaderManager;
 import xyz.thm.addon.system.THMSystem;
+import meteordevelopment.meteorclient.settings.Setting;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -90,7 +91,11 @@ public class MainMenuSettingsScreen extends Screen {
             y = addShaderChoice(system, contentX, y, contentWidth);
         }
 
-        y = addBlurSlider(system, contentX, y, contentWidth);
+        int sliderWidth = (contentWidth - 4) / 2;
+        addSlider("Resolution (%)", system.shaderResolution, 25, 100, contentX, y, sliderWidth);
+        addSlider("Shader FPS", system.shaderFps, 0, 120, contentX + sliderWidth + 4, y, contentWidth - sliderWidth - 4);
+        y += ROW_HEIGHT;
+        y = addSlider("Blur", system.mainMenuBlur, 0, 100, contentX, y, contentWidth);
 
         // Enters shader-only preview mode and drops back to the title screen (which strips its own
         // UI while previewMode is on). The exit ("Show UI") lives on the title screen since this
@@ -194,7 +199,7 @@ public class MainMenuSettingsScreen extends Screen {
         int y = 16;
         y += ROW_HEIGHT * 3; // Styled Window, Particle Trail, Random Shader
         y += random ? (12 + gridRows() * 14 + 4) : ROW_HEIGHT; // shader pool grid vs. shader choice
-        y += ROW_HEIGHT; // blur slider
+        y += ROW_HEIGHT * 2; // resolution/FPS and blur
         y += ROW_HEIGHT; // preview shader button
         y += 20 + 10; // close button + bottom padding
         return y;
@@ -231,17 +236,17 @@ public class MainMenuSettingsScreen extends Screen {
         return y + gridRows() * 14 + 4;
     }
 
-    private int addBlurSlider(THMSystem system, int x, int y, int width) {
-        int initial = system.mainMenuBlur.get();
-        AbstractSliderButton slider = new AbstractSliderButton(x, y, width, 20, Component.literal("Blur: " + initial), initial / 100.0) {
+    private int addSlider(String label, Setting<Integer> setting, int min, int max, int x, int y, int width) {
+        int initial = setting.get();
+        AbstractSliderButton slider = new AbstractSliderButton(x, y, width, 20, Component.literal(label + ": " + initial), (initial - min) / (double) (max - min)) {
             @Override
             protected void updateMessage() {
-                this.setMessage(Component.literal("Blur: " + Math.round(this.value * 100)));
+                this.setMessage(Component.literal(label + ": " + Math.round(min + this.value * (max - min))));
             }
 
             @Override
             protected void applyValue() {
-                system.mainMenuBlur.set((int) Math.round(this.value * 100));
+                setting.set((int) Math.round(min + this.value * (max - min)));
             }
         };
         this.addRenderableWidget(slider);

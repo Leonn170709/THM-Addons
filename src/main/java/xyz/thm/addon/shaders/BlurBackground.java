@@ -28,6 +28,7 @@ import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
 import org.lwjgl.system.MemoryStack;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.system.THMSystem;
 
 // "Frosted glass" blur for just the window rectangle (not the whole shader background): copies
 // that region of the already-rendered framebuffer into a small offscreen texture, runs a real
@@ -48,12 +49,6 @@ class BlurBackground {
     // blit (bilinear, see FilterMode.LINEAR below) is the standard cost/quality tradeoff every
     // engine's blur/bloom uses; cuts the two most expensive passes' pixel count by WORK_SCALE^2.
     private static final int WORK_SCALE = 2;
-    // Same idea for the background shader itself (see renderScaled): the .fsh files are the
-    // expensive part of the menu frame (sea.fsh raymarches per pixel), and they're all smooth
-    // gradients/noise with no fine detail to lose, so drawing them at 1/N resolution and
-    // bilinear-upscaling costs N^2 fewer fragment shader invocations for a barely visible
-    // difference. ponytail: hardcoded, not a setting - add one if someone wants native-res.
-    private static final int SHADER_SCALE = 2;
     private static final int MIN_TEXTURE_SIZE = 4;
     private static final long BLUR_PARAMS_SIZE = 16L; // std140: vec4(stepX, stepY, radius, unused)
     private static final long RECT_BUFFER_SIZE = 32L; // std140: vec4 rectPixels, vec4 fbSize
@@ -138,9 +133,12 @@ class BlurBackground {
     private static GpuTexture scaledTexture;
     private static GpuTextureView scaledView;
     private static int scaledWidth = -1, scaledHeight = -1;
+    private static RenderPipeline scaledPipeline;
+    private static long lastShaderDraw;
+    private static int lastShaderFps = -1;
 
     /**
-     * Draws the active background shader at 1/SHADER_SCALE resolution into an offscreen texture,
+     * Updates the background at its configured resolution and animation rate,
      * then upscales it onto the main framebuffer (bilinear). Reuses the blur pass pipeline with
      * radius = 0, which is just a passthrough sample, i.e. a plain resize.
      *
@@ -154,16 +152,35 @@ class BlurBackground {
         GpuTextureView mainView = framebuffer.getColorTextureView();
         if (mainView == null) return false;
 
-        int w = Math.max(MIN_TEXTURE_SIZE, framebuffer.width / SHADER_SCALE);
-        int h = Math.max(MIN_TEXTURE_SIZE, framebuffer.height / SHADER_SCALE);
+        THMSystem system = THMSystem.get();
+        int resolution = system == null ? 25 : system.shaderResolution.get();
+        int fps = system == null ? 30 : system.shaderFps.get();
+        int w = shaderDimension(framebuffer.width, resolution);
+        int h = shaderDimension(framebuffer.height, resolution);
         ensureScaledTexture(device, w, h);
 
-        ShaderBackground.drawInto(shaderPipeline, scaledView, w, h);
+        long now = System.nanoTime();
+        boolean changed = scaledPipeline != shaderPipeline || lastShaderFps != fps;
+        if (shouldUpdateShader(now, lastShaderDraw, fps, changed)) {
+            ShaderBackground.drawInto(shaderPipeline, scaledView, w, h);
+            lastShaderDraw = now;
+            if (changed) THMAddon.LOG.info("[THM/Menu] Background render budget; size={}x{}, animationFps={}", w, h, fps);
+            scaledPipeline = shaderPipeline;
+            lastShaderFps = fps;
+        }
 
         CommandEncoder encoder = device.createCommandEncoder();
         writeBlurParams(encoder, 0f, 0f, 0f);
         drawFullscreen(encoder, blurPipeline, mainView, "BlurParams", blurParamsBuffer, scaledView);
         return true;
+    }
+
+    static int shaderDimension(int dimension, int percentage) {
+        return Math.max(MIN_TEXTURE_SIZE, (int) ((long) dimension * Math.clamp(percentage, 25, 100) / 100));
+    }
+
+    static boolean shouldUpdateShader(long now, long lastDraw, int fps, boolean changed) {
+        return changed || fps <= 0 || now - lastDraw >= 1_000_000_000L / fps;
     }
 
     /**
@@ -323,6 +340,7 @@ class BlurBackground {
         scaledView = device.createTextureView(scaledTexture);
         scaledWidth = w;
         scaledHeight = h;
+        scaledPipeline = null;
     }
 
     private static void ensureTextures(GpuDevice device, int w, int h) {

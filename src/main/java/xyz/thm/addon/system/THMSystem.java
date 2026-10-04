@@ -346,6 +346,22 @@ public class THMSystem extends System<THMSystem> {
         .build()
     );
 
+    public final Setting<Integer> shaderResolution = sgMainMenu.add(new IntSetting.Builder()
+        .name("shader-resolution")
+        .description("Background render resolution as a percentage.")
+        .defaultValue(25)
+        .min(25).max(100).sliderRange(25, 100)
+        .build()
+    );
+
+    public final Setting<Integer> shaderFps = sgMainMenu.add(new IntSetting.Builder()
+        .name("shader-fps")
+        .description("Background animation FPS. 0 = unlimited.")
+        .defaultValue(30)
+        .min(0).max(120).sliderRange(0, 120)
+        .build()
+    );
+
     public final Setting<Integer> mainMenuBlur = sgMainMenu.add(new IntSetting.Builder()
         .name("blur")
         .description("Blurs the title screen shader background. 0 = no blur, 100 = full blur.")

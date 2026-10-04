@@ -30,6 +30,28 @@ class MixinTargetsTest {
     private final Map<String, ClassNode> classes = new HashMap<>();
 
     @Test
+    void titleBlurRunsAfterBothBackgroundPathsInTheSameRenderCallback() throws Exception {
+        ClassNode mixin = read("xyz/thm/addon/mixin/GuiBackgroundMixin");
+        String shader = "xyz/thm/addon/shaders/ShaderBackground";
+        MethodNode background = mixin.methods.stream().filter(method -> {
+            for (var instruction : method.instructions) {
+                if (instruction instanceof MethodInsnNode call && call.owner.equals("net/minecraft/client/renderer/CubeMap")
+                    && call.name.equals("render")) return true;
+            }
+            return false;
+        }).findFirst().orElseThrow();
+        int shaderDraw = -1, panoramaDraw = -1, blur = -1;
+        for (int i = 0; i < background.instructions.size(); i++) {
+            if (!(background.instructions.get(i) instanceof MethodInsnNode call)) continue;
+            if (call.owner.equals(shader) && call.name.equals("render")) shaderDraw = i;
+            if (call.owner.equals("net/minecraft/client/renderer/CubeMap") && call.name.equals("render")) panoramaDraw = i;
+            if (call.owner.equals(shader) && call.name.equals("renderBlurredRegion")) blur = i;
+        }
+        assertTrue(shaderDraw >= 0 && panoramaDraw > shaderDraw && blur > panoramaDraw,
+            "Window blur must run after the shader or fallback panorama, before GUI contents.");
+    }
+
+    @Test
     void configuredMixinMembersExist() throws Exception {
         List<String> failures = new ArrayList<>();
         for (String resource : List.of("thm-addon.mixins.json", "thm-addon.sodium.mixins.json", "thm-addon.xaero.mixins.json")) {

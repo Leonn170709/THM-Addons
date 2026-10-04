@@ -35,6 +35,38 @@ class SpeedmineTest {
         assertEquals(20, Speedmine.serverTicks(1000, Float.NaN), 1e-9);
     }
 
+    @Test
+    void fullTpsMatchesUnsyncedStartsEvenWithoutCredit() {
+        for (double credit : new double[] {0, 0.98, 1}) {
+            assertTrue(Speedmine.canStart(true, 20, credit));
+            assertTrue(Speedmine.canStart(false, 10, credit));
+        }
+        assertTrue(Speedmine.canStart(true, Float.NaN, 0));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"20,100", "19.99,99", "10,50", "5,25", "0,0"})
+    void instantStartRateTracksTpsAcrossUnevenClientTicks(float tps, int expectedStarts) {
+        double credit = 0;
+        int starts = 0;
+        for (int tick = 0; tick < 100; tick++) {
+            credit = Speedmine.replenishStartCredit(credit, tick % 2 == 0 ? 49 : 51, tps);
+            if (Speedmine.canStart(true, tps, credit)) {
+                starts++;
+                credit = Math.max(0, credit - 1);
+            }
+        }
+        assertEquals(expectedStarts, starts);
+    }
+
+    @Test
+    void startCreditCannotAccumulateAnUnlimitedBurstDuringPause() {
+        double credit = Speedmine.replenishStartCredit(0, 60000, 10);
+        assertTrue(Speedmine.canStart(true, 10, credit));
+        assertTrue(Speedmine.canStart(true, 10, credit - 1));
+        assertFalse(Speedmine.canStart(true, 10, credit - 2));
+    }
+
     @ParameterizedTest
     @CsvSource({"false,false,false,false,false", "false,true,false,false,true", "false,false,true,false,true", "false,false,false,true,false", "true,false,false,false,true", "false,true,true,true,true"})
     void migrateLocalRemovalToSingleToggle(boolean current, boolean instant, boolean unvalidated,

@@ -6,9 +6,27 @@
 
 # 26.2 port gotchas
 
+- The 2026-10-04 live diagnostics confirmed `TitleBridgeScreen` from ForceCloseLoadingScreen, outer THM setup, 30 discovered backgrounds, and successful scaled shader drawing on Vulkan. An ImageButton sprite includes its vanilla frame; shrinking the whole sprite retains that frame, so crop its outer pixels when adding THM chrome.
+
+- Animated backgrounds reuse one offscreen texture between updates, independently of GUI FPS. Defaults are 25% resolution and 30 background FPS; 50% restores the old resolution and 0 FPS redraws every frame. Shader changes and texture resizes force an immediate update. Compiler checks and cadence tests do not measure live FPS.
+
+- Main-menu setup must run after the outer `Screen.init`, resize, or widget rebuild. Another client can cancel the inner `TitleScreen.init`, skipping tail hooks that add THM settings or select shaders. Setup must avoid duplicate buttons when these hooks nest. Place Boze first in the upper-left sidebar and stack other wide addon buttons below it. Keep small addon buttons with Friends/Language/Accessibility in the central icon row; keep THM Menu inside the panel to avoid third-party footer text.
+
+- `[THM/Init]` logs startup stages. `[THM/Menu]` logs requested/active screen classes, title init entry/return, outer setup, styled widget counts, render hooks, GPU backend, shader selection/compilation, and fallback reasons. Render/button messages log once or when their state changes.
+
+- 26.2 adds a Friends button beside Language and Accessibility. Lay out small title-screen buttons after initialization, preserve their sprite and notification rendering, and anchor the separate Realms notification overlay inside the relocated Realms button's right edge. Its vanilla badge coordinates do not follow the Realms button. Pack visible badges without reserving empty notification slots.
+
+- TPS safety walls must use Netherrack independently of paving material. Track only placed safety targets and remove them on all four sides after recovery, before Forward moves. Normal highway mining alone leaves the lateral walls behind.
+
+- `Manage-hotbar` controls whether HighwayBuilder enables HotbarManager; an independently active manager still reserves its slots. Restocking uses configured slots directly and pauses the manager's sorting to keep offhand swap slots stable. Offhand EChest placement checks the actual hand, handles exhausted supply, and pauses its watchdog while a safety totem is required.
+
+- Boze and THM both initialized in the 2026-10-04 Prism 26.2 log, with no reported TitleScreen mixin failure. A replacement menu is a possible cause when vanilla TitleScreen hooks disappear, but this log does not identify the active screen. The published [Boze event API](https://docs.boze.dev/dev/boze/api/event/package-summary.html) has no dedicated title-screen event.
+
 - Vanilla handles primary STOP immediately at progress >= 0.7, but the delayed secondary completes in `ServerPlayerGameMode.tick()` with the tool held then. Secondary STOP after a new START may target a different `destroyPos` and be ignored. Normal mining therefore retains its tool through confirmation in every swap mode; fast swap timing applies to instant/primed breaks. Prioritize the delayed secondary tool, but send the primary STOP at its own threshold. Track both pending confirmations; waiting for the secondary before finishing the primary delays double-break.
 
 - Speedmine's Keep mode checks after tick placements and holds through the next client tick. A replacement keeps the tool even while TPS throttling delays its STOP. Same Tick wraps selection/mining/restoration in one call; End of Tick restores in `TickEvent.Post`; Tool Hold preserves the confirmation wait. Meteor enum values serialize their `toString()` labels, so legacy `tool-hold` migration must write those labels.
+
+- TPS sync must not throttle starts at 20 TPS. Below 20, preserve fractional start credit with a two-block cap; a one-block cap discards overflow and repeatedly skips ticks when the estimate is just under 20 or client ticks vary.
 
 - Speedmine now exposes only `client-prediction` for local removal. Legacy `instant-client-remove=true` or `validate-break=false` migrates to prediction on; `remove-slow-blocks` is retired. Mining packets use the best hotbar tool. Keep/end-of-tick reuse a retained selection only when the shared server-slot tracker still matches. Prediction cannot make a ghost placement exist on the server.
 
@@ -25,7 +43,7 @@
 - A successful compile or unit test does not prove rendering or server behavior. Do not mark feature parity or either graphics backend complete without an in-game check.
 - `getCommit()` and `getRepo()` read the SHA and branch embedded at build time. Keep both dynamic; a jar built from uncommitted changes still identifies its last committed SHA.
 
-- GUI extraction and drawing are separate in 26.2. Screen callbacks receive `GuiGraphicsExtractor`; shader GPU passes belong in `GuiRenderer.render`. Title-window blur is requested during extraction and drawn after the panorama. Meteor widget rendering runs in its own later GUI pass.
+- GUI extraction and drawing are separate in 26.2. Screen callbacks receive `GuiGraphicsExtractor`; shader GPU passes belong in `GuiRenderer.render`. Apply title-window blur directly after drawing the shader or vanilla panorama in that callback. An earlier GUI renderer reaches `prepare()` without a panorama and would consume a queued blur before the background overwrites it. Meteor widget rendering runs in its own later GUI pass.
 - Screen ownership moved from `Minecraft` to `Minecraft.gui`; HighwayBuilder's screen replacement now targets `Gui#setScreen`. Camera rotation alignment moved into `Camera.alignWithEntity`.
 - Blaze3D uses `GpuFormat`, `BindGroupLayout`, optional clear colors, and four-argument draw calls. Postprocessing pipelines include `Globals`; bind default uniforms before drawing. New scissor validation rejects offscreen rectangles, so clamp blur bounds.
 - Vulkan's surface presentation flips Y. Its framebuffer/scissor convention still matches the existing bottom-origin blur coordinates; do not add a second backend-specific flip.

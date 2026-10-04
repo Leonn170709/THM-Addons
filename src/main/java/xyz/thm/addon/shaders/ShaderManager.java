@@ -37,6 +37,7 @@ public class ShaderManager {
             }
             names.sort(String::compareTo);
             cached = names;
+            THMAddon.LOG.info("[THM/Menu] Shader discovery completed; available={}", names.size());
         }
         return cached;
     }
@@ -53,12 +54,14 @@ public class ShaderManager {
 
         if (all.isEmpty()) {
             activeRoll = null;
+            THMAddon.LOG.warn("[THM/Menu] Shader selection skipped: no background resources found");
             return;
         }
 
         if (!system.shaderRandom.get()) {
             String choice = system.shaderChoice.get();
             activeRoll = all.contains(choice) ? choice : null;
+            THMAddon.LOG.info("[THM/Menu] Shader selection completed; random=false, configured={}, active={}", choice, activeRoll);
             return;
         }
 
@@ -75,6 +78,7 @@ public class ShaderManager {
             next = withoutPrevious.get(RANDOM.nextInt(withoutPrevious.size()));
         }
         activeRoll = next;
+        THMAddon.LOG.info("[THM/Menu] Shader selection completed; random=true, candidates={}, active={}", pool.size(), activeRoll);
     }
 
     /** @return the currently active shader name, or null for the vanilla panorama. */

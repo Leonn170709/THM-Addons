@@ -85,7 +85,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
 
     @Override
     public void onInitialize() {
-        LOG.info("Initializing THM Addon");
+        LOG.info("[THM/Init] Initializing THM Addon {}; Minecraft={}", VERSION, SharedConstants.getCurrentVersion().name());
         FabricLoader loader = FabricLoader.getInstance();
 
         record ModOption(String modId, String displayName, String url) {}
@@ -158,6 +158,8 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         ChunkResync.init();
         PacketPlaceTracker.init();
 
+        LOG.info("[THM/Init] Services initialized; registering modules");
+
         // Modules
         Modules.get().add(new HighwayTraveler());
         HighwayBuilderTHM highwayBuilder = new HighwayBuilderTHM();
@@ -206,6 +208,8 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new THMHwyMonitor());
         Modules.get().add(new HighwayTools());
 
+        LOG.info("[THM/Init] Modules registered; registering commands and HUD");
+
         //Commands
         Commands.add(new Center());
         Commands.add(new EclipCommand());
@@ -232,6 +236,8 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Hud.get().register(PlayerListHud.INFO);
         Hud.get().register(PacketsHud.INFO);
 
+        LOG.info("[THM/Init] Commands and HUD registered; registering themes");
+
         //Themes
         GuiThemes.add(DarkTheme.INSTANCE);
         GuiThemes.add(SnowyTheme.INSTANCE);
@@ -244,7 +250,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
 
         //System/Tab
         Tabs.add(new THMTab());
-
+        LOG.info("[THM/Init] Addon registration complete; themes/tab registered, bozeLoaded={}", loader.isModLoaded("boze-loader"));
 
     }
 

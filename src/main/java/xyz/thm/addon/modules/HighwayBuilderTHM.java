@@ -1783,6 +1783,7 @@ public class HighwayBuilderTHM extends Module {
     private boolean tpsSafetyCenterOwned;
     private BlockPos tpsSafetyEnclosureAnchor;
     private final ArrayDeque<BlockPos> tpsSafetyEnclosureTargets = new ArrayDeque<>();
+    private final Set<BlockPos> tpsSafetyPlacedBlocks = new LinkedHashSet<>();
     private int enclosurePlaceCreditTenths;
     private final Set<BlockPos> countedBrokenForwardPositions = new HashSet<>();
     private final Set<BlockPos> countedPlacedForwardPositions = new HashSet<>();
@@ -1794,6 +1795,7 @@ public class HighwayBuilderTHM extends Module {
     private final ForwardSchedulerRuntime forwardSchedulerRuntime = new ForwardSchedulerRuntime();
     private int invalidRestockRecoveryRetries;
     private boolean invalidRestockRecoveryPending;
+    private boolean hotbarManagerPausedForTrash;
     private boolean kitbotUpdateOnFinishActive;
     private long kitbotUpdateOnFinishStartTick;
     private boolean kitbotUpdateOnFinishTpAccepted;
@@ -4771,6 +4773,7 @@ public class HighwayBuilderTHM extends Module {
             if (debugLog.get()) tickDebug("idle: tps throttle paused (%s, sampledTps=%s)", tpsThrottlePauseReason, formatTpsThrottleSample(tpsThrottleSampledTps));
             return;
         }
+        if (tickTpsSafetyCleanup()) return;
 
         if (statuslog.get()) {
             statusLogTimer++;
@@ -6626,6 +6629,7 @@ public class HighwayBuilderTHM extends Module {
     private void clearSafetyRuntime(String reason) {
         safetyPlacedThisTick = false;
         clearTpsSafetyEnclosureRuntime(reason, true);
+        tpsSafetyPlacedBlocks.clear();
     }
 
     private boolean tickTpsSafetyEnclosureDuringPause() {
@@ -6675,19 +6679,16 @@ public class HighwayBuilderTHM extends Module {
         tpsSafetyEnclosureAnchor = mc.player.blockPosition().immutable();
         tpsSafetyEnclosureTargets.clear();
 
-        addTpsSafetyPillar(tpsSafetyEnclosureAnchor.north());
-        addTpsSafetyPillar(tpsSafetyEnclosureAnchor.south());
-        addTpsSafetyPillar(tpsSafetyEnclosureAnchor.east());
-        addTpsSafetyPillar(tpsSafetyEnclosureAnchor.west());
+        tpsSafetyEnclosureTargets.addAll(tpsSafetyTargets(tpsSafetyEnclosureAnchor));
 
         if (debugLog.get()) {
             highwayDebug("HB TPS safety enclosure anchor=%s targets=%d.", formatBlockPos(tpsSafetyEnclosureAnchor), tpsSafetyEnclosureTargets.size());
         }
     }
 
-    private void addTpsSafetyPillar(BlockPos base) {
-        tpsSafetyEnclosureTargets.add(base.immutable());
-        tpsSafetyEnclosureTargets.add(base.above().immutable());
+    static List<BlockPos> tpsSafetyTargets(BlockPos anchor) {
+        return List.of(anchor.north(), anchor.north().above(), anchor.south(), anchor.south().above(),
+            anchor.east(), anchor.east().above(), anchor.west(), anchor.west().above());
     }
 
     private void placeNextTpsSafetyEnclosureBlock() {
@@ -6697,7 +6698,7 @@ public class HighwayBuilderTHM extends Module {
             BlockPos target = tpsSafetyEnclosureTargets.pollFirst();
             if (!isSafetyPlacementCandidate(target)) continue;
 
-            int slot = findSafetyBlockHotbarSlot();
+            int slot = State.Forward.findAndMoveToHotbar(this, stack -> stack.is(Items.NETHERRACK), false);
             if (slot == -1) {
                 tpsSafetyEnclosureTargets.addFirst(target);
                 if (debugLog.get()) highwayDebug("HB TPS safety enclosure waiting: no non-hard-fail block slot.");
@@ -6705,16 +6706,46 @@ public class HighwayBuilderTHM extends Module {
             }
             if (!canSafetyPlaceBlockAt(target, slot)) continue;
 
-            if (trySafetyAirPlaceBlock(target, slot, "tps-enclosure")) {
+            if (BlockUtils.place(target, new FindItemResult(slot, mc.player.getInventory().getItem(slot).getCount()),
+                rotation.get().place, 0, true, true, true)) {
+                safetyPlacedThisTick = true;
+                tpsSafetyPlacedBlocks.add(target);
                 if (debugLog.get()) highwayDebug("HB TPS safety enclosure placed %s.", formatBlockPos(target));
                 return;
             }
+            tpsSafetyEnclosureTargets.addFirst(target);
+            return;
         }
 
         if (debugLog.get()) highwayDebug("HB TPS safety enclosure completed.");
         tpsSafetyEnclosureActive = false;
         tpsSafetyCenterOwned = false;
         tpsSafetyEnclosureAnchor = null;
+    }
+
+    private boolean tickTpsSafetyCleanup() {
+        if (tpsSafetyPlacedBlocks.isEmpty() || state != State.Forward || suspended) return false;
+        input.stop();
+        for (Iterator<BlockPos> it = tpsSafetyPlacedBlocks.iterator(); it.hasNext();) {
+            BlockPos target = it.next();
+            BlockState block = mc.level.getBlockState(target);
+            if (!block.is(Blocks.NETHERRACK) || !isWithinConfiguredForwardRange(target)) {
+                it.remove();
+                continue;
+            }
+            if (breakTimer > 0) {
+                breakTimer--;
+                return true;
+            }
+            int slot = State.Forward.findAndMoveBestToolToHotbar(this, block, false, false);
+            if (slot == -1) return true;
+            InvUtils.swap(slot, false);
+            if (rotation.get().mine) Rotations.rotate(Rotations.getYaw(target), Rotations.getPitch(target), () -> BlockUtils.breakBlock(target, true));
+            else BlockUtils.breakBlock(target, true);
+            breakTimer = breakDelay.get();
+            return true;
+        }
+        return false;
     }
 
     private boolean tryFallSaveAirPlace() {
@@ -7625,6 +7656,7 @@ public class HighwayBuilderTHM extends Module {
         if (slotId < 0) return false;
         ItemStack source = mc.player.getInventory().getItem(slot);
         ItemStack offhand = mc.player.getOffhandItem();
+        ItemStack expected = source.copy();
         if (!source.isEmpty() && ItemStack.isSameItemSameComponents(source, offhand)) {
             if (mc.player.containerMenu != mc.player.inventoryMenu
                 || !mc.player.containerMenu.getCarried().isEmpty()) return false;
@@ -7634,7 +7666,7 @@ public class HighwayBuilderTHM extends Module {
             mc.gameMode.handleContainerInput(mc.player.containerMenu.containerId,
                 slotId, SlotUtils.OFFHAND, ContainerInput.SWAP, mc.player);
         }
-        return true;
+        return ItemStack.isSameItemSameComponents(expected, mc.player.getOffhandItem());
     }
 
     private boolean isRestockEnclosureOffhandState(State candidate) {
@@ -8071,6 +8103,10 @@ public class HighwayBuilderTHM extends Module {
             case Center, ThrowOutTrash, Restock, WaitForRestockBlockadeTeardown, PlaceShulkerBlockade, MineShulkerBlockade, PlaceEChestBlockade, MineEChestBlockade, MineEnderChests, KitbotOrder -> true;
             default -> false;
         };
+    }
+
+    public boolean ownsRestockInventory() {
+        return isActive() && (restockTask.isSequenceActive() || isRestockState(state));
     }
 
     private String stateName(State state) {
@@ -11608,33 +11644,31 @@ public class HighwayBuilderTHM extends Module {
 
     private boolean isHotbarSlotReservedByManager(int hotbarSlot) {
         if (hotbarSlot < 0 || hotbarSlot >= 9) return false;
-        if (!hotbarmanager.get()) return false;
 
         HotbarManager manager = Modules.get().get(HotbarManager.class);
-        return manager != null && manager.isActive() && manager.managesSlot(hotbarSlot);
+        return manager != null && (manager.isActive() || hotbarManagerPausedForTrash) && manager.managesSlot(hotbarSlot);
     }
 
     private boolean isHotbarSlotConfiguredByManager(int hotbarSlot) {
         if (hotbarSlot < 0 || hotbarSlot >= 9) return false;
-        if (!hotbarmanager.get()) return false;
 
         HotbarManager manager = Modules.get().get(HotbarManager.class);
-        return manager != null && manager.managesSlot(hotbarSlot);
+        return manager != null && (manager.isActive() || hotbarManagerPausedForTrash) && manager.managesSlot(hotbarSlot);
     }
 
     private boolean disableHotbarManagerForTrash(String reason) {
-        if (!hotbarmanager.get()) return false;
-
         HotbarManager manager = Modules.get().get(HotbarManager.class);
         if (manager == null || !manager.isActive()) return false;
 
         manager.toggle();
+        hotbarManagerPausedForTrash = true;
         if (restockDebugLog.get()) restockDebug("ThrowOutTrash paused HotbarManager (%s).", reason);
         return true;
     }
 
     private void restoreHotbarManagerAfterTrash(String reason) {
-        if (!hotbarmanager.get()) return;
+        if (!hotbarManagerPausedForTrash) return;
+        hotbarManagerPausedForTrash = false;
 
         HotbarManager manager = Modules.get().get(HotbarManager.class);
         if (manager == null || manager.isActive()) return;
@@ -11769,10 +11803,9 @@ public class HighwayBuilderTHM extends Module {
 
     private int getPreferredManagedHotbarSlot(Item item) {
         if (item == null || item == Items.AIR) return -1;
-        if (!hotbarmanager.get()) return -1;
 
         HotbarManager manager = Modules.get().get(HotbarManager.class);
-        if (manager == null || !manager.isActive()) return -1;
+        if (manager == null || (!manager.isActive() && !hotbarManagerPausedForTrash)) return -1;
 
         for (int i = 0; i < 9; i++) {
             if (manager.managesSlot(i) && manager.getManagedItem(i) == item) return i;
@@ -14990,9 +15023,21 @@ public class HighwayBuilderTHM extends Module {
                 else {
                     // Place ender chest. With offhand-build they sit in the offhand, which the inventory
                     // search never looks at: without this the phase sees none and ends without placing.
-                    boolean fromOffhand = b.noSwapLoadout.get() && b.offhandHoldsEnderChest();
-                    if (b.noSwapLoadout.get() && !fromOffhand) return;
-                    int slot = fromOffhand ? SlotUtils.OFFHAND : findAndMoveToHotbar(b, itemStack -> itemStack.getItem() == Items.ENDER_CHEST);
+                    boolean fromOffhand = b.offhandHoldsEnderChest();
+                    if (b.noSwapLoadout.get() && !fromOffhand) {
+                        if (b.noSwapShouldHoldTotem()) {
+                            b.restockWatchdog.pauseHeartbeat("echest-offhand-totem");
+                            return;
+                        }
+                        FindItemResult chest = InvUtils.find(stack -> stack.is(Items.ENDER_CHEST), 0, 35);
+                        if (chest.found()) {
+                            if (!b.moveLoadoutToOffhand(chest.slot())) return;
+                            fromOffhand = b.offhandHoldsEnderChest();
+                            if (!fromOffhand) return;
+                        }
+                    }
+                    int slot = fromOffhand ? SlotUtils.OFFHAND : b.noSwapLoadout.get() ? -1
+                        : findAndMoveToHotbar(b, itemStack -> itemStack.is(Items.ENDER_CHEST));
                     RestockTask.RestockSession session = b.restockTask.getSession();
                     int minimumRemainingEChests = session != null ? session.saveEchestsReserve : b.saveEchests.get();
                     if (slot == -1 || countItem(b, stack -> stack.getItem().equals(Items.ENDER_CHEST)) <= minimumRemainingEChests) {
@@ -18294,6 +18339,11 @@ public class HighwayBuilderTHM extends Module {
             // Check hotbar
             int slot = findSlot(b, predicate, true);
             if (slot != -1) {
+                int preferred = b.getPreferredManagedHotbarSlot(b.mc.player.getInventory().getItem(slot).getItem());
+                if (preferred != -1 && preferred != slot) {
+                    if (!swapInventoryToHotbar(b, slot, preferred)) return -1;
+                    slot = preferred;
+                }
                 if (b.restockDebugLog.get()) b.restockDebug("findAndMoveToHotbar found matching item already in hotbar slot %d.", slot);
                 return slot;
             }
@@ -18447,10 +18497,8 @@ public class HighwayBuilderTHM extends Module {
                 }
             }
 
-            // Check if the tool is already in hotbar
-            if (bestSlot < 9) return bestSlot;
-
             int hotbarSlot = b.getPreferredManagedHotbarSlot(bestStack.getItem());
+            if (bestSlot < 9 && (hotbarSlot == -1 || hotbarSlot == bestSlot)) return bestSlot;
             if (hotbarSlot != -1) {
                 if (b.restockDebugLog.get()) {
                     b.restockDebug("findAndMoveBestToolToHotbar using HotbarManager slot %d for managed item %s.",

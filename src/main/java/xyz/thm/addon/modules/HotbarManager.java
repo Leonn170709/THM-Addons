@@ -19,6 +19,7 @@ import meteordevelopment.meteorclient.gui.widgets.containers.WTable;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.world.TickRate;
@@ -115,6 +116,8 @@ public class HotbarManager extends Module {
     private void onTick(TickEvent.Post event) {
         if (mc.player == null) return;
         if (!mc.player.containerMenu.getCarried().isEmpty()) return;
+        HighwayBuilderTHM builder = Modules.get().get(HighwayBuilderTHM.class);
+        if (builder != null && builder.ownsRestockInventory()) return;
         if ((ticksLeft -= TickRate.INSTANCE.getTickRate() / 20.0) > 0.0) return;
 
         int highestSlot = -1;
@@ -129,7 +132,7 @@ public class HotbarManager extends Module {
             if (slotItem != Items.AIR && !replace.get()) continue;
             if (slotItem == targetItem) continue;
 
-            FindItemResult result = InvUtils.find(stack -> stack.getItem() == targetItem, i, 35);
+            FindItemResult result = InvUtils.find(stack -> stack.getItem() == targetItem, 0, 35);
             if (!result.found()) continue;
 
             InvUtils.move().from(result.slot()).to(i);

@@ -11,9 +11,7 @@ import java.util.Set;
 import java.util.WeakHashMap;
 import net.minecraft.client.gui.components.AbstractWidget;
 
-// Marks which vanilla ClickableWidgets TitleScreenMenuMixin has repositioned into the THM
-// window frame, so ButtonWidgetStyleMixin knows which buttons to re-skin (and leaves every
-// other screen's buttons - options, pause menu, etc. - untouched).
+// Marks THM menu widgets without changing other screens' buttons.
 public class ThmStyledButtons {
     private static final Set<AbstractWidget> styled = Collections.newSetFromMap(new WeakHashMap<>());
 

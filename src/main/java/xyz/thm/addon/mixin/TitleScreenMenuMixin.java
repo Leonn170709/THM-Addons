@@ -9,33 +9,22 @@ package xyz.thm.addon.mixin;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.components.AbstractWidget;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.LogoRenderer;
 import net.minecraft.client.gui.components.SplashRenderer;
-import net.minecraft.client.gui.components.SpriteIconButton;
-import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.input.MouseButtonEvent;
-import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
-import net.minecraft.util.Mth;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
+import xyz.thm.addon.THMAddon;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import xyz.thm.addon.gui.MainMenuFx;
-import xyz.thm.addon.gui.MainMenuSettingsScreen;
-import xyz.thm.addon.gui.ThmStyledButtons;
-import xyz.thm.addon.shaders.ShaderBackground;
-import xyz.thm.addon.shaders.ShaderManager;
 import xyz.thm.addon.system.THMSystem;
-
-import java.util.ArrayList;
-import java.util.List;
 
 // Reuses vanilla's own buttons (so their click handlers stay untouched) but moves them into
 // a BleachHack-styled window frame (see MainMenuFx) instead of vanilla's default layout, and
@@ -44,75 +33,31 @@ import java.util.List;
 // that matters.
 @Mixin(TitleScreen.class)
 public abstract class TitleScreenMenuMixin extends Screen {
+    @Unique private boolean thm$renderEntered;
+    @Unique private int thm$chromeLogState = -1;
 
     protected TitleScreenMenuMixin(Component title) {
         super(title);
     }
 
-    @Inject(method = "init", at = @At("TAIL"))
-    private void thm$layoutWindow(CallbackInfo ci) {
-        ShaderManager.reroll();
-
-        if (THMSystem.get().mainMenuWindow.get()) {
-            int[] bounds = MainMenuFx.windowBounds(this.width, this.height);
-            int x1 = bounds[0], y1 = bounds[1], x2 = bounds[2], y2 = bounds[3];
-            int h = y2 - y1;
-            int centerX = x1 + (x2 - x1) / 2;
-            int maxY = y1 + Mth.clamp(h / 4 + 119, 0, h - 22);
-
-            thm$repositionByLabel("menu.singleplayer", centerX - 100, y1 + h / 4 + 38);
-            thm$repositionByLabel("menu.multiplayer", centerX - 100, y1 + h / 4 + 62);
-            thm$repositionByLabel("menu.online", centerX - 100, y1 + h / 4 + 86);
-            thm$repositionByLabel("menu.options", centerX - 100, maxY);
-            thm$repositionByLabel("menu.quit", centerX + 2, maxY);
-
-            List<SpriteIconButton> iconButtons = new ArrayList<>();
-            for (GuiEventListener el : this.children()) {
-                if (el instanceof SpriteIconButton icon) iconButtons.add(icon);
-            }
-            // Icon-only buttons (language/accessibility) keep their vanilla look - just repositioned,
-            // not re-skinned, since BleachHack's own recreation doesn't have icon buttons either.
-            if (!iconButtons.isEmpty()) iconButtons.get(0).setPosition(centerX - 124, maxY);
-            if (iconButtons.size() > 1) iconButtons.get(1).setPosition(centerX + 104, maxY);
-        }
-
-        // The "THM Menu" button is the only way into the settings screen (which now also hosts the
-        // shader preview toggle), so it lives in the bottom-left corner - always reachable
-        // regardless of window on/off.
-        AbstractWidget menuButton = this.addRenderableWidget(Button.builder(Component.literal("THM Menu"), b ->
-                this.minecraft.gui.setScreen(new MainMenuSettingsScreen(this)))
-            .bounds(6, this.height - 22, 90, 16)
-            .build());
-        ThmStyledButtons.mark(menuButton);
-
-        // Preview mode strips everything down to the raw shader; the toggle to *enter* it lives in
-        // the settings screen, but the exit has to live here since that screen is hidden meanwhile.
-        if (MainMenuFx.previewMode) {
-            AbstractWidget showUi = this.addRenderableWidget(Button.builder(Component.literal("Show UI"), b -> {
-                    MainMenuFx.previewMode = false;
-                    this.minecraft.gui.setScreen(new MainMenuSettingsScreen(this));
-                })
-                .bounds(6, this.height - 22, 90, 16)
-                .build());
-            ThmStyledButtons.mark(showUi);
-
-            for (GuiEventListener el : this.children()) {
-                if (el instanceof AbstractWidget widget && widget != showUi) {
-                    widget.visible = false;
-                }
-            }
-        }
+    @Inject(method = "init", at = @At("HEAD"))
+    private void thm$logInitEntry(CallbackInfo ci) {
+        thm$renderEntered = false;
+        thm$chromeLogState = -1;
+        THMAddon.LOG.info("[THM/Menu] TitleScreenMenuMixin.init entered; screen={}, size={}x{}, systemReady={}",
+            this.getClass().getName(), this.width, this.height, THMSystem.get() != null);
     }
 
-    private void thm$repositionByLabel(String i18nKey, int x, int y) {
-        String label = I18n.get(i18nKey);
-        for (GuiEventListener el : this.children()) {
-            if (el instanceof AbstractWidget widget && widget.getMessage().getString().equals(label)) {
-                widget.setPosition(x, y);
-                ThmStyledButtons.mark(widget);
-                return;
-            }
-        }
+    @Inject(method = "extractRenderState", at = @At("HEAD"))
+    private void thm$logRenderEntry(GuiGraphicsExtractor context, int mouseX, int mouseY, float deltaTicks, CallbackInfo ci) {
+        if (thm$renderEntered) return;
+        thm$renderEntered = true;
+        THMAddon.LOG.info("[THM/Menu] TitleScreenMenuMixin.extractRenderState entered; screen={}", this.getClass().getName());
+    }
+
+    @Inject(method = "init", at = @At("TAIL"))
+    private void thm$logInitReturn(CallbackInfo ci) {
+        THMAddon.LOG.info("[THM/Menu] TitleScreenMenuMixin.init tail reached; children={}, outer setup follows", this.children().size());
     }
 
     // Chrome is drawn before super.render() (which draws the buttons) so the buttons sit on
@@ -120,12 +65,13 @@ public abstract class TitleScreenMenuMixin extends Screen {
     // ScreenMixin (every world-not-loaded screen, not just this one).
     @Inject(method = "extractRenderState", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/screens/Screen;extractRenderState(Lnet/minecraft/client/gui/GuiGraphicsExtractor;IIF)V"))
     private void thm$renderWindowChrome(GuiGraphicsExtractor context, int mouseX, int mouseY, float deltaTicks, CallbackInfo ci) {
-        if (MainMenuFx.previewMode) return;
-
-        if (THMSystem.get().mainMenuWindow.get()) {
-            int[] bounds = MainMenuFx.windowBounds(this.width, this.height);
-            ShaderBackground.requestBlurredRegion(bounds[0], bounds[1], bounds[2], bounds[3], THMSystem.get().mainMenuBlur.get());
+        int state = (THMSystem.get().mainMenuWindow.get() ? 1 : 0) | (MainMenuFx.previewMode ? 2 : 0);
+        if (state != thm$chromeLogState) {
+            thm$chromeLogState = state;
+            THMAddon.LOG.info("[THM/Menu] TitleScreenMenuMixin.chrome hook reached; window={}, preview={}, action={}",
+                (state & 1) != 0, MainMenuFx.previewMode, MainMenuFx.previewMode ? "skip preview" : (state & 1) != 0 ? "draw window" : "skip disabled window");
         }
+        if (MainMenuFx.previewMode) return;
 
         MainMenuFx.renderWindow(context, this.font, this.width, this.height);
     }
@@ -135,7 +81,7 @@ public abstract class TitleScreenMenuMixin extends Screen {
     // nothing to go "back" to). "_" doesn't touch the actual OS window - it minimizes the THM
     // window itself (turns mainMenuWindow off and relayouts back to vanilla's own button
     // positions), same as BleachHack's own click-gui panels collapsing rather than iconifying
-    // the game. The always-present "THM Menu" button (see thm$layoutWindow) is what brings it
+    // the game. The always-present "THM Menu" button (see ScreenMixin) is what brings it
     // back afterwards.
     @Inject(method = "mouseClicked", at = @At("HEAD"), cancellable = true)
     private void thm$handleChromeClick(MouseButtonEvent click, boolean doubled, CallbackInfoReturnable<Boolean> cir) {

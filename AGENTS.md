@@ -125,6 +125,11 @@ startup, so `THMHwyMonitor` and `HighwayTools` are registered without a separate
 Highway", `THMAddon.PVP` = "THM PVP") via `onRegisterCategories()`. `THMTab` is a separate,
 addon-specific settings screen — don't confuse the two when adding a new module's config surface.
 
+**Main-menu diagnostics:** `[THM/Init]` logs addon registration stages; `[THM/Menu]` logs screen and shader hooks. Menu setup runs after outer `Screen.init`, resize, and widget rebuild, since other clients can cancel inner `TitleScreen.init`. Keep setup idempotent and render logging limited to first use or state changes.
+
+Background shaders use a cached texture with separate resolution/FPS settings in THM Menu. Keep shader updates independent of GUI frame rate and invalidate the texture on shader or size changes.
+Apply title-window blur in the panorama callback after the background draw; an earlier GUI pass can reach `prepare()` before the background exists.
+
 **Rendering:** Every render call goes through the THM helpers — never `event.renderer.*` or
 `Renderer2D` directly, so the optimizations live in one place:
 - `utils/RenderUtilsTHM` — blocks, boxes, lines, tracers, entity boxes, fade/pulse/shrink modes,

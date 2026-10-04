@@ -388,7 +388,7 @@ public class Speedmine extends Module {
 
         clientTick++;
         long now = System.currentTimeMillis();
-        startCredit = Math.min(1, startCredit + serverTicks(now - lastStartCreditMs, effectiveTps()));
+        startCredit = replenishStartCredit(startCredit, now - lastStartCreditMs, effectiveTps());
         lastStartCreditMs = now;
         pendingBreaks.removeIf(pending -> now >= pending.deadlineMs());
 
@@ -420,7 +420,7 @@ public class Speedmine extends Module {
         if (lastBrokenPos != null
                 && autoRebreak.get() && lastBreakConfirmed
                 && primary == null && secondary == null
-                && (!tpsSync.get() || startCredit >= 1)
+                && canStart()
                 && !outOfRange(lastBrokenPos)
                 && BlockUtils.canBreak(lastBrokenPos, mc.level.getBlockState(lastBrokenPos))) {
             handleBlockClick(lastBrokenPos, mc.level.getBlockState(lastBrokenPos));
@@ -483,7 +483,7 @@ public class Speedmine extends Module {
             return;
         }
 
-        if (tpsSync.get() && startCredit < 1) {
+        if (!canStart()) {
             queue.addLast(pos.immutable());
             return;
         }
@@ -493,7 +493,7 @@ public class Speedmine extends Module {
             ctx.rebreak = true;
             if (ctx.instaBreak) sendStart(ctx);
             else {
-                if (tpsSync.get()) startCredit--;
+                if (tpsSync.get()) startCredit = Math.max(0, startCredit - 1);
                 finishBreak(ctx, silentSwap.get());
             }
             return;
@@ -526,7 +526,7 @@ public class Speedmine extends Module {
     }
 
     private void drainQueue() {
-        if (hasPendingNormalBreak() || queue.isEmpty() || (tpsSync.get() && startCredit < 1)) return;
+        if (hasPendingNormalBreak() || queue.isEmpty() || !canStart()) return;
 
         if (primary == null || (doubleBreak.get() && secondary == null)) {
             BlockPos pos = queue.pollFirst();
@@ -539,7 +539,7 @@ public class Speedmine extends Module {
     private void sendStart(MineContext ctx) {
         if (!ctx.pos.equals(lastStartedPos)) lastBreakConfirmed = false;
         lastStartedPos = ctx.pos;
-        if (tpsSync.get()) startCredit--;
+        if (tpsSync.get()) startCredit = Math.max(0, startCredit - 1);
         if (rotate.get()) lookAt(ctx.pos);
         withMiningTool(ctx, silentSwap.get(), () -> {
             if (grimBypass.get()) {
@@ -885,6 +885,19 @@ public class Speedmine extends Module {
 
     private float effectiveTps() {
         return tpsSync.get() ? TickRate.INSTANCE.getTickRate() : 20;
+    }
+
+    private boolean canStart() {
+        return canStart(tpsSync.get(), effectiveTps(), startCredit);
+    }
+
+    static boolean canStart(boolean sync, float tps, double credit) {
+        return !sync || !Float.isFinite(tps) || tps >= 20 || credit >= 1;
+    }
+
+    static double replenishStartCredit(double credit, long elapsedMillis, float tps) {
+        // Retain fractional overflow so tick jitter does not discard earned starts.
+        return Math.min(2, credit + serverTicks(elapsedMillis, tps));
     }
 
     static double serverTicks(long elapsedMillis, float tps) {
