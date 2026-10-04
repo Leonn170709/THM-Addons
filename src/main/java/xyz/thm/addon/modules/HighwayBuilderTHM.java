@@ -927,18 +927,21 @@ public class HighwayBuilderTHM extends Module {
         .description("Keeps the THM Speedmine module (PVP category) active while this runs.")
         .defaultValue(false)
         .onChanged(value -> {
-            if (value && Speedmine.INSTANCE != null && !Speedmine.INSTANCE.isActive()) Speedmine.INSTANCE.toggle();
+            if (value && Speedmine.INSTANCE != null) {
+                Speedmine.INSTANCE.clientPrediction.set(!this.thmSpeedmineValidateBlock.get());
+                if (!Speedmine.INSTANCE.isActive()) Speedmine.INSTANCE.toggle();
+            }
         })
         .build()
     );
 
     private final Setting<Boolean> thmSpeedmineValidateBlock = sgDigging.add(new BoolSetting.Builder()
         .name("validate-block")
-        .description("Sets THM Speedmine's own Validate Break setting.")
+        .description("Disable THM Speedmine client prediction.")
         .defaultValue(false)
         .visible(alwaysUseThmSpeedmine::get)
         .onChanged(value -> {
-            if (Speedmine.INSTANCE != null) Speedmine.INSTANCE.validateBreak.set(value);
+            if (alwaysUseThmSpeedmine.get() && Speedmine.INSTANCE != null) Speedmine.INSTANCE.clientPrediction.set(!value);
         })
         .build()
     );

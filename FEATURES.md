@@ -21,7 +21,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 
 ## Mining and Building
 - `tunnel-miner` — Mines a tunnel block-by-block to target XZ coordinates at the same Y.
-- `Speedmine` — Mines blocks faster.
+- `Speedmine`: Packet mining with selectable instant/rebreak swap timing, automatic normal-break tool hold, TPS sync, and client prediction.
 - `BlockCounter` — Counts the selected blocks.
 - `Better-echest-farmer` — Better echest farmer that uses instant rebreak exploit.
 - `sign-render` — Renders sign text through walls with advanced clustering.
@@ -48,7 +48,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 ## PvP
 - `auto-trap+` — Traps a target player. Adds an optional anti-cheat friendly support placement mode.
 - `surround-plus` — Surrounds feet with Obsidian using strict logic.
-- `phase` — Allows player to phase through solid blocks using ender pearls.
+- `phase`: Pearl phasing with optional head-level self-web placement.
 - `anti-phase` — Places scaffolding inside players so their pearls land instead of phasing them.
 - `AutoConcrete` — Drops falling blocks above enemies' heads.
 - `AntiConcrete` — Places a button under yourself when enemies are nearby or dropping blocks above you.

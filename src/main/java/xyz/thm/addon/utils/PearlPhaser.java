@@ -173,6 +173,11 @@ public class PearlPhaser {
      * setting doesn't apply.
      */
     public void throwPearl(Vec3 aim) {
+        throwPearl(aim, false);
+    }
+
+    /** Keep scaffolding intact when the owner uses a head cobweb. */
+    public void throwPearl(Vec3 aim, boolean keepScaffolding) {
         int pearlSlot = PlacementUtils.getEnderPearlSlot();
         if (pearlSlot == -1 || mc.player.getCooldowns().isOnCooldown(Items.ENDER_PEARL.getDefaultInstance())) {
             return;
@@ -192,7 +197,7 @@ public class PearlPhaser {
             throwPitch = pitch.get();
         }
 
-        if (antiAntiPhase.get()) {
+        if (antiAntiPhase.get() && !keepScaffolding) {
             breakScaffolding();
         }
         if (on(attack)) {

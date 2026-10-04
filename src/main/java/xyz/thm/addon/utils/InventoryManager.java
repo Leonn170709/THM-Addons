@@ -118,6 +118,15 @@ public class InventoryManager {
     }
     @EventHandler
     public void onDisconnect(GameLeftEvent event) {
+        serverSlot = -1;
+        sendingPacket = false;
+        isEating = false;
+        currentPriority = Priority.NORMAL;
+        swapData.clear();
+        lastSwapOriginalSlot = -1;
+        lastSwapBufferSlot = -1;
+        lastSwapOriginalServerSlot = -1;
+        lastSwapOriginalClientSlot = -1;
         Arrays.fill(transactions, -1);
         transactionIndex = 0;
         isGrim = false;

@@ -6,6 +6,15 @@
 
 # 26.2 port gotchas
 
+- Vanilla handles primary STOP immediately at progress >= 0.7, but the delayed secondary completes in `ServerPlayerGameMode.tick()` with the tool held then. Secondary STOP after a new START may target a different `destroyPos` and be ignored. Normal mining therefore retains its tool through confirmation in every swap mode; fast swap timing applies to instant/primed breaks. Prioritize the delayed secondary tool, but send the primary STOP at its own threshold. Track both pending confirmations; waiting for the secondary before finishing the primary delays double-break.
+
+- Speedmine's Keep mode checks after tick placements and holds through the next client tick. A replacement keeps the tool even while TPS throttling delays its STOP. Same Tick wraps selection/mining/restoration in one call; End of Tick restores in `TickEvent.Post`; Tool Hold preserves the confirmation wait. Meteor enum values serialize their `toString()` labels, so legacy `tool-hold` migration must write those labels.
+
+- Speedmine now exposes only `client-prediction` for local removal. Legacy `instant-client-remove=true` or `validate-break=false` migrates to prediction on; `remove-slow-blocks` is retired. Mining packets use the best hotbar tool. Keep/end-of-tick reuse a retained selection only when the shared server-slot tracker still matches. Prediction cannot make a ghost placement exist on the server.
+
+- Silent miners must compare against `InventoryManager.getServerSlot()`, because other modules and vanilla can change it. Tool Hold waits for server confirmation; client-side air does not confirm a break. A rebreak STOP uses the position retained by the last server START, so starting another position invalidates that primed rebreak.
+- Client block prediction must call `ClientLevel.setBlock` inside the same `startPrediction` callback as its mining packet. Setting air after that scope closes bypasses vanilla acknowledgement/correction tracking. TPS sync scales elapsed progress and packet cadence; START already contributes one server tick of mining progress.
+
 - Offhand supplies belong to the whole restock sequence, including recovery states. Refilling obsidian outside `MineEnderChests` can displace its chest stack. `PICKUP` moves require an empty cursor, and chest menus expose no offhand slot; use `ContainerInput.SWAP` with button `SlotUtils.OFFHAND` for different items, and merge matching stacks only in the player inventory with an empty cursor.
 - `migrateMappings` changed known Yarn names to Mojang names. It did not port changed Minecraft, Fabric, or Meteor APIs. Wildcard imports and mixin targets need manual review. Run it only in an isolated checkout: a failed run previously removed its input directory.
 - Minecraft 26.2 uses Java 25 and the non-remapping Fabric Loom plugin. There is no Yarn dependency or `mappings(...)` entry in this branch. The Gradle daemon JVM criteria requests Java 25.
