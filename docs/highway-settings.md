@@ -38,6 +38,8 @@ TPS safety enclosures also use Netherrack. After TPS recovers, the builder remov
 
 An active HotbarManager keeps priority for configured slots, even with `Manage-hotbar` off. Its sorting waits during restocking while HighwayBuilder uses those slots directly.
 
+Restock cleanup keeps the held tool when another tool has the same mining score. Offhand and packet-build loadouts let the restock state control the main hand while containers are being removed.
+
 Offhand restocks keep their supplies through recovery instead of refilling with obsidian. Chest,
 totem and tool swaps work with a full inventory, including `minimum-empty-slots` set to `0`.
 

@@ -10,10 +10,51 @@ import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class HighwayBuilderTHMTest {
+    @Test
+    void equalPickaxesStopMovingAfterTheFirstManagedSlotSwap() {
+        String[] inventory = new String[36];
+        inventory[1] = "pickaxe-a";
+        inventory[7] = "pickaxe-b";
+        int selected = 4;
+        int swaps = 0;
+        for (int tick = 0; tick < 100; tick++) {
+            int best = HighwayBuilderTHM.selectBestMiningTool(inventory.length, selected,
+                i -> inventory[i] == null ? -1 : 8);
+            if (best != 7) {
+                String displaced = inventory[7];
+                inventory[7] = inventory[best];
+                inventory[best] = displaced;
+                swaps++;
+            }
+            selected = 7;
+        }
+        assertEquals(1, swaps);
+        assertEquals("pickaxe-a", inventory[7]);
+    }
+
+    @Test
+    void strongerToolStillReplacesHeldTool() {
+        double[] scores = new double[36];
+        Arrays.fill(scores, -1);
+        scores[7] = 8;
+        scores[12] = 10;
+        assertEquals(12, HighwayBuilderTHM.selectBestMiningTool(scores.length, 7, i -> scores[i]));
+    }
+
+    @Test
+    void excludedHeldToolDoesNotWinAndNoEligibleToolReturnsMissing() {
+        double[] scores = new double[36];
+        Arrays.fill(scores, -1);
+        assertEquals(-1, HighwayBuilderTHM.selectBestMiningTool(scores.length, 7, i -> scores[i]));
+        scores[12] = 8;
+        assertEquals(12, HighwayBuilderTHM.selectBestMiningTool(scores.length, 7, i -> scores[i]));
+    }
+
     @Test
     void safetyEnclosureCoversAllFourSidesAtFeetAndHeadWithoutTouchingFloor() {
         BlockPos anchor = new BlockPos(-17, 119, 23);

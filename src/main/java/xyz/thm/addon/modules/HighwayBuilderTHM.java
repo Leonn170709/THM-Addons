@@ -168,6 +168,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
+import java.util.function.IntToDoubleFunction;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -7647,7 +7648,7 @@ public class HighwayBuilderTHM extends Module {
             restockOffhandBlocksIfLow();
         }
 
-        ensurePickaxeInMainHand();
+        if (!ownsRestockInventory() || wantsEnderChestOffhand()) ensurePickaxeInMainHand();
     }
 
     private boolean moveLoadoutToOffhand(int slot) {
@@ -7738,7 +7739,7 @@ public class HighwayBuilderTHM extends Module {
 
     /** Feature: while packet-build paving, rest with obsidian actually held in the main hand. */
     private void tickPacketBuildMainHandObby() {
-        if (!packetBuild.get() || noSwapLoadout.get() || mc.player == null) return;
+        if (!packetBuild.get() || noSwapLoadout.get() || mc.player == null || ownsRestockInventory()) return;
         ItemStack held = mc.player.getInventory().getItem(mc.player.getInventory().getSelectedSlot());
         if (held.getItem() instanceof BlockItem bi && blocksToPlace.get().contains(bi.getBlock())) return;
         FindItemResult obby = InvUtils.findInHotbar(
@@ -11827,7 +11828,8 @@ public class HighwayBuilderTHM extends Module {
 
         BlockState state = mc.level.getBlockState(bp);
         int toolSlot = findAndMoveBestToolToHotbarForSharedUtility(state, noSilkTouch, failHardNoHotbar);
-        if (toolSlot != -1 && toolSlot != mc.player.getInventory().getSelectedSlot()) InvUtils.swap(toolSlot, false);
+        if (toolSlot == -1) return -1;
+        if (toolSlot != mc.player.getInventory().getSelectedSlot()) InvUtils.swap(toolSlot, false);
 
         if (rotation.get().mine) Rotations.rotate(Rotations.getYaw(bp), Rotations.getPitch(bp), () -> BlockUtils.breakBlock(bp, true));
         else BlockUtils.breakBlock(bp, true);
@@ -12218,18 +12220,22 @@ public class HighwayBuilderTHM extends Module {
         if (mc.player == null) return -1;
 
         BlockState eChestState = Blocks.ENDER_CHEST.defaultBlockState();
+        return selectBestMiningTool(mc.player.getInventory().getNonEquipmentItems().size(), mc.player.getInventory().getSelectedSlot(),
+            i -> AutoTool.getScore(mc.player.getInventory().getItem(i), eChestState, false, false,
+                AutoTool.EnchantPreference.None, this::passesEChestMiningPickaxeGuard));
+    }
+
+    static int selectBestMiningTool(int slots, int heldSlot, IntToDoubleFunction scoreAt) {
         double bestScore = -1;
         int bestSlot = -1;
-
-        for (int i = 0; i < mc.player.getInventory().getNonEquipmentItems().size(); i++) {
-            ItemStack stack = mc.player.getInventory().getItem(i);
-            double score = AutoTool.getScore(stack, eChestState, false, false, AutoTool.EnchantPreference.None, this::passesEChestMiningPickaxeGuard);
-            if (score > bestScore) {
+        for (int i = 0; i < slots; i++) {
+            double score = scoreAt.applyAsDouble(i);
+            // Keep the held tool on ties so managed-slot swaps cannot alternate identical picks.
+            if (score > bestScore || (score >= 0 && score == bestScore && i == heldSlot)) {
                 bestScore = score;
                 bestSlot = i;
             }
         }
-
         return bestSlot;
     }
 
@@ -17722,6 +17728,7 @@ public class HighwayBuilderTHM extends Module {
                     BlockState state = b.mc.level.getBlockState(bp);
 
                     int toolSlot = findAndMoveBestToolToHotbar(b, state, false);
+                    if (toolSlot == -1) return;
                     if (toolSlot != b.mc.player.getInventory().getSelectedSlot()) InvUtils.swap(toolSlot, false);
 
                     if (b.rotation.get().mine) Rotations.rotate(Rotations.getYaw(bp), Rotations.getPitch(bp), () -> BlockUtils.breakBlock(bp, true));
@@ -18461,20 +18468,11 @@ public class HighwayBuilderTHM extends Module {
             if (b.mc.player.isCreative()) return b.mc.player.getInventory().getSelectedSlot();
 
             // Find best tool
-            double bestScore = -1;
-            int bestSlot = -1;
-
-            for (int i = 0; i < b.mc.player.getInventory().getNonEquipmentItems().size(); i++) {
-                double score = AutoTool.getScore(b.mc.player.getInventory().getItem(i), blockState, false, false, AutoTool.EnchantPreference.None, itemStack -> {
+            int bestSlot = selectBestMiningTool(b.mc.player.getInventory().getNonEquipmentItems().size(), b.mc.player.getInventory().getSelectedSlot(),
+                i -> AutoTool.getScore(b.mc.player.getInventory().getItem(i), blockState, false, false, AutoTool.EnchantPreference.None, itemStack -> {
                     if (noSilkTouch && Utils.hasEnchantment(itemStack, Enchantments.SILK_TOUCH)) return false;
                     return !b.dontBreakTools.get() || itemStack.getMaxDamage() - itemStack.getDamageValue() > (itemStack.getMaxDamage() * (b.breakDurability.get() / 100.0));
-                });
-
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestSlot = i;
-                }
-            }
+                }));
 
             if (bestSlot == -1) return noSilkTouch ? -1 : b.mc.player.getInventory().getSelectedSlot();
 

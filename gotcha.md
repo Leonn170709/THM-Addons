@@ -20,6 +20,8 @@
 
 - `Manage-hotbar` controls whether HighwayBuilder enables HotbarManager; an independently active manager still reserves its slots. Restocking uses configured slots directly and pauses the manager's sorting to keep offhand swap slots stable. Offhand EChest placement checks the actual hand, handles exhausted supply, and pauses its watchdog while a safety totem is required.
 
+- Keep the held mining tool on equal AutoTool scores. Choosing the first inventory match every tick can swap two equal pickaxes back and forth through the same managed slot, resetting container mining. Restock states own main-hand selection; generic offhand/packet-build loadouts must not replace their cleanup tool.
+
 - Boze and THM both initialized in the 2026-10-04 Prism 26.2 log, with no reported TitleScreen mixin failure. A replacement menu is a possible cause when vanilla TitleScreen hooks disappear, but this log does not identify the active screen. The published [Boze event API](https://docs.boze.dev/dev/boze/api/event/package-summary.html) has no dedicated title-screen event.
 
 - Vanilla handles primary STOP immediately at progress >= 0.7, but the delayed secondary completes in `ServerPlayerGameMode.tick()` with the tool held then. Secondary STOP after a new START may target a different `destroyPos` and be ignored. Normal mining therefore retains its tool through confirmation in every swap mode; fast swap timing applies to instant/primed breaks. Prioritize the delayed secondary tool, but send the primary STOP at its own threshold. Track both pending confirmations; waiting for the secondary before finishing the primary delays double-break.
