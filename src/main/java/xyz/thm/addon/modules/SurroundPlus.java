@@ -8,6 +8,7 @@ package xyz.thm.addon.modules;
 
 import net.minecraft.network.protocol.game.ServerboundAttackPacket;
 
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.utils.PacketPlaceTracker;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
@@ -651,14 +652,31 @@ public class SurroundPlus extends Module {
         });
     }
 
-    public enum CenterMode {
+    public enum CenterMode implements DescribedOption {
         Teleport,
         NCP,
-        None
+        None;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Teleport -> "Snap to the block center when enabled.";
+                case NCP -> "Move gradually toward the block center.";
+                case None -> "Leave your position unchanged.";
+            };
+        }
     }
 
-    public enum TimingMode {
+    public enum TimingMode implements DescribedOption {
         Vanilla,
-        Sequential
+        Sequential;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Vanilla -> "Place surround blocks on client ticks.";
+                case Sequential -> "Also react to block, crystal, and explosion packets.";
+            };
+        }
     }
 }

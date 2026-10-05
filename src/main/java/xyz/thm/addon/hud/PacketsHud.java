@@ -23,6 +23,7 @@ import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketType;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.THMAddon;
 
 import java.util.Set;
@@ -36,7 +37,16 @@ public class PacketsHud extends HudElement {
         PacketsHud::new
     );
 
-    public enum Mode { PerSecond, PerTick }
+    public enum Mode implements DescribedOption { PerSecond, PerTick;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case PerSecond -> "Count packets per second.";
+                case PerTick -> "Count packets per client tick.";
+            };
+        }
+    }
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 

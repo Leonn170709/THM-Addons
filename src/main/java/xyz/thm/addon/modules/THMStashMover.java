@@ -72,6 +72,7 @@ import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import xyz.thm.addon.settings.DropdownDescriptions;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.server.ServerStatusHandler;
 import xyz.thm.addon.utils.THMStashMoverErrorLog;
@@ -416,6 +417,8 @@ public class THMStashMover extends Module {
         deletePairSelection = validSelection(deletePairSelection, deletablePairs);
         pairTable.add(theme.label("Delete pair"));
         WDropdown<String> deleteDropdown = pairTable.add(theme.dropdown(deletablePairs, deletePairSelection)).expandX().widget();
+        DropdownDescriptions.configure(deleteDropdown,
+            value -> value.equals("") ? "Choose a pair." : "Select this pair for deletion.");
         deleteDropdown.action = () -> deletePairSelection = deleteDropdown.get();
         WButton delete = pairTable.add(theme.button("Delete")).widget();
         delete.action = () -> {
@@ -428,6 +431,8 @@ public class THMStashMover extends Module {
         renamePairSelection = validSelection(renamePairSelection, renamePairs);
         pairTable.add(theme.label("Rename pair"));
         WDropdown<String> renameDropdown = pairTable.add(theme.dropdown(renamePairs, renamePairSelection)).expandX().widget();
+        DropdownDescriptions.configure(renameDropdown,
+            value -> value.equals("") ? "Choose a pair." : "Select this pair for renaming.");
         renameDropdown.action = () -> renamePairSelection = renameDropdown.get();
         WTextBox renameName = pairTable.add(theme.textBox(renamePairDraft)).expandX().widget();
         renameName.action = () -> renamePairDraft = renameName.get();

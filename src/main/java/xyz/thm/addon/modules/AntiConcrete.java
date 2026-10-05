@@ -23,6 +23,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.THMAddon;
 
 public class AntiConcrete extends Module {
@@ -236,9 +237,18 @@ public class AntiConcrete extends Module {
     }
 
     // -------------------- Enums -------------------- //
-    public enum Mode {
+    public enum Mode implements DescribedOption {
         Strict,
         Smart,
-        Mine
+        Mine;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Strict -> "Place a button when enemies are nearby.";
+                case Smart -> "Place a button when enemies drop concrete above you.";
+                case Mine -> "Mine concrete inside your hitbox.";
+            };
+        }
     }
 }

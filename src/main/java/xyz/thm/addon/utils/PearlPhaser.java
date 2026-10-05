@@ -26,6 +26,7 @@ import net.minecraft.world.level.block.ScaffoldingBlock;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
 
 import java.util.function.BooleanSupplier;
@@ -382,7 +383,15 @@ public class PearlPhaser {
         mc.gameMode.handleContainerInput(0, pearlSlot < 9 ? pearlSlot + 36 : pearlSlot, 0, ContainerInput.PICKUP, mc.player);
     }
 
-    public enum SelfPlaceType {
-        Fire, Web
+    public enum SelfPlaceType implements DescribedOption {
+        Fire, Web;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Fire -> "Place fire below you when phasing.";
+                case Web -> "Place a cobweb at your feet when phasing.";
+            };
+        }
     }
 }

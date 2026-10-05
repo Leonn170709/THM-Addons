@@ -83,7 +83,7 @@ public abstract class NoSlowMixin implements NoSlowAntiClimb {
         );
         thm$antiClimb = sgGeneral.add(new EnumSetting.Builder<NoSlowAntiClimb.Mode>()
             .name("anti-climb")
-            .description("Stops ladders, vines and scaffolding from lifting you. Smart keeps catching falls over a block.")
+            .description("When to block automatic climbing.")
             .defaultValue(NoSlowAntiClimb.Mode.Off)
             .build()
         );

@@ -6,6 +6,7 @@
 
 package xyz.thm.addon.modules;
 
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.utils.PacketPlaceTracker;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.mixininterface.IVec3;
@@ -132,9 +133,17 @@ public class ScaffoldTHM extends Module {
             InvUtils.swapBack();
         }
     }
-    public enum ListMode {
+    public enum ListMode implements DescribedOption {
         Blacklist,
-        Whitelist
+        Whitelist;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Blacklist -> "Avoid placing listed blocks.";
+                case Whitelist -> "Place only listed blocks.";
+            };
+        }
     }
 
     public boolean hasWorked() {

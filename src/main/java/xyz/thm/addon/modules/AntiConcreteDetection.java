@@ -20,6 +20,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.Block;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.THMAddon;
 
 public class AntiConcreteDetection extends Module {
@@ -84,8 +85,16 @@ public class AntiConcreteDetection extends Module {
     }
 
     // -------------------- Enums -------------------- //
-    public enum BreakMode {
+    public enum BreakMode implements DescribedOption {
         Tap,
-        Hold
+        Hold;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Tap -> "Tap buttons once to start breaking.";
+                case Hold -> "Keep breaking buttons until they disappear.";
+            };
+        }
     }
 }

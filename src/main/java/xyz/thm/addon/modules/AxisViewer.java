@@ -18,6 +18,7 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.Dimension;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.world.phys.Vec3;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
 
@@ -341,7 +342,7 @@ public class AxisViewer extends Module {
             end.x(), end.y(), end.z(), color);
     }
 
-    public enum AxisType {
+    public enum AxisType implements DescribedOption {
         Both,
         Cardinals,
         Diagonals,
@@ -353,6 +354,16 @@ public class AxisViewer extends Module {
 
         boolean diagonals() {
             return this == Both || this == Diagonals;
+        }
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Both -> "Show cardinal and diagonal axes.";
+                case Cardinals -> "Show north, south, east, and west axes.";
+                case Diagonals -> "Show diagonal axes.";
+                case None -> "Hide axes in this dimension.";
+            };
         }
     }
 }

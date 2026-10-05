@@ -59,6 +59,7 @@
     "meteor.CrystalAuraMixin",
     "meteor.ChamsDepthMixin",
     "meteor.DefaultSettingsWidgetFactoryMixin",
+    "meteor.DropdownTooltipMixin",
     "meteor.EXPThrowerMixin",
     "meteor.GuiThemeMixin",
     "meteor.KillAuraMixin",

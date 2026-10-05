@@ -6,9 +6,22 @@
 
 package xyz.thm.addon.interfaces;
 
+import xyz.thm.addon.settings.DescribedOption;
+
 /** Implemented by Meteor's NoSlow through NoSlowMixin. */
 public interface NoSlowAntiClimb {
-    enum Mode { Off, Always, Smart }
+    enum Mode implements DescribedOption {
+        Off, Always, Smart;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Off -> "Keep normal climbing behavior.";
+                case Always -> "Block all automatic climbing.";
+                case Smart -> "Block climbing while keeping fall catches over blocks.";
+            };
+        }
+    }
 
     Mode thm$antiClimbMode();
 }

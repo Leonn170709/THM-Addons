@@ -40,6 +40,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.system.THMSystem;
 import xyz.thm.addon.utils.PlacementUtils;
@@ -718,7 +719,7 @@ public class CrystalAuraTHM extends Module {
     }
 
     /** Solid keeps the box at full size and opacity; the others are Meteor's own fade/shrink animations. */
-    public enum CrystalRender {
+    public enum CrystalRender implements DescribedOption {
         Solid(false, false),
         Fade(true, false),
         Shrink(false, true),
@@ -729,6 +730,16 @@ public class CrystalAuraTHM extends Module {
         CrystalRender(boolean fade, boolean shrink) {
             this.fade = fade;
             this.shrink = shrink;
+        }
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Solid -> "Show placement boxes without animation.";
+                case Fade -> "Fade placement boxes out.";
+                case Shrink -> "Shrink placement boxes away.";
+                case Smooth -> "Fade and shrink placement boxes.";
+            };
         }
     }
 
@@ -810,18 +821,36 @@ public class CrystalAuraTHM extends Module {
     private record DamageResult(float enemyDamage, LivingEntity enemyEntity, float enemyHealth,
                                  float friendDamage, float selfDamage) {}
 
-    public enum RotateOn {
+    public enum RotateOn implements DescribedOption {
         Place, Break, Both;
 
         boolean covers(boolean breaking) {
             return this == Both || (breaking ? this == Break : this == Place);
         }
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Place -> "Rotate when placing crystals.";
+                case Break -> "Rotate when breaking crystals.";
+                case Both -> "Rotate when placing and breaking crystals.";
+            };
+        }
     }
 
-    public enum RotationMode {
+    public enum RotationMode implements DescribedOption {
         /** Meteor's own rotation manager — shared with every other Meteor module. */
         Normal,
         Silent,
-        Client
+        Client;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Normal -> "Use Meteor's shared rotation manager.";
+                case Silent -> "Rotate on the server without moving the camera.";
+                case Client -> "Turn your camera toward the crystal action.";
+            };
+        }
     }
 }

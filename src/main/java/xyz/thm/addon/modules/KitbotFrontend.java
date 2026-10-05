@@ -16,6 +16,7 @@ import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.world.entity.player.Player;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.kitbot.KitbotAvailabilityTracker;
 import xyz.thm.addon.utils.kitbot.KitbotChatCommandParser;
@@ -940,16 +941,28 @@ public class KitbotFrontend extends Module {
         String warning
     ) {}
 
-    public enum Mode {
+    public enum Mode implements DescribedOption {
         Update,
         Goto,
         Kit,
         Send,
         Token,
-        Claim
+        Claim;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Update -> "Update a highway's recorded position.";
+                case Goto -> "Teleport to a highway's recorded position.";
+                case Kit -> "Request a kit for yourself.";
+                case Send -> "Send a kit to another player.";
+                case Token -> "Check your KitBot token balance.";
+                case Claim -> "Claim available KitBot rewards.";
+            };
+        }
     }
 
-    public enum Direction {
+    public enum Direction implements DescribedOption {
         West("W"),
         East("E"),
         North("N"),
@@ -982,9 +995,31 @@ public class KitbotFrontend extends Module {
             }
             return null;
         }
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case West -> "Use the west highway.";
+                case DugWest -> "Use the dug west highway.";
+                case East -> "Use the east highway.";
+                case DugEast -> "Use the dug east highway.";
+                case North -> "Use the north highway.";
+                case DugNorth -> "Use the dug north highway.";
+                case South -> "Use the south highway.";
+                case DugSouth -> "Use the dug south highway.";
+                case NorthEast -> "Use the northeast highway.";
+                case DugNorthEast -> "Use the dug northeast highway.";
+                case SouthEast -> "Use the southeast highway.";
+                case DugSouthEast -> "Use the dug southeast highway.";
+                case SouthWest -> "Use the southwest highway.";
+                case DugSouthWest -> "Use the dug southwest highway.";
+                case NorthWest -> "Use the northwest highway.";
+                case DugNorthWest -> "Use the dug northwest highway.";
+            };
+        }
     }
 
-    public enum KitName {
+    public enum KitName implements DescribedOption {
         Refill("Refill", 1),
         Pvp("PvP", 0.5),
         Echest("Echest", 0.2),
@@ -1038,6 +1073,29 @@ public class KitbotFrontend extends Module {
                 sb.append(kit.describe());
             }
             return sb.toString();
+        }
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Refill -> "Use a refill kit.";
+                case Pvp -> "Use a PvP kit.";
+                case Echest -> "Use an ender-chest kit.";
+                case Pickaxe -> "Use a pickaxe kit.";
+                case Highway -> "Use a highway-building kit.";
+                case Lights -> "Use a lighting kit.";
+                case Travel -> "Use a travel kit.";
+                case Grief -> "Use a griefing kit.";
+                case Redstone -> "Use a redstone kit.";
+                case Exp -> "Use an experience kit.";
+                case Logs -> "Use a log kit.";
+                case Mapart -> "Use a map-art kit.";
+                case Stash -> "Use a stash kit.";
+                case Bricks -> "Use a brick kit.";
+                case Gapples -> "Use a golden-apple kit.";
+                case Concrete -> "Use a concrete kit.";
+                case Totems -> "Use a totem kit.";
+            };
         }
     }
 }

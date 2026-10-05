@@ -13,6 +13,7 @@ import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.nbt.CompoundTag;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.modules.HighwayBuilderTHM;
 import xyz.thm.addon.settings.StringMultiSelect;
@@ -92,7 +93,16 @@ public class THMSystem extends System<THMSystem> {
         .build()
     );
 
-    public enum UpdateChannel { STABLE, DEV }
+    public enum UpdateChannel implements DescribedOption { STABLE, DEV;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case STABLE -> "Use stable addon releases.";
+                case DEV -> "Use development builds.";
+            };
+        }
+    }
 
     public final Setting<UpdateChannel> updateChannel = sgUpdater.add(new EnumSetting.Builder<UpdateChannel>()
         .name("update-channel")
@@ -559,15 +569,33 @@ public class THMSystem extends System<THMSystem> {
         return tag == null ? new CompoundTag() : tag.copy();
     }
 
-    public enum Mode {
+    public enum Mode implements DescribedOption {
         None,
         HighwayBuilding,
-        HighwayDigging
+        HighwayDigging;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case None -> "Keep your current highway settings.";
+                case HighwayBuilding -> "Apply the highway-building profile.";
+                case HighwayDigging -> "Apply the highway-digging profile.";
+            };
+        }
     }
-    public enum Type {
+    public enum Type implements DescribedOption {
         Obby,
         TransparentWhite,
-        TransparentBlack
+        TransparentBlack;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Obby -> "Use the obsidian icon.";
+                case TransparentWhite -> "Use the transparent white icon.";
+                case TransparentBlack -> "Use the transparent black icon.";
+            };
+        }
     }
 
 }

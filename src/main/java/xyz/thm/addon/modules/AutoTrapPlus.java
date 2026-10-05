@@ -10,6 +10,7 @@
  */
 package xyz.thm.addon.modules;
 
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.utils.PacketPlaceTracker;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -863,37 +864,83 @@ public class AutoTrapPlus extends Module {
         };
     }
 
-    public enum TopMode {
+    public enum TopMode implements DescribedOption {
         Full,
         Top,
         Face,
-        None
+        None;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Full -> "Place the roof and face-level walls.";
+                case Top -> "Place only the roof above the target.";
+                case Face -> "Place only face-level walls.";
+                case None -> "Skip the roof and face-level walls.";
+            };
+        }
     }
 
-    public enum HeightMode {
+    public enum HeightMode implements DescribedOption {
         Feet,
-        Eye
+        Eye;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Feet -> "Build the trap from the target's feet.";
+                case Eye -> "Build the trap at the target's eye height.";
+            };
+        }
     }
 
     // Bottom mode is fixed to Full; enum removed
 
-    public enum GapSide {
+    public enum GapSide implements DescribedOption {
         None,
         TowardPlayer,
         North,
         South,
         East,
-        West
+        West;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case None -> "Leave no gap in the trap.";
+                case TowardPlayer -> "Leave a gap facing you.";
+                case North -> "Leave a gap to the north.";
+                case South -> "Leave a gap to the south.";
+                case East -> "Leave a gap to the east.";
+                case West -> "Leave a gap to the west.";
+            };
+        }
     }
 
-    public enum BuildOrder {
+    public enum BuildOrder implements DescribedOption {
         BottomToTop,
-        TopToBottom
+        TopToBottom;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case BottomToTop -> "Place lower trap blocks first.";
+                case TopToBottom -> "Place upper trap blocks first.";
+            };
+        }
     }
 
-    public enum LogoutTrapMode {
+    public enum LogoutTrapMode implements DescribedOption {
         Auto,
-        Manual
+        Manual;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Auto -> "Trap logout spots automatically.";
+                case Manual -> "Trap logout spots when the keybind is pressed.";
+            };
+        }
     }
 
     private record LogoutSpotData(UUID playerId, String playerName, BlockPos feetPos, double eyeY) {

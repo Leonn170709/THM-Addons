@@ -55,6 +55,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.RangeUtils;
@@ -330,9 +331,17 @@ public class TunnelMinerModule extends Module {
         "minecraft:black_concrete_powder"
     };
 
-    private enum PathMode {
+    private enum PathMode implements DescribedOption {
         AxisFirst,
-        DiagonalThenAxis
+        DiagonalThenAxis;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case AxisFirst -> "Finish one coordinate axis before the other.";
+                case DiagonalThenAxis -> "Move diagonally first, then finish the remaining axis.";
+            };
+        }
     }
     private static final PathMode HARD_PATH_MODE = PathMode.DiagonalThenAxis;
 
@@ -845,7 +854,6 @@ public class TunnelMinerModule extends Module {
         .defaultValue(new SettingColor(255, 255, 0, 255))
         .build()
     );
-
 
     // ── State machine ─────────────────────────────────────────────────────────
 

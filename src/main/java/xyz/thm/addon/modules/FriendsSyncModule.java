@@ -19,6 +19,7 @@ import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.multiplayer.PlayerInfo;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.settings.StringMultiSelect;
 import xyz.thm.addon.utils.FriendClients;
@@ -31,16 +32,24 @@ public class FriendsSyncModule extends Module {
 
     private static final Color INSTALLED = new Color(85, 255, 85);
 
-    public enum SyncMode {
+    public enum SyncMode implements DescribedOption {
         Command,
-        File
+        File;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Command -> "Run friend commands when tracked players join.";
+                case File -> "Update installed clients' friend files directly.";
+            };
+        }
     }
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
     private final Setting<SyncMode> syncMode = sgGeneral.add(new EnumSetting.Builder<SyncMode>()
         .name("sync-mode")
-        .description("Command: run chat commands when a tracked player joins. File: write straight into the installed clients' friend lists — no waiting for anyone to join.")
+        .description("How to synchronize tracked players with friend lists.")
         .defaultValue(SyncMode.File)
         .build()
     );

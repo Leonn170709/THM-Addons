@@ -32,6 +32,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
 import meteordevelopment.meteorclient.mixininterface.IVec3;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.THMUtils;
 
@@ -44,7 +45,7 @@ import java.util.*;
  */
 public class HighwayTraveler extends Module {
 
-    public enum TravelMethod {
+    public enum TravelMethod implements DescribedOption {
         WALK("Walk"),
         WASP("Wasp");
 
@@ -53,9 +54,17 @@ public class HighwayTraveler extends Module {
 
         @Override
         public String toString() { return label; }
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case WALK -> "Walk along the highway.";
+                case WASP -> "Travel using Wasp flight.";
+            };
+        }
     }
 
-    public enum TravelDirection {
+    public enum TravelDirection implements DescribedOption {
         AUTO("Auto"),
         POS_X("East (+X)"),
         NEG_X("West (-X)"),
@@ -71,6 +80,21 @@ public class HighwayTraveler extends Module {
 
         @Override
         public String toString() { return label; }
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case AUTO -> "Use your facing direction when enabled.";
+                case POS_X -> "Travel east along positive X.";
+                case NEG_X -> "Travel west along negative X.";
+                case POS_Z -> "Travel south along positive Z.";
+                case NEG_Z -> "Travel north along negative Z.";
+                case POS_X_POS_Z -> "Travel southeast along positive X and Z.";
+                case POS_X_NEG_Z -> "Travel northeast along positive X and negative Z.";
+                case NEG_X_POS_Z -> "Travel southwest along negative X and positive Z.";
+                case NEG_X_NEG_Z -> "Travel northwest along negative X and Z.";
+            };
+        }
     }
 
     private enum TravelState { FORWARD, STOPPED, PATH_FOLLOW, BACKUP }
@@ -616,7 +640,6 @@ public class HighwayTraveler extends Module {
             travelState = TravelState.FORWARD;
             return;
         }
-
 
         BlockPos aim = null;
         int      i   = 0;

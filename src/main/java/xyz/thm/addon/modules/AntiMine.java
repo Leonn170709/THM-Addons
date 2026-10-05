@@ -15,6 +15,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.server.level.BlockDestructionProgress;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.PearlPhaser;
 import xyz.thm.addon.utils.PlacementUtils;
@@ -37,7 +38,7 @@ public class AntiMine extends Module {
 
     public final Setting<Mode> mode = sgGeneral.add(new EnumSetting.Builder<Mode>()
         .name("mode")
-        .description("Pearl: phase into the block being mined. Clip: stand between blocks so crystals can't be placed.")
+        .description("How to avoid crystals when nearby blocks are mined.")
         .defaultValue(Mode.Clip)
         .build());
 
@@ -301,7 +302,15 @@ public class AntiMine extends Module {
         return mode.get().name();
     }
 
-    public enum Mode {
-        Pearl, Clip
+    public enum Mode implements DescribedOption {
+        Pearl, Clip;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Pearl -> "Pearl into a nearby block when mined.";
+                case Clip -> "Move onto a nearby block boundary when mined.";
+            };
+        }
     }
 }

@@ -55,6 +55,7 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.mixin.accessor.ClientPlayerInteractionManagerTHMAccessor;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.meteorclient.utils.world.TickRate;
@@ -290,12 +291,20 @@ public class HighwayBuilderTHM extends Module {
 
     private boolean suppressThmHwyMonitorSync;
 
-    public enum Floor {
+    public enum Floor implements DescribedOption {
         Replace,
-        PlaceMissing
+        PlaceMissing;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Replace -> "Replace existing floor blocks with paving blocks.";
+                case PlaceMissing -> "Fill missing floor blocks only.";
+            };
+        }
     }
 
-    public enum Rotation {
+    public enum Rotation implements DescribedOption {
         None(false, false),
         Mine(true, false),
         Place(false, true),
@@ -307,14 +316,32 @@ public class HighwayBuilderTHM extends Module {
             this.mine = mine;
             this.place = place;
         }
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case None -> "Do not rotate for mining or placing.";
+                case Mine -> "Rotate when mining.";
+                case Place -> "Rotate when placing.";
+                case Both -> "Rotate when mining and placing.";
+            };
+        }
     }
 
-    public enum CenterMode {
+    public enum CenterMode implements DescribedOption {
         Teleport,
-        Walk
+        Walk;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Teleport -> "Snap to the block center.";
+                case Walk -> "Walk to the block center.";
+            };
+        }
     }
 
-    public enum BlockadeType {
+    public enum BlockadeType implements DescribedOption {
         Full(6, false),
         FullRoof(6, true),
         Partial(4, false),
@@ -327,9 +354,19 @@ public class HighwayBuilderTHM extends Module {
             this.columns = columns;
             this.roof = roof;
         }
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Full -> "Build a six-column blockade.";
+                case FullRoof -> "Build a six-column blockade with a roof.";
+                case Partial -> "Build a four-column blockade.";
+                case Shulker -> "Build a three-column blockade.";
+            };
+        }
     }
 
-    public enum KitbotEChestRestockKit {
+    public enum KitbotEChestRestockKit implements DescribedOption {
         Echest(KitbotFrontend.KitName.Echest),
         Highway(KitbotFrontend.KitName.Highway);
 
@@ -343,9 +380,17 @@ public class HighwayBuilderTHM extends Module {
         public String toString() {
             return kitName.toString();
         }
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Echest -> "Restock ender chests with the Echest kit.";
+                case Highway -> "Restock ender chests with the Highway kit.";
+            };
+        }
     }
 
-    public enum KitbotPickaxeRestockKit {
+    public enum KitbotPickaxeRestockKit implements DescribedOption {
         Pickaxe(KitbotFrontend.KitName.Pickaxe),
         Highway(KitbotFrontend.KitName.Highway);
 
@@ -359,11 +404,27 @@ public class HighwayBuilderTHM extends Module {
         public String toString() {
             return kitName.toString();
         }
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Pickaxe -> "Restock pickaxes with the Pickaxe kit.";
+                case Highway -> "Restock pickaxes with the Highway kit.";
+            };
+        }
     }
 
-    public enum RestockSecondarySourceOrder {
+    public enum RestockSecondarySourceOrder implements DescribedOption {
         EnderChestThenKitBot,
-        KitBotThenEnderChest
+        KitBotThenEnderChest;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case EnderChestThenKitBot -> "Try the ender chest before KitBot.";
+                case KitBotThenEnderChest -> "Try KitBot before the ender chest.";
+            };
+        }
     }
 
     private enum KitbotStructureBlockType {
@@ -377,14 +438,23 @@ public class HighwayBuilderTHM extends Module {
         TimedOut
     }
 
-    public enum AirPlaceMode {
+    public enum AirPlaceMode implements DescribedOption {
         Never,
         Smart,
-        Always
+        Always;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Never -> "Place only against existing blocks.";
+                case Smart -> "Air-place only when no support is available.";
+                case Always -> "Air-place every block.";
+            };
+        }
     }
 
     /** One breaking method at a time; the old speedmine/instant/on-place toggles collapsed into this. */
-    public enum EChestBreakMode {
+    public enum EChestBreakMode implements DescribedOption {
         Speedmine("Speedmine rebreak"),
         InstantRebreak("Instant rebreak"),
         OnPlace("Instant rebreak on place"),
@@ -400,10 +470,20 @@ public class HighwayBuilderTHM extends Module {
         public String toString() {
             return title;
         }
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Speedmine -> "Let Speedmine handle ender-chest rebreaks.";
+                case InstantRebreak -> "Rebreak placed ender chests on mining ticks.";
+                case OnPlace -> "Send rebreak packets immediately after placement.";
+                case Normal -> "Break each ender chest normally.";
+            };
+        }
     }
 
     /** Break modes offered without offhand-build: on-place needs the chest in the offhand. */
-    public enum EChestBreakModeNoOffhand {
+    public enum EChestBreakModeNoOffhand implements DescribedOption {
         Speedmine(EChestBreakMode.Speedmine),
         InstantRebreak(EChestBreakMode.InstantRebreak),
         Normal(EChestBreakMode.Normal);
@@ -418,9 +498,18 @@ public class HighwayBuilderTHM extends Module {
         public String toString() {
             return mode.toString();
         }
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Speedmine -> "Let Speedmine handle ender-chest rebreaks.";
+                case InstantRebreak -> "Rebreak placed ender chests on mining ticks.";
+                case Normal -> "Break each ender chest normally.";
+            };
+        }
     }
 
-    public enum FoodManagement {
+    public enum FoodManagement implements DescribedOption {
         None("None"),
         AutoEat("Auto Eat"),
         AutoGap("Auto Gap");
@@ -434,6 +523,15 @@ public class HighwayBuilderTHM extends Module {
         @Override
         public String toString() {
             return title;
+        }
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case None -> "Leave eating modules unchanged.";
+                case AutoEat -> "Manage Meteor Auto Eat while building.";
+                case AutoGap -> "Manage Meteor Auto Gap while building.";
+            };
         }
     }
 
@@ -1317,7 +1415,7 @@ public class HighwayBuilderTHM extends Module {
 
     private final Setting<FoodManagement> foodManagement = sgInventory.add(new EnumSetting.Builder<FoodManagement>()
         .name("food-management")
-        .description("Ensures the selected Meteor food module is enabled while HighwayBuilder is running.")
+        .description("Food module to manage while building.")
         .defaultValue(FoodManagement.None)
         .build()
     );
@@ -1621,7 +1719,6 @@ public class HighwayBuilderTHM extends Module {
         .build()
     );
 
-
     private final Setting<Boolean> statuslog = sgStatistics.add(new BoolSetting.Builder()
         .name("Send-Status")
         .description("Sends the status every 5 min (Digging/Paving,Axis,Name,hash)")
@@ -1638,7 +1735,7 @@ public class HighwayBuilderTHM extends Module {
     );
     private final Setting<WebhookContent> webhookContent = sgStatistics.add(new EnumSetting.Builder<WebhookContent>()
         .name("webhook-content")
-        .description("What the statistics webhook sends: the text stats, the proof screenshot, or both in one request.")
+        .description("Content to send in statistics webhooks.")
         .defaultValue(WebhookContent.Text)
         .visible(() -> printStatistics.get() && sendStatisticsWebhhok.get())
         .build()
@@ -2191,10 +2288,19 @@ public class HighwayBuilderTHM extends Module {
         }
     }
 
-    public enum WebhookContent {
+    public enum WebhookContent implements DescribedOption {
         Text,
         Image,
-        Both
+        Both;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Text -> "Send text statistics.";
+                case Image -> "Send a statistics image.";
+                case Both -> "Send text and an image.";
+            };
+        }
     }
 
     /** Webhook send parked until the proof screenshot exists, so both go out in one request. */
@@ -5103,7 +5209,6 @@ public class HighwayBuilderTHM extends Module {
             }
         }
     }
-
 
     @EventHandler
     private void onMessageReceive(ReceiveMessageEvent event) {

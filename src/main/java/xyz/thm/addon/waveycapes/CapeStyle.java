@@ -6,6 +6,16 @@
 
 package xyz.thm.addon.waveycapes;
 
-public enum CapeStyle {
-    BLOCKY, SMOOTH
+import xyz.thm.addon.settings.DescribedOption;
+
+public enum CapeStyle implements DescribedOption {
+    BLOCKY, SMOOTH;
+
+    @Override
+    public String description() {
+        return switch (this) {
+            case BLOCKY -> "Use rigid cape segments.";
+            case SMOOTH -> "Use a smoothly curved cape.";
+        };
+    }
 }

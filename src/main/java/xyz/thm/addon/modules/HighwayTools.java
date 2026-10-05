@@ -43,6 +43,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import com.google.gson.JsonObject;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.THMUtils;
 import xyz.thm.addon.utils.TrustedHttp;
@@ -241,7 +242,6 @@ public class HighwayTools extends Module {
         .visible(() -> obsidianGuardEnabled.get())
         .build()
     );
-
 
 
     private final IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
@@ -1358,12 +1358,20 @@ public class HighwayTools extends Module {
         mc.options.keyShift.setDown(false);
     }
 
-    public enum CheckerMode {
+    public enum CheckerMode implements DescribedOption {
         HighwayEnd,
-        HighwayStart
+        HighwayStart;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case HighwayEnd -> "Trigger where the highway ends.";
+                case HighwayStart -> "Trigger where the highway begins.";
+            };
+        }
     }
 
-    public enum Highway {
+    public enum Highway implements DescribedOption {
         West,
         East,
         North,
@@ -1379,7 +1387,29 @@ public class HighwayTools extends Module {
         DugNorthEast,
         DugSouthEast,
         DugSouthWest,
-        DugNorthWest
+        DugNorthWest;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case West -> "Use the west highway.";
+                case DugWest -> "Use the dug west highway.";
+                case East -> "Use the east highway.";
+                case DugEast -> "Use the dug east highway.";
+                case North -> "Use the north highway.";
+                case DugNorth -> "Use the dug north highway.";
+                case South -> "Use the south highway.";
+                case DugSouth -> "Use the dug south highway.";
+                case NorthEast -> "Use the northeast highway.";
+                case DugNorthEast -> "Use the dug northeast highway.";
+                case SouthEast -> "Use the southeast highway.";
+                case DugSouthEast -> "Use the dug southeast highway.";
+                case SouthWest -> "Use the southwest highway.";
+                case DugSouthWest -> "Use the dug southwest highway.";
+                case NorthWest -> "Use the northwest highway.";
+                case DugNorthWest -> "Use the dug northwest highway.";
+            };
+        }
     }
 
     private enum WorkLine {

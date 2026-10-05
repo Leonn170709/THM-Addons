@@ -49,6 +49,7 @@ import java.util.Map;
 import java.util.AbstractMap;
 import net.minecraft.util.Util;
 import org.meteordev.starscript.Script;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.THMAddon;
 
 import java.util.ArrayList;
@@ -327,8 +328,16 @@ public class DiscordRPC extends Module {
         return help;
     }
 
-    public enum SelectMode {
+    public enum SelectMode implements DescribedOption {
         Random,
-        Sequential
+        Sequential;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Random -> "Pick a random status line.";
+                case Sequential -> "Cycle through status lines in order.";
+            };
+        }
     }
 }

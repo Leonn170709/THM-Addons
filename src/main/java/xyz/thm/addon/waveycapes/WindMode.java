@@ -6,6 +6,16 @@
 
 package xyz.thm.addon.waveycapes;
 
-public enum WindMode {
-    NONE, WAVES
+import xyz.thm.addon.settings.DescribedOption;
+
+public enum WindMode implements DescribedOption {
+    NONE, WAVES;
+
+    @Override
+    public String description() {
+        return switch (this) {
+            case NONE -> "Disable cape wind.";
+            case WAVES -> "Add wind waves to the cape.";
+        };
+    }
 }

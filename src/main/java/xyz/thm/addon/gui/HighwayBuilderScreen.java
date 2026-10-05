@@ -29,6 +29,7 @@ import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.settings.Settings;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.client.gui.screens.Screen;
+import xyz.thm.addon.settings.DropdownDescriptions;
 import xyz.thm.addon.hud.HighwayHud;
 import xyz.thm.addon.modules.HighwayBuilderTHM;
 import xyz.thm.addon.system.THMSystem;
@@ -174,6 +175,7 @@ public class HighwayBuilderScreen extends WindowScreen {
                 .expandX()
                 .widget();
             presetSelect.action = () -> selectedCustomPreset = presetSelect.get();
+            DropdownDescriptions.configure(presetSelect, value -> "Use this saved highway preset.");
             WButton applyPreset = customProfiles.add(theme.button("Apply")).widget();
             applyPreset.action = () -> {
                 selectedCustomPreset = presetSelect.get();

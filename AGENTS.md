@@ -135,6 +135,10 @@ addon-specific settings screen — don't confuse the two when adding a new modul
 **Speedmine rebreak:** `ClientLevelSpeedmineMixin` handles server block updates on the client
 thread before world application. Packet-triggered prediction retains the incoming state for rollback.
 
+**Dropdown tooltips:** Enum choices implement `settings/DescribedOption` for per-option descriptions.
+Keep descriptions to one short sentence. Use `DropdownDescriptions.configure` for string menus.
+`DropdownTooltipMixin` gives open menus tooltip priority over covered settings.
+
 **Main-menu diagnostics:** `[THM/Init]` logs addon registration stages; `[THM/Menu]` logs screen and shader hooks. Menu setup runs after outer `Screen.init`, resize, and widget rebuild, since other clients can cancel inner `TitleScreen.init`. Keep setup idempotent and render logging limited to first use or state changes.
 
 Background shaders use a cached texture with separate resolution/FPS settings in THM Menu. Keep shader updates independent of GUI frame rate and invalidate the texture on shader or size changes.

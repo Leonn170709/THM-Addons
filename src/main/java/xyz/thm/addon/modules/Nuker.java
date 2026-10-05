@@ -49,6 +49,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
 import xyz.thm.addon.utils.InventoryManager;
@@ -736,28 +737,64 @@ public class Nuker extends Module {
         }
     }
 
-    public enum ListMode {
+    public enum ListMode implements DescribedOption {
         Whitelist,
-        Blacklist
+        Blacklist;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Whitelist -> "Mine only listed blocks.";
+                case Blacklist -> "Skip listed blocks.";
+            };
+        }
     }
 
-    public enum Mode {
+    public enum Mode implements DescribedOption {
         All,
         Flatten,
-        Smash
+        Smash;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case All -> "Mine all eligible blocks in range.";
+                case Flatten -> "Mine blocks at or above your feet.";
+                case Smash -> "Mine only instantly breakable blocks.";
+            };
+        }
     }
 
-    public enum SortMode {
+    public enum SortMode implements DescribedOption {
         None,
         Closest,
         Furthest,
-        TopDown
+        TopDown;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case None -> "Use the scan order.";
+                case Closest -> "Mine nearest blocks first.";
+                case Furthest -> "Mine farthest blocks first.";
+                case TopDown -> "Mine highest blocks first.";
+            };
+        }
     }
 
-    public enum Shape {
+    public enum Shape implements DescribedOption {
         Cube,
         UniformCube,
-        Sphere
+        Sphere;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Cube -> "Mine within the configured cuboid.";
+                case UniformCube -> "Mine within a cube of equal dimensions.";
+                case Sphere -> "Mine within a sphere.";
+            };
+        }
     }
 
     public static int chebyshevDist(int x1, int y1, int z1, int x2, int y2, int z2) {
@@ -767,11 +804,22 @@ public class Nuker extends Module {
         return Math.max(Math.max(dX, dY), dZ);
     }
 
-    public enum NukerSwapModes {
+    public enum NukerSwapModes implements DescribedOption {
         None,
         Normal,
         Silent,
         InventoryNormal,
-        InventorySilent
+        InventorySilent;
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case None -> "Keep your current tool.";
+                case Normal -> "Select the best hotbar tool visibly.";
+                case Silent -> "Select the best hotbar tool silently.";
+                case InventoryNormal -> "Move an inventory tool to the hotbar and keep it.";
+                case InventorySilent -> "Use an inventory tool and restore its slot.";
+            };
+        }
     }
 }

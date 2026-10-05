@@ -45,6 +45,7 @@ import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.mixin.accessor.ClientLevelPredictionAccessor;
 import xyz.thm.addon.mixin.accessor.ClientPlayerInteractionManagerTHMAccessor;
 import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.system.THMSystem;
 import xyz.thm.addon.utils.RangeUtils;
 import xyz.thm.addon.utils.InventoryManager;
@@ -198,7 +199,7 @@ public class Speedmine extends Module {
 
     public final Setting<RebreakMode> rebreakMode = sgMine.add(new EnumSetting.Builder<RebreakMode>()
         .name("rebreak-mode")
-        .description("Off disables instant rebreak; Strict waits; Strong repeats; Bypass switches after confirmation.")
+        .description("How instant rebreaks wait for server confirmation.")
         .defaultValue(RebreakMode.Strong)
         .visible(autoRebreak::get)
         .build());
@@ -1026,10 +1027,38 @@ public class Speedmine extends Module {
             renderColor.get(), renderColor.get(), ShapeMode.Lines);
     }
 
-    public enum RebreakTrigger { onPacket, onClientWorld }
+    public enum RebreakTrigger implements DescribedOption {
+        onPacket("Rebreak before server updates change the client world."),
+        onClientWorld("Check for replacement blocks each client tick.");
 
-    public enum RebreakMode {
-        Off, Strict, Strong, Bypass;
+        private final String description;
+
+        RebreakTrigger(String description) {
+            this.description = description;
+        }
+
+        @Override
+        public String description() {
+            return description;
+        }
+    }
+
+    public enum RebreakMode implements DescribedOption {
+        Off("Disable instant rebreaks."),
+        Strict("Wait for server confirmation between rebreaks."),
+        Strong("Skip confirmation waits and TPS start delays."),
+        Bypass("Use Strict until a rebreak is confirmed, then Strong.");
+
+        private final String description;
+
+        RebreakMode(String description) {
+            this.description = description;
+        }
+
+        @Override
+        public String description() {
+            return description;
+        }
 
         boolean isStrong(boolean confirmedRebreak) {
             return this == Strong || (this == Bypass && confirmedRebreak);
@@ -1040,16 +1069,23 @@ public class Speedmine extends Module {
         }
     }
 
-    public enum SwapMode {
-        Keep("Keep for Next Tick"),
-        SameTick("Same Tick"),
-        EndOfTick("End of Tick"),
-        ToolHold("Tool Hold");
+    public enum SwapMode implements DescribedOption {
+        Keep("Keep for Next Tick", "Keep the tool through the next tick and consecutive rebreaks."),
+        SameTick("Same Tick", "Restore the previous slot immediately after mining packets."),
+        EndOfTick("End of Tick", "Restore the selected slot at the end of the tick."),
+        ToolHold("Tool Hold", "Hold the tool through server validation and three idle ticks.");
 
         private final String title;
+        private final String description;
 
-        SwapMode(String title) {
+        SwapMode(String title, String description) {
             this.title = title;
+            this.description = description;
+        }
+
+        @Override
+        public String description() {
+            return description;
         }
 
         SwapMode forBreak(boolean instant, boolean primedRebreak) {

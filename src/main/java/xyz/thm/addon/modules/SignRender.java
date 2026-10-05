@@ -23,6 +23,7 @@ import net.minecraft.world.level.block.entity.SignBlockEntity;
 import net.minecraft.world.level.block.entity.SignText;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
 
@@ -175,7 +176,7 @@ public class SignRender extends Module {
         .visible(cacheSignText::get)
         .build()
     );
-    public enum ClusterMode {
+    public enum ClusterMode implements DescribedOption {
         Stack("Stack vertically"),
         Cycle("Cycle through signs"),
         Count("Show count only"),
@@ -187,6 +188,16 @@ public class SignRender extends Module {
         @Override
         public String toString() {
             return description;
+        }
+
+        @Override
+        public String description() {
+            return switch (this) {
+                case Stack -> "Stack nearby sign text vertically.";
+                case Cycle -> "Show nearby signs one at a time.";
+                case Count -> "Show only the number of nearby signs.";
+                case Smart -> "Arrange nearby sign text automatically.";
+            };
         }
     }
     private static class SignRenderData {
