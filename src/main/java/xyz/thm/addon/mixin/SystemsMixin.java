@@ -14,6 +14,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import xyz.thm.addon.system.THMSystem;
+import xyz.thm.addon.utils.AddonUpdater;
 
 @Mixin(value = Systems.class, remap = false)
 public abstract class SystemsMixin {
@@ -27,5 +28,6 @@ public abstract class SystemsMixin {
         System<?> higSystem = add(new THMSystem());
         higSystem.init();
         higSystem.load();
+        AddonUpdater.checkOnStartup();
     }
 }

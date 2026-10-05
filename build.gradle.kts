@@ -60,7 +60,7 @@ dependencies {
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 
-// Generates the 7 API endpoint URLs as an AES/GCM-encrypted vault (fresh random key per build,
+// Generates the API endpoint URLs as an AES/GCM-encrypted vault (fresh random key per build,
 // never committed) instead of plain constants - a compromised/decompiled jar still needs to break
 // the cipher to recover an endpoint. APIUtils.java itself stays plain, readable, and untouched.
 val generateApiEndpoints = tasks.register("generateApiEndpoints") {
@@ -94,10 +94,18 @@ val generateApiEndpoints = tasks.register("generateApiEndpoints") {
             "capeList" to req("api.cape"),
             "capePost" to req("api.capePost"),
             "capeIndex" to req("api.capeIndex"),
+            "updater" to props.getProperty("api.updater", "").trim(),
         )
         for ((name, url) in urls) {
-            if (!url.startsWith("https://")) error("secrets.properties key api.$name must be an https:// URL")
+            if ((name != "updater" || url.isNotEmpty()) && !url.startsWith("https://")) {
+                error("secrets.properties key api.$name must be an https:// URL")
+            }
         }
+        val updaterKey = props.getProperty("update.publicKey", "").trim()
+        if (urls.getValue("updater").isBlank() != updaterKey.isBlank()) {
+            error("Set both api.updater and update.publicKey, or leave both empty")
+        }
+        if (updaterKey.isNotEmpty()) Base64.getDecoder().decode(updaterKey)
 
         val rng = SecureRandom()
         val masterKey = ByteArray(32).also { rng.nextBytes(it) }
@@ -141,6 +149,8 @@ val generateApiEndpoints = tasks.register("generateApiEndpoints") {
             |    private static final String CAPE_LIST = "${encrypted["capeList"]}";
             |    private static final String CAPE_POST = "${encrypted["capePost"]}";
             |    private static final String CAPE_INDEX = "${encrypted["capeIndex"]}";
+            |    private static final String UPDATER = "${encrypted["updater"]}";
+            |    private static final String UPDATER_PUBLIC_KEY = "$updaterKey";
             |
             |    private GeneratedApiEndpoints() {}
             |
@@ -151,6 +161,8 @@ val generateApiEndpoints = tasks.register("generateApiEndpoints") {
             |    static String capeListUrl() { return decrypt(CAPE_LIST); }
             |    static String capePostUrl() { return decrypt(CAPE_POST); }
             |    static String capeIndexUrl() { return decrypt(CAPE_INDEX); }
+            |    static String updaterUrl() { return decrypt(UPDATER); }
+            |    static String updaterPublicKey() { return UPDATER_PUBLIC_KEY; }
             |
             |    private static byte[] masterKey() {
             |        byte[] key = new byte[32];
@@ -198,6 +210,23 @@ tasks.register<Test>("checkShaders") {
 
 tasks {
     processResources {
+        val secretsFile = file("secrets.properties").takeIf { it.exists() } ?: file("secrets.properties.example")
+        val configured = Properties().also { props -> secretsFile.inputStream().use { props.load(it) } }
+        val updaterEnabled = !configured.getProperty("api.updater", "").isBlank()
+        val branch = (System.getenv("THM_UPDATE_BRANCH")?.takeIf { it.isNotBlank() }
+            ?: System.getenv("GITHUB_REF_NAME")?.takeIf { System.getenv("GITHUB_REF_TYPE") == "branch" }
+            ?: run {
+                val process = ProcessBuilder("git", "branch", "--show-current")
+                    .directory(rootDir)
+                    .start()
+                process.inputStream.bufferedReader().readLine()?.trim() ?: ""
+            }).trim()
+        if (updaterEnabled && branch.isBlank()) {
+            error("Updater-enabled builds need THM_UPDATE_BRANCH when built from a detached checkout or tag")
+        }
+        if (updaterEnabled && !branch.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,99}"))) {
+            error("Updater branch must be a version branch containing only letters, digits, dots, underscores, or hyphens")
+        }
         val propertyMap = mapOf(
             "version" to project.version,
             "mc_version" to libs.versions.minecraft.get(),
@@ -207,14 +236,7 @@ tasks {
                     .start()
                 process.inputStream.bufferedReader().readLine()?.trim() ?: ""
             }),
-            "gh_branch" to (System.getenv("GITHUB_HEAD_REF")
-                ?: System.getenv("GITHUB_REF_NAME")?.takeIf { System.getenv("GITHUB_REF_TYPE") == "branch" }
-                ?: run {
-                    val process = ProcessBuilder("git", "branch", "--show-current")
-                        .directory(rootDir)
-                        .start()
-                    process.inputStream.bufferedReader().readLine()?.trim() ?: ""
-                }),
+            "gh_branch" to branch,
         )
 
         inputs.properties(propertyMap)

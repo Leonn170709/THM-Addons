@@ -48,6 +48,9 @@ public class THMSystem extends System<THMSystem> {
     private final SettingGroup sgKitbot = settings.createGroup("KitBot");
     private final SettingGroup sgPrefix = settings.createGroup("API Token");
 
+    public final Settings updaterSettings = new Settings();
+    private final SettingGroup sgUpdater = updaterSettings.createGroup("Updater");
+
     // Separate settings object for the Wavy Capes screen (not shown in the main THM tab)
     public final Settings wavyCapesSettings = new Settings();
     private final SettingGroup sgWavyCapes = wavyCapesSettings.createGroup("Wavy Capes");
@@ -86,6 +89,22 @@ public class THMSystem extends System<THMSystem> {
         .name("tabbed-highway-gui")
         .description("Opens HighwayBuilder in the tabbed control screen instead of Meteor's list.")
         .defaultValue(true)
+        .build()
+    );
+
+    public enum UpdateChannel { STABLE, DEV }
+
+    public final Setting<UpdateChannel> updateChannel = sgUpdater.add(new EnumSetting.Builder<UpdateChannel>()
+        .name("update-channel")
+        .description("Choose stable releases or development builds.")
+        .defaultValue(UpdateChannel.STABLE)
+        .build()
+    );
+
+    public final Setting<Boolean> autoUpdate = sgUpdater.add(new BoolSetting.Builder()
+        .name("auto-update")
+        .description("Install updates on startup. Restart to apply.")
+        .defaultValue(false)
         .build()
     );
 
@@ -448,6 +467,7 @@ public class THMSystem extends System<THMSystem> {
         CompoundTag tag = new CompoundTag();
         tag.putString("version", THMAddon.VERSION);
         tag.put("settings", settings.toTag());
+        tag.put("updaterSettings", updaterSettings.toTag());
         tag.put("wavyCapesSettings", wavyCapesSettings.toTag());
         tag.put("mainMenuSettings", mainMenuSettings.toTag());
         tag.putString(ACTIVE_HIGHWAY_PROFILE_TAG, (activeHighwayProfile == null ? Mode.None : activeHighwayProfile).name());
@@ -460,6 +480,9 @@ public class THMSystem extends System<THMSystem> {
         if (tag.contains("settings")) {
             settings.fromTag(tag.getCompound("settings").orElse(new CompoundTag()));
         }
+        // Older configs stored the Updater group in the main tab settings.
+        updaterSettings.fromTag(tag.getCompound(tag.contains("updaterSettings") ? "updaterSettings" : "settings")
+            .orElse(new CompoundTag()));
         if (tag.contains("wavyCapesSettings")) {
             wavyCapesSettings.fromTag(tag.getCompound("wavyCapesSettings").orElse(new CompoundTag()));
         }

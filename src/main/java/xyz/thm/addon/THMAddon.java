@@ -22,6 +22,7 @@ import meteordevelopment.meteorclient.utils.notebot.decoder.SongDecoders;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.metadata.ModMetadata;
@@ -66,6 +67,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
     }
     @Override
     public void onInitializeClient() {
+        ClientTickEvents.END_CLIENT_TICK.register(AddonUpdater::promptOnTitle);
         if (!FabricLoader.getInstance().isModLoaded("anarchymod")) {
             try {
                 PayloadTypeRegistry.serverboundPlay().register(JoinPayload.ID, JoinPayload.CODEC);

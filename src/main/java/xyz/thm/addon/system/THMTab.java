@@ -11,12 +11,15 @@ import meteordevelopment.meteorclient.gui.tabs.Tab;
 import meteordevelopment.meteorclient.gui.tabs.TabScreen;
 import meteordevelopment.meteorclient.gui.tabs.WindowTabScreen;
 import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
+import meteordevelopment.meteorclient.gui.widgets.WLabel;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import meteordevelopment.meteorclient.settings.Settings;
 import meteordevelopment.meteorclient.utils.misc.NbtUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import xyz.thm.addon.utils.ThmMembers;
+import xyz.thm.addon.gui.UpdaterScreen;
+import xyz.thm.addon.utils.AddonUpdater;
 
 public class THMTab extends Tab {
     private static boolean thmTabOpen;
@@ -40,6 +43,7 @@ public class THMTab extends Tab {
     private static class THMScreen extends WindowTabScreen {
         private final Settings settings;
         private WVerticalList settingsContainer;
+        private WLabel updaterStatus;
 
         public THMScreen(GuiTheme theme, Tab tab) {
             super(theme, tab);
@@ -51,6 +55,7 @@ public class THMTab extends Tab {
         public void tick() {
             super.tick();
             settings.tick(settingsContainer, theme);
+            if (updaterStatus != null) updaterStatus.set(AddonUpdater.status());
         }
 
         @Override
@@ -61,6 +66,11 @@ public class THMTab extends Tab {
         @Override
         public void initWidgets() {
             thmTabOpen = true;
+            WButton updater = add(theme.button("Addon Updater")).expandX().widget();
+            updater.action = () -> Minecraft.getInstance().gui.setScreen(new UpdaterScreen(theme));
+            updaterStatus = add(theme.label(AddonUpdater.status())).expandX().widget();
+            add(theme.horizontalSeparator()).expandX();
+
             settingsContainer = add(theme.verticalList()).expandX().widget();
             settingsContainer.add(theme.settings(settings)).expandX();
 
