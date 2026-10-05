@@ -69,6 +69,7 @@
     "meteor.ModuleMixin",
     "meteor.ModulesScreenMixin",
     "meteor.NametagsMixin",
+    "meteor.NoFallMixin",
     "meteor.NoSlowMixin",
     "meteor.NotebotMixin",
     "meteor.NotifierMixin",

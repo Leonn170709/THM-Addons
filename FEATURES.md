@@ -16,6 +16,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 - `scaffold-THM` — Scaffolds blocks under you.
 - `auto-portal` — For the Base Hunter who has places to be.
 - `Fly-Bypass` — Fly using packets.
+- `no-fall`: Meteor NoFall with NoGround mode, mace support, and optional reset packets on disable.
 - `highway-traveler` — Travels along anarchy highways with smart BFS obstacle avoidance.
 - `elytra-route` — Flies to a target bearing, restocks from inventory shulkers, and manages periodic home saves.
 
