@@ -21,7 +21,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 
 ## Mining and Building
 - `tunnel-miner` — Mines a tunnel block-by-block to target XZ coordinates at the same Y.
-- `Speedmine`: Packet mining with selectable instant/rebreak swap timing, automatic normal-break tool hold, TPS sync, and client prediction.
+- `Speedmine`: Packet mining with packet/world rebreak triggers, Off/Strict/Strong/Bypass modes, a rebreak-rate monitor, tool swap timing, TPS sync, and client prediction.
 - `BlockCounter` — Counts the selected blocks.
 - `Better-echest-farmer` — Better echest farmer that uses instant rebreak exploit.
 - `sign-render` — Renders sign text through walls with advanced clustering.

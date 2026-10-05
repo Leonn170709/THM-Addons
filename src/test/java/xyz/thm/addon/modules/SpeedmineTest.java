@@ -20,6 +20,47 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class SpeedmineTest {
     @ParameterizedTest
+    @EnumSource(Speedmine.RebreakMode.class)
+    void replacementsCannotRebreakBeforeInitialServerConfirmation(Speedmine.RebreakMode mode) {
+        assertFalse(mode.canRebreak(false, false, false));
+        assertFalse(mode.canRebreak(false, true, true));
+    }
+
+    @Test
+    void strictWaitsForEachServerResponse() {
+        var mode = Speedmine.RebreakMode.Strict;
+        assertTrue(mode.canRebreak(true, false, false));
+        assertFalse(mode.canRebreak(true, true, false));
+        assertTrue(mode.canRebreak(true, false, true));
+        assertFalse(mode.canRebreak(true, true, true));
+    }
+
+    @Test
+    void strongCanRebreakConsecutiveReplacementPacketsWithoutAnAirResponse() {
+        var mode = Speedmine.RebreakMode.Strong;
+        assertTrue(mode.canRebreak(true, false, false));
+        assertTrue(mode.canRebreak(true, true, false));
+        assertTrue(mode.isStrong(false), "Strong must skip the TPS start delay immediately.");
+    }
+
+    @Test
+    void bypassOnlyStopsWaitingAfterAConfirmedRebreak() {
+        var mode = Speedmine.RebreakMode.Bypass;
+        assertTrue(mode.canRebreak(true, false, false));
+        assertFalse(mode.canRebreak(true, true, false));
+        assertFalse(mode.isStrong(false));
+        assertTrue(mode.canRebreak(true, true, true));
+        assertTrue(mode.isStrong(true));
+        assertFalse(mode.canRebreak(true, true, false), "Starting another target must restore Strict behavior.");
+    }
+
+    @Test
+    void offNeverUsesTheInstantRebreakPath() {
+        assertFalse(Speedmine.RebreakMode.Off.canRebreak(true, false, false));
+        assertFalse(Speedmine.RebreakMode.Off.canRebreak(true, false, true));
+    }
+
+    @ParameterizedTest
     @CsvSource({"1000,20,20", "1000,10,10", "1000,5,5", "50,20,1", "100,10,1", "1000,0,0", "1000,-5,0", "1000,30,20", "-50,20,0"})
     void progressAndStartBudgetFollowServerTicks(long millis, float tps, double ticks) {
         assertEquals(ticks, Speedmine.serverTicks(millis, tps), 1e-9);
