@@ -7,6 +7,8 @@
 package xyz.thm.addon.mixin;
 
 import com.mojang.serialization.Codec;
+import net.minecraft.client.InactivityFpsLimit;
+import net.minecraft.util.StringRepresentable;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Mutable;
@@ -17,8 +19,6 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.Arrays;
-import net.minecraft.client.InactivityFpsLimit;
-import net.minecraft.util.StringRepresentable;
 
 /**
  * Adds a third value, "Never", to vanilla's "Reduce FPS when" option — the one Sodium re-exposes on

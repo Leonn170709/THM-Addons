@@ -23,8 +23,8 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
-import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.settings.DescribedOption;
 
 public class AntiConcrete extends Module {
     public AntiConcrete() {

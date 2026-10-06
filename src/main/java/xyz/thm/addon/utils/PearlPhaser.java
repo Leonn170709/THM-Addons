@@ -6,13 +6,11 @@
 
 package xyz.thm.addon.utils;
 
-import net.minecraft.network.protocol.game.ServerboundAttackPacket;
-
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.network.protocol.game.*;
+import net.minecraft.network.protocol.game.ServerboundAttackPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
@@ -26,8 +24,8 @@ import net.minecraft.world.level.block.ScaffoldingBlock;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
+import xyz.thm.addon.settings.DescribedOption;
 
 import java.util.function.BooleanSupplier;
 

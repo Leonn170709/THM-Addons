@@ -23,11 +23,12 @@ import net.minecraft.world.level.block.entity.SignBlockEntity;
 import net.minecraft.world.level.block.entity.SignText;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
+import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.utils.RenderUtilsTHM;
-import xyz.thm.addon.THMAddon;
 
 import java.util.*;
+
 public class SignRender extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgRender = settings.createGroup("Render");

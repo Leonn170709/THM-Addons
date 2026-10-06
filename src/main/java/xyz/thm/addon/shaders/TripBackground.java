@@ -20,13 +20,14 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
-import java.nio.ByteBuffer;
-import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
 import org.lwjgl.system.MemoryStack;
 import xyz.thm.addon.THMAddon;
+
+import java.nio.ByteBuffer;
+import java.util.Optional;
 
 // Joke "I'm high" full-frame post effect - the same Blaze3D framebuffer-post plumbing as
 // BlurBackground (attributeless big-triangle vertex shader, POST_PROCESSING_SNIPPET

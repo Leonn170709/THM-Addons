@@ -16,8 +16,8 @@ import meteordevelopment.meteorclient.gui.widgets.input.WDropdown;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WCheckbox;
 import net.minecraft.client.Minecraft;
-import xyz.thm.addon.settings.DropdownDescriptions;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.settings.DropdownDescriptions;
 import xyz.thm.addon.system.THMSystem;
 import xyz.thm.addon.utils.AddonUpdater;
 

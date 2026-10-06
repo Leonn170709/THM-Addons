@@ -6,6 +6,14 @@
 
 package xyz.thm.addon.mixin;
 
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.PlayerFaceExtractor;
+import net.minecraft.client.gui.components.PlayerTabOverlay;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.entity.player.Player;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -15,14 +23,6 @@ import xyz.thm.addon.utils.FastTab;
 
 import java.util.List;
 import java.util.UUID;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.components.PlayerFaceExtractor;
-import net.minecraft.client.gui.components.PlayerTabOverlay;
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.multiplayer.PlayerInfo;
-import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
-import net.minecraft.world.entity.player.Player;
 
 @Mixin(PlayerTabOverlay.class)
 public class PlayerListHudMixin {

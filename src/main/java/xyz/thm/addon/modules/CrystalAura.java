@@ -28,7 +28,6 @@ import meteordevelopment.meteorclient.events.entity.EntityRemovedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
-import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.friends.Friends;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -44,12 +43,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.protocol.game.ServerboundAttackPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.EntityTypes;
-import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.MobCategory;
-import net.minecraft.world.entity.TamableAnimal;
+import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Items;
@@ -65,19 +59,12 @@ import xyz.thm.addon.utils.InventoryManager;
 import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.utils.ThmMembers;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Comparator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
+import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 /** Java/Meteor port of Lambda's CrystalAura at e8eb261c9d605cc2312ea05063d0cb74d005ce46. */
 public class CrystalAura extends Module {

@@ -10,15 +10,15 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractButton;
 import net.minecraft.client.gui.components.AbstractWidget;
-import net.minecraft.client.gui.components.SpriteIconButton;
 import net.minecraft.client.gui.components.ImageButton;
+import net.minecraft.client.gui.components.SpriteIconButton;
 import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
-import xyz.thm.addon.THMAddon;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.gui.MainMenuFx;
 import xyz.thm.addon.gui.ThmStyledButtons;
 

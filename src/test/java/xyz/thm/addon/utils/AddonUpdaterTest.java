@@ -10,22 +10,22 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import xyz.thm.addon.system.THMSystem;
 
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.io.ByteArrayOutputStream;
-import java.security.MessageDigest;
-import java.util.HexFormat;
-import java.util.jar.JarOutputStream;
-import java.util.jar.JarEntry;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.nio.charset.StandardCharsets;
 import java.security.KeyPairGenerator;
+import java.security.MessageDigest;
 import java.security.Signature;
 import java.util.Base64;
+import java.util.HexFormat;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 

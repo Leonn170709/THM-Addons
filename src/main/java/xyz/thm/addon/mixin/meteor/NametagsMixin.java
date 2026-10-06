@@ -6,8 +6,12 @@
 
 package xyz.thm.addon.mixin.meteor;
 
+import com.mojang.blaze3d.platform.NativeImage;
 import meteordevelopment.meteorclient.events.render.Render2DEvent;
 import meteordevelopment.meteorclient.renderer.text.TextRenderer;
+import meteordevelopment.meteorclient.settings.BoolSetting;
+import meteordevelopment.meteorclient.settings.Setting;
+import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.friends.Friends;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -21,9 +25,6 @@ import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.world.entity.player.Player;
-import meteordevelopment.meteorclient.settings.BoolSetting;
-import meteordevelopment.meteorclient.settings.Setting;
-import meteordevelopment.meteorclient.settings.SettingGroup;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -41,8 +42,6 @@ import java.util.Optional;
 
 import static xyz.thm.addon.utils.ThmMembers.isIgnore;
 import static xyz.thm.addon.utils.ThmMembers.isKillOnSight;
-
-import com.mojang.blaze3d.platform.NativeImage;
 
 @Mixin(value = Nametags.class, priority = 1001)
 public abstract class NametagsMixin extends Module {

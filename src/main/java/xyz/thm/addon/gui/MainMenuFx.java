@@ -6,21 +6,21 @@
 
 package xyz.thm.addon.gui;
 
-import xyz.thm.addon.THMAddon;
-import xyz.thm.addon.system.THMSystem;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Comparator;
-import java.util.Random;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.PlainTextButton;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.language.I18n;
-import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.util.ARGB;
+import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.system.THMSystem;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Random;
 
 // ponytail: ported from BleachHack's BleachTitleScreen/ParticleManager/Particle/Window - an
 // OS-window-styled frame (same chrome as BleachHack's gui/window/Window.java, recolored to

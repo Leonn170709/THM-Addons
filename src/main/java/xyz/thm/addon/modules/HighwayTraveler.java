@@ -6,8 +6,10 @@
 
 package xyz.thm.addon.modules;
 
+import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
+import meteordevelopment.meteorclient.mixininterface.IVec3;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
@@ -30,10 +32,8 @@ import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.NetherPortalBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
-import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
-import meteordevelopment.meteorclient.mixininterface.IVec3;
-import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.utils.THMUtils;
 
 import java.util.*;

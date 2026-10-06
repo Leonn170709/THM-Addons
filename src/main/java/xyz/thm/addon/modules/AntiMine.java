@@ -15,8 +15,8 @@ import net.minecraft.core.Direction;
 import net.minecraft.server.level.BlockDestructionProgress;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
-import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.utils.PearlPhaser;
 import xyz.thm.addon.utils.PlacementUtils;
 

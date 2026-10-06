@@ -48,10 +48,10 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.InventoryManager;
+import xyz.thm.addon.utils.THMUtils;
 import xyz.thm.addon.utils.server.ServerReconnectService;
 import xyz.thm.addon.utils.server.ServerStatusHandler;
 import xyz.thm.addon.utils.server.ServerStatusHandler.ServerState;
-import xyz.thm.addon.utils.THMUtils;
 
 import java.util.*;
 import java.util.function.Predicate;

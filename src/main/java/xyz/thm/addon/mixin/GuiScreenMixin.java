@@ -6,18 +6,18 @@
 
 package xyz.thm.addon.mixin;
 
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Gui;
-import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.TitleScreen;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import xyz.thm.addon.THMAddon;
-import net.fabricmc.loader.api.FabricLoader;
 import xyz.thm.addon.gui.HighwayBuilderScreen;
 
 @Mixin(Gui.class)

@@ -8,11 +8,6 @@ package xyz.thm.addon.utils.render;
 
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.vertex.PoseStack;
-import java.util.ArrayList;
-import java.util.IdentityHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.mixininterface.IEntityRenderState;
 import meteordevelopment.meteorclient.systems.modules.Modules;
@@ -28,6 +23,8 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
 import xyz.thm.addon.mixin.accessor.RenderSetupAccessor;
 import xyz.thm.addon.mixin.accessor.RenderTypeAccessor;
+
+import java.util.*;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 

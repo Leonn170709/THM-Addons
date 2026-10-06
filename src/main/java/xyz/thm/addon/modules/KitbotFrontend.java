@@ -16,8 +16,8 @@ import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.world.entity.player.Player;
-import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.utils.kitbot.KitbotAvailabilityTracker;
 import xyz.thm.addon.utils.kitbot.KitbotChatCommandParser;
 

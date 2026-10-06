@@ -7,14 +7,14 @@
 package xyz.thm.addon.mixin.meteor;
 
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
-import meteordevelopment.meteorclient.mixininterface.IVec3;
-import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.mixin.AbstractClientPlayerAccessor;
+import meteordevelopment.meteorclient.mixininterface.IVec3;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.Settings;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.render.PopChams;
+import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.render.WireframeEntityRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import net.minecraft.world.entity.Entity;

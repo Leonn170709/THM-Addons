@@ -7,8 +7,8 @@
 package xyz.thm.addon.mixin.xaero;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.chunk.EmptyLevelChunk;
 import net.minecraft.world.level.chunk.LevelChunk;
 import org.spongepowered.asm.mixin.Mixin;

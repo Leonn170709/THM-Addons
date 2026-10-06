@@ -8,8 +8,8 @@ package xyz.thm.addon.mixin.meteor;
 
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.world.TickEvent;
-import meteordevelopment.meteorclient.systems.modules.combat.Offhand;
 import meteordevelopment.meteorclient.systems.modules.Modules;
+import meteordevelopment.meteorclient.systems.modules.combat.Offhand;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;

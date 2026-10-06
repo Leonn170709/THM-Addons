@@ -22,8 +22,8 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Items;
-import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.utils.RenderUtilsTHM;
 
 public class AntiPhase extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();

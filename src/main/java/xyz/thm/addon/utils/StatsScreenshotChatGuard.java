@@ -13,19 +13,15 @@ import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
-import net.minecraft.client.multiplayer.chat.GuiMessage;
-import net.minecraft.client.multiplayer.chat.GuiMessageTag;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.ChatComponent;
+import net.minecraft.client.multiplayer.chat.GuiMessage;
+import net.minecraft.client.multiplayer.chat.GuiMessageTag;
 import net.minecraft.network.chat.Component;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.mixin.accessor.ChatHudAccessor;
 
-import java.util.ArrayDeque;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.Locale;
-import java.util.Map;
+import java.util.*;
 
 public final class StatsScreenshotChatGuard {
     private static final int MAX_BUFFERED_MESSAGES = 1_000;

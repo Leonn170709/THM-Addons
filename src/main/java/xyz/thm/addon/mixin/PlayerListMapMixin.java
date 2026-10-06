@@ -6,6 +6,8 @@
 
 package xyz.thm.addon.mixin;
 
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.client.multiplayer.PlayerInfo;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Mutable;
@@ -17,8 +19,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import net.minecraft.client.multiplayer.ClientPacketListener;
-import net.minecraft.client.multiplayer.PlayerInfo;
 
 /**
  * Vanilla's playerListEntries is a plain HashMap that the render thread mutates on every join/leave

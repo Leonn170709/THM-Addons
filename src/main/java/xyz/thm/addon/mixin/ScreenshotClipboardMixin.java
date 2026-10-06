@@ -6,6 +6,7 @@
 
 package xyz.thm.addon.mixin;
 
+import com.mojang.blaze3d.platform.NativeImage;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import net.minecraft.client.Screenshot;
 import net.minecraft.network.chat.Component;
@@ -14,11 +15,10 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import xyz.thm.addon.THMAddon;
-import xyz.thm.addon.utils.THMUtils;
 import xyz.thm.addon.system.THMSystem;
+import xyz.thm.addon.utils.THMUtils;
 
 import javax.imageio.ImageIO;
-import com.mojang.blaze3d.platform.NativeImage;
 import java.awt.*;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;

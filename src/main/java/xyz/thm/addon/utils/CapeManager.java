@@ -6,20 +6,16 @@
 
 package xyz.thm.addon.utils;
 
+import com.mojang.blaze3d.platform.NativeImage;
 import meteordevelopment.meteorclient.MeteorClient;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.Identifier;
 import xyz.thm.addon.THMAddon;
-import com.mojang.blaze3d.platform.NativeImage;
+
 import java.io.File;
 import java.nio.file.Files;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.regex.Pattern;
 
 /** Downloads THM capes listed in the API's cape index to disk and registers them as textures on demand. */

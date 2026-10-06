@@ -6,10 +6,11 @@
 
 package xyz.thm.addon.gui;
 
+import net.minecraft.client.gui.components.AbstractWidget;
+
 import java.util.Collections;
 import java.util.Set;
 import java.util.WeakHashMap;
-import net.minecraft.client.gui.components.AbstractWidget;
 
 // Marks THM menu widgets without changing other screens' buttons.
 public class ThmStyledButtons {

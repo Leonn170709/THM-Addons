@@ -5,6 +5,7 @@
  */
 
 package xyz.thm.addon.modules;
+
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
@@ -21,11 +22,12 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.utils.RenderUtilsTHM;
 
 import java.util.ArrayList;
 import java.util.List;
+
 public class AutoPortal extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final List<BlockPos> waitingForBreak = new ArrayList<>();

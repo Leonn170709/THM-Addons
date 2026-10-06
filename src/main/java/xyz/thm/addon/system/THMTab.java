@@ -10,16 +10,16 @@ import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.tabs.Tab;
 import meteordevelopment.meteorclient.gui.tabs.TabScreen;
 import meteordevelopment.meteorclient.gui.tabs.WindowTabScreen;
-import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
 import meteordevelopment.meteorclient.gui.widgets.WLabel;
+import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import meteordevelopment.meteorclient.settings.Settings;
 import meteordevelopment.meteorclient.utils.misc.NbtUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
-import xyz.thm.addon.utils.ThmMembers;
 import xyz.thm.addon.gui.UpdaterScreen;
 import xyz.thm.addon.utils.AddonUpdater;
+import xyz.thm.addon.utils.ThmMembers;
 
 public class THMTab extends Tab {
     private static boolean thmTabOpen;

@@ -9,12 +9,12 @@ package xyz.thm.addon.utils;
 import com.google.gson.JsonObject;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.protocol.game.ClientboundBlockChangedAckPacket;
 import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

@@ -6,18 +6,9 @@
 
 package xyz.thm.addon.waveycapes;
 
-import org.joml.Matrix4f;
-import org.joml.Vector4f;
-
-import xyz.thm.addon.waveycapes.sim.BasicSimulation;
-import xyz.thm.addon.waveycapes.util.CapePoint;
-import xyz.thm.addon.waveycapes.util.Mth;
-import xyz.thm.addon.waveycapes.util.Vector3;
-import xyz.thm.addon.waveycapes.util.Vector4;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
-import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.client.model.player.PlayerModel;
@@ -30,6 +21,15 @@ import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.core.ClientAsset;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.player.PlayerSkin;
+import org.joml.Matrix4f;
+import org.joml.Vector4f;
+import xyz.thm.addon.waveycapes.sim.BasicSimulation;
+import xyz.thm.addon.waveycapes.util.CapePoint;
+import xyz.thm.addon.waveycapes.util.Mth;
+import xyz.thm.addon.waveycapes.util.Vector3;
+import xyz.thm.addon.waveycapes.util.Vector4;
+
+import java.util.List;
 
 public class WaveyCapeRenderLayer extends RenderLayer<AvatarRenderState, PlayerModel> {
 

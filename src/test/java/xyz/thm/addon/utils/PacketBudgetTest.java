@@ -9,7 +9,8 @@ package xyz.thm.addon.utils;
 import org.junit.jupiter.api.Test;
 import xyz.thm.addon.utils.PacketBudget.Plan;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PacketBudgetTest {
     // HighwayBuilder's costs: mine = start+stop (+swing), place = use-on-block (+swing).

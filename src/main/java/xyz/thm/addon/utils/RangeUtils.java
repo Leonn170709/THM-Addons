@@ -6,12 +6,12 @@
 
 package xyz.thm.addon.utils;
 
-import static meteordevelopment.meteorclient.MeteorClient.mc;
-
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
+
+import static meteordevelopment.meteorclient.MeteorClient.mc;
 
 /**
  * Direction-aware, AABB-based reach checks — the same measure the server uses.

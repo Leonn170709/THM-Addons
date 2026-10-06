@@ -5,9 +5,10 @@
  */
 
 package xyz.thm.addon.commands;
-import meteordevelopment.meteorclient.commands.Command;
+
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import meteordevelopment.meteorclient.commands.Command;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.client.multiplayer.ClientSuggestionProvider;
 import xyz.thm.addon.modules.Loadouts;

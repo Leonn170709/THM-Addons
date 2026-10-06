@@ -6,6 +6,7 @@
 
 package xyz.thm.addon.hud;
 
+import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -19,12 +20,11 @@ import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.network.PacketUtils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
-import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketType;
-import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.settings.DescribedOption;
 
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;

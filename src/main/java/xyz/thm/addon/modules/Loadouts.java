@@ -5,18 +5,16 @@
  */
 
 package xyz.thm.addon.modules;
-import java.io.*;
-import java.util.Map;
-import java.util.HashMap;
-import java.util.ArrayList;
-import java.util.ArrayDeque;
-import java.util.HashSet;
-import java.util.Set;
+
+import com.google.common.reflect.TypeToken;
 import com.google.gson.Gson;
 import com.mojang.logging.LogUtils;
-import oshi.util.tuples.Pair;
-import java.lang.reflect.Type;
-import com.google.common.reflect.TypeToken;
+import meteordevelopment.meteorclient.events.world.TickEvent;
+import meteordevelopment.meteorclient.settings.BoolSetting;
+import meteordevelopment.meteorclient.settings.IntSetting;
+import meteordevelopment.meteorclient.settings.Setting;
+import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
@@ -25,14 +23,16 @@ import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import meteordevelopment.meteorclient.settings.Setting;
-import meteordevelopment.meteorclient.settings.IntSetting;
-import meteordevelopment.meteorclient.settings.BoolSetting;
-import meteordevelopment.meteorclient.utils.player.InvUtils;
-import meteordevelopment.meteorclient.systems.modules.Module;
-import meteordevelopment.meteorclient.events.world.TickEvent;
+import oshi.util.tuples.Pair;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.THMUtils;
+
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.Reader;
+import java.io.Writer;
+import java.lang.reflect.Type;
+import java.util.*;
 
 public class Loadouts extends Module {
     public Loadouts() { super(THMAddon.PVP, "Loadouts", "Save and load inventory configurations."); }

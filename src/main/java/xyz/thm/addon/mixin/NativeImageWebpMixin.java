@@ -6,12 +6,13 @@
 
 package xyz.thm.addon.mixin;
 
+import com.mojang.blaze3d.platform.NativeImage;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import xyz.thm.addon.utils.webp.Vp8LDecoder;
-import com.mojang.blaze3d.platform.NativeImage;
+
 import java.nio.ByteBuffer;
 
 /** Every NativeImage.read(...) overload funnels through read(Format, ByteBuffer); intercepting it here adds WebP support everywhere (nametag icons, capes, and any other texture). */

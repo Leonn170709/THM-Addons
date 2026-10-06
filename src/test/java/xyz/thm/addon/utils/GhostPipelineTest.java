@@ -11,8 +11,8 @@ import com.mojang.blaze3d.pipeline.BindGroupLayout;
 import com.mojang.blaze3d.pipeline.ColorTargetState;
 import com.mojang.blaze3d.pipeline.DepthStencilState;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
-import xyz.thm.addon.utils.render.GhostRenderer;
 import org.junit.jupiter.api.Test;
+import xyz.thm.addon.utils.render.GhostRenderer;
 
 import static org.junit.jupiter.api.Assertions.*;
 

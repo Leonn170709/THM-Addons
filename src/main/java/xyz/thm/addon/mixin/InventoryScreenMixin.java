@@ -6,11 +6,6 @@
 
 package xyz.thm.addon.mixin;
 
-import org.jetbrains.annotations.Nullable;
-import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Unique;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -22,6 +17,11 @@ import net.minecraft.client.gui.screens.recipebook.RecipeUpdateListener;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.InventoryMenu;
+import org.jetbrains.annotations.Nullable;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import xyz.thm.addon.modules.Loadouts;
 

@@ -18,9 +18,9 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.Dimension;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.world.phys.Vec3;
+import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.utils.RenderUtilsTHM;
-import xyz.thm.addon.THMAddon;
 
 public class AxisViewer extends Module {
     private final SettingGroup sgOverworld = settings.createGroup("Overworld");

@@ -47,17 +47,12 @@ import xyz.thm.addon.mixin.accessor.ClientPlayerInteractionManagerTHMAccessor;
 import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
 import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.system.THMSystem;
-import xyz.thm.addon.utils.RangeUtils;
 import xyz.thm.addon.utils.InventoryManager;
+import xyz.thm.addon.utils.RangeUtils;
 import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.utils.ThmMembers;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.Deque;
-import java.util.List;
-import java.util.Locale;
+import java.util.*;
 import java.util.function.Function;
 
 import static xyz.thm.addon.THMAddon.THMColor;

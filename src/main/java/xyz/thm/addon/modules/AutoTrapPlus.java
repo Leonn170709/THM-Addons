@@ -10,8 +10,6 @@
  */
 package xyz.thm.addon.modules;
 
-import xyz.thm.addon.settings.DescribedOption;
-import xyz.thm.addon.utils.PacketPlaceTracker;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
@@ -42,11 +40,13 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
-import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.interfaces.LogoutSpotsPlayers;
 import xyz.thm.addon.interfaces.LogoutSpotsPoseData;
+import xyz.thm.addon.settings.DescribedOption;
+import xyz.thm.addon.utils.PacketPlaceTracker;
 import xyz.thm.addon.utils.PlacementUtils;
+import xyz.thm.addon.utils.RenderUtilsTHM;
 
 import java.util.*;
 

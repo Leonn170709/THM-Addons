@@ -6,9 +6,8 @@
 
 package xyz.thm.addon;
 
-import javax.swing.JOptionPane;
-import javax.swing.UIManager;
-import java.awt.Desktop;
+import javax.swing.*;
+import java.awt.*;
 import java.net.URI;
 
 // Jar's Main-Class (see build.gradle.kts jar.manifest): this is what runs when someone

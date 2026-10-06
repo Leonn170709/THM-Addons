@@ -6,13 +6,7 @@
 
 package xyz.thm.addon.utils;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.google.gson.Strictness;
+import com.google.gson.*;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import com.mojang.serialization.JsonOps;
@@ -27,18 +21,8 @@ import xyz.thm.addon.modules.HighwayBuilderTHM;
 import java.io.IOException;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
+import java.nio.file.*;
+import java.util.*;
 
 public final class HighwayPresetManager {
     private static final int MAX_JSON_BYTES = 512 * 1024;

@@ -6,12 +6,10 @@
 
 package xyz.thm.addon.mixin;
 
-import net.minecraft.client.gui.render.GuiRenderer;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.TitleScreen;
 import com.mojang.blaze3d.systems.RenderSystem;
-import xyz.thm.addon.THMAddon;
-import xyz.thm.addon.shaders.ShaderManager;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.render.GuiRenderer;
+import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.renderer.CubeMap;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -19,8 +17,10 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import xyz.thm.addon.shaders.ShaderBackground;
+import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.gui.MainMenuFx;
+import xyz.thm.addon.shaders.ShaderBackground;
+import xyz.thm.addon.shaders.ShaderManager;
 import xyz.thm.addon.system.THMSystem;
 
 @Mixin(GuiRenderer.class)

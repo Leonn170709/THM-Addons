@@ -21,9 +21,9 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import xyz.thm.addon.interfaces.LogoutSpotsPoseData;
 import xyz.thm.addon.mixin.accessor.LivingEntityAccessor;
+import xyz.thm.addon.mixin.accessor.PlayerModelPartsAccessor;
 
 import java.util.UUID;
-import xyz.thm.addon.mixin.accessor.PlayerModelPartsAccessor;
 
 @Mixin(targets = "meteordevelopment.meteorclient.systems.modules.render.LogoutSpots$Entry", remap = false)
 public abstract class LogoutSpotsEntryPoseMixin implements LogoutSpotsPoseData {

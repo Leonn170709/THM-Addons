@@ -8,6 +8,7 @@ package xyz.thm.addon.modules;
 
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
+import com.google.gson.JsonObject;
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
@@ -26,8 +27,6 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.util.Mth;
-import net.minecraft.core.*;
-import net.minecraft.world.phys.*;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -42,9 +41,8 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import com.google.gson.JsonObject;
-import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.utils.THMUtils;
 import xyz.thm.addon.utils.TrustedHttp;
 

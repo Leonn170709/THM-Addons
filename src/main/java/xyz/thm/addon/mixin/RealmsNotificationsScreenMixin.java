@@ -13,6 +13,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.resources.language.I18n;
 import net.minecraft.resources.Identifier;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -21,7 +22,6 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import xyz.thm.addon.gui.MainMenuFx;
-import net.minecraft.client.resources.language.I18n;
 import xyz.thm.addon.system.THMSystem;
 
 @Mixin(RealmsNotificationsScreen.class)

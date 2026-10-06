@@ -6,13 +6,10 @@
 
 package xyz.thm.addon.mixin.meteor;
 //Thank You BepHax for your awesome Mixins
+
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
-import meteordevelopment.meteorclient.settings.BoolSetting;
-import meteordevelopment.meteorclient.settings.DoubleSetting;
-import meteordevelopment.meteorclient.settings.EnumSetting;
-import meteordevelopment.meteorclient.settings.Setting;
-import meteordevelopment.meteorclient.settings.SettingGroup;
+import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.movement.NoSlow;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.core.BlockPos;
@@ -42,6 +39,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
+
 @Mixin(value = NoSlow.class, remap = false)
 public abstract class NoSlowMixin implements NoSlowAntiClimb {
     @Shadow @Final protected SettingGroup sgGeneral;

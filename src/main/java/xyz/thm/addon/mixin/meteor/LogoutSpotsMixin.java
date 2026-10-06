@@ -26,7 +26,8 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import xyz.thm.addon.interfaces.LogoutSpotsPlayers;
 import xyz.thm.addon.interfaces.LogoutSpotsPoseData;
-import xyz.thm.addon.mixin.accessor.*;
+import xyz.thm.addon.mixin.accessor.EntityPositionAccessor;
+import xyz.thm.addon.mixin.accessor.LivingEntityAccessor;
 import xyz.thm.addon.utils.render.GhostRenderer;
 import xyz.thm.addon.utils.render.SkinGhostPlayer;
 

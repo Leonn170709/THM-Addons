@@ -6,6 +6,8 @@
 
 package xyz.thm.addon.modules;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import com.mojang.authlib.GameProfile;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
@@ -19,8 +21,6 @@ import net.minecraft.network.chat.TextColor;
 import net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.utils.THMUtils;
 import xyz.thm.addon.utils.TrustedHttp;

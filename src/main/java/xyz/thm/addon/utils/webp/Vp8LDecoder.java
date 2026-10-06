@@ -6,8 +6,9 @@
 
 package xyz.thm.addon.utils.webp;
 
-import xyz.thm.addon.THMAddon;
 import com.mojang.blaze3d.platform.NativeImage;
+import xyz.thm.addon.THMAddon;
+
 import java.nio.ByteBuffer;
 
 /**

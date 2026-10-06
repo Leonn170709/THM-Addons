@@ -8,6 +8,11 @@ package xyz.thm.addon.mixin;
 
 import com.mojang.brigadier.ParseResults;
 import com.mojang.brigadier.suggestion.Suggestions;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.CommandSuggestions;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.multiplayer.ClientSuggestionProvider;
+import net.minecraft.util.FormattedCharSequence;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -19,11 +24,6 @@ import xyz.thm.addon.utils.kitbot.KitbotChatRouter;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.components.CommandSuggestions;
-import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.multiplayer.ClientSuggestionProvider;
-import net.minecraft.util.FormattedCharSequence;
 
 @Mixin(CommandSuggestions.class)
 public abstract class ChatInputSuggestorMixin {

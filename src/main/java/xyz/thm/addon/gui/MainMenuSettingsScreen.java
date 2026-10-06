@@ -6,19 +6,14 @@
 
 package xyz.thm.addon.gui;
 
+import meteordevelopment.meteorclient.settings.Setting;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.components.AbstractSliderButton;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.Checkbox;
-import net.minecraft.client.gui.components.CycleButton;
-import net.minecraft.client.gui.components.StringWidget;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.components.*;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 import xyz.thm.addon.shaders.ShaderManager;
 import xyz.thm.addon.system.THMSystem;
-import meteordevelopment.meteorclient.settings.Setting;
 
 import java.util.ArrayList;
 import java.util.List;

@@ -18,8 +18,6 @@ import meteordevelopment.meteorclient.utils.world.Dir;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
-import net.minecraft.core.*;
-import net.minecraft.world.phys.*;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;

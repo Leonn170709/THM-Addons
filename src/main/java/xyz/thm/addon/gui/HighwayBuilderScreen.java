@@ -9,12 +9,6 @@ package xyz.thm.addon.gui;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.GuiThemes;
 import meteordevelopment.meteorclient.gui.WidgetScreen;
-import meteordevelopment.meteorclient.systems.modules.Module;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
 import meteordevelopment.meteorclient.gui.WindowScreen;
 import meteordevelopment.meteorclient.gui.widgets.WKeybind;
 import meteordevelopment.meteorclient.gui.widgets.WLabel;
@@ -27,21 +21,21 @@ import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.settings.Settings;
+import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.client.gui.screens.Screen;
-import xyz.thm.addon.settings.DropdownDescriptions;
+import org.lwjgl.glfw.GLFW;
 import xyz.thm.addon.hud.HighwayHud;
 import xyz.thm.addon.modules.HighwayBuilderTHM;
+import xyz.thm.addon.settings.DropdownDescriptions;
 import xyz.thm.addon.system.THMSystem;
 import xyz.thm.addon.utils.HighwayPresetManager;
 import xyz.thm.addon.utils.TimeFormat;
 
 import java.io.IOException;
-import java.util.LinkedHashMap;
-import java.util.Locale;
-import java.util.Map;
-
-import org.lwjgl.glfw.GLFW;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.util.*;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 

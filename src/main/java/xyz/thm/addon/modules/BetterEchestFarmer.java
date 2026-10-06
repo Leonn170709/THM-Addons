@@ -33,8 +33,8 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.shapes.VoxelShape;
-import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.utils.RenderUtilsTHM;
 
 public class BetterEchestFarmer extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();

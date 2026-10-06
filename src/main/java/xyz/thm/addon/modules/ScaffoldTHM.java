@@ -6,8 +6,6 @@
 
 package xyz.thm.addon.modules;
 
-import xyz.thm.addon.settings.DescribedOption;
-import xyz.thm.addon.utils.PacketPlaceTracker;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.mixininterface.IVec3;
 import meteordevelopment.meteorclient.settings.*;
@@ -26,6 +24,8 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.settings.DescribedOption;
+import xyz.thm.addon.utils.PacketPlaceTracker;
 
 import java.util.List;
 

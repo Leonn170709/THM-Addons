@@ -7,13 +7,10 @@
 package xyz.thm.addon.utils;
 
 import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+
+import java.util.*;
 
 /**
  * Asks the server for the real state of blocks the client thinks are solid: the server answers every

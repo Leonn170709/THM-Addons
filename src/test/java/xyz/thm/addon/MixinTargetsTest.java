@@ -10,11 +10,7 @@ import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Type;
-import org.objectweb.asm.tree.AnnotationNode;
-import org.objectweb.asm.tree.ClassNode;
-import org.objectweb.asm.tree.MethodNode;
-import org.objectweb.asm.tree.MethodInsnNode;
-import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.*;
 
 import java.io.InputStream;
 import java.io.InputStreamReader;

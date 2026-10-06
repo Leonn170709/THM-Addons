@@ -9,8 +9,8 @@ package xyz.thm.addon.modules;
 import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
 
-import java.util.HashSet;
 import java.util.Arrays;
+import java.util.HashSet;
 
 import static org.junit.jupiter.api.Assertions.*;
 

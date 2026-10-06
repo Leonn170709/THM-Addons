@@ -6,6 +6,8 @@
 
 package xyz.thm.addon.utils;
 
+import net.minecraft.client.Minecraft;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -15,7 +17,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
-import net.minecraft.client.Minecraft;
 
 public final class THMStashMoverErrorLog {
     private static final long MAX_BYTES = 10L * 1024L * 1024L;

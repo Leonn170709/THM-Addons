@@ -8,13 +8,13 @@ package xyz.thm.addon.utils;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonParser;
+import net.minecraft.nbt.CompoundTag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import net.minecraft.nbt.CompoundTag;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;

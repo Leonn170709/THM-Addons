@@ -32,21 +32,22 @@ import net.minecraft.client.gui.screens.DisconnectedScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.network.protocol.game.ClientboundForgetLevelChunkPacket;
 import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
+import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.settings.DescribedOption;
+import xyz.thm.addon.utils.ChunkResync;
+import xyz.thm.addon.utils.THMUtils;
+import xyz.thm.addon.utils.ThmMembers;
 import xyz.thm.addon.utils.server.ServerReconnectService;
 import xyz.thm.addon.utils.server.ServerStatusHandler;
 import xyz.thm.addon.utils.server.ServerStatusHandler.ServerState;
-import xyz.thm.addon.utils.ThmMembers;
-import xyz.thm.addon.utils.ChunkResync;
-import xyz.thm.addon.settings.DescribedOption;
 
 import java.lang.reflect.Field;
 import java.util.*;
@@ -54,7 +55,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import xyz.thm.addon.utils.THMUtils;
 import static xyz.thm.addon.utils.THMUtils.getSaveName;
 
 public class THMHwyMonitor extends Module {

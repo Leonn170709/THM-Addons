@@ -6,12 +6,11 @@
 
 package xyz.thm.addon.utils;
 
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
-
-import net.minecraft.core.BlockPos;
-import net.minecraft.world.phys.Vec3;
 
 class RangeUtilsTest {
     private static final Vec3 EYE = new Vec3(0.5, 1.62, 0.5);

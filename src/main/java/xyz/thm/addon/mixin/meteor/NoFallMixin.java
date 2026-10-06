@@ -6,8 +6,6 @@
 
 package xyz.thm.addon.mixin.meteor;
 
-import xyz.thm.addon.settings.DescribedOption;
-
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.mixin.ServerboundMovePlayerPacketAccessor;
 import meteordevelopment.meteorclient.mixininterface.IServerboundMovePlayerPacket;
@@ -24,6 +22,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import xyz.thm.addon.settings.DescribedOption;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 

@@ -6,13 +6,10 @@
 
 package xyz.thm.addon.modules;
 
+import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
-import meteordevelopment.meteorclient.settings.BoolSetting;
-import meteordevelopment.meteorclient.settings.IntSetting;
-import meteordevelopment.meteorclient.settings.PacketListSetting;
-import meteordevelopment.meteorclient.settings.Setting;
-import meteordevelopment.meteorclient.settings.SettingGroup;
+import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.network.PacketUtils;
@@ -20,15 +17,6 @@ import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketType;
-import net.minecraft.network.protocol.common.ServerboundKeepAlivePacket;
-import net.minecraft.network.protocol.common.ServerboundPongPacket;
-import net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket;
-import net.minecraft.network.protocol.game.ServerboundClientTickEndPacket;
-import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
-import net.minecraft.network.protocol.game.ServerboundMoveVehiclePacket;
-import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
-import net.minecraft.network.protocol.game.ServerboundSwingPacket;
-import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import xyz.thm.addon.THMAddon;
 
 import java.util.Set;

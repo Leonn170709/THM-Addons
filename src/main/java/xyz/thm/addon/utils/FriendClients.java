@@ -10,17 +10,14 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import net.minecraft.client.Minecraft;
+
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
-import net.minecraft.client.Minecraft;
 
 /**
  * Friend lists of other clients, for {@link xyz.thm.addon.modules.FriendsSyncModule}.

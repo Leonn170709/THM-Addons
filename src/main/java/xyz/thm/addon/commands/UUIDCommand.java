@@ -9,10 +9,11 @@ package xyz.thm.addon.commands;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import meteordevelopment.meteorclient.commands.Command;
-import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.multiplayer.ClientSuggestionProvider;
-import java.util.List;
+import net.minecraft.client.multiplayer.PlayerInfo;
 import xyz.thm.addon.utils.AccountUtils;
+
+import java.util.List;
 
 public class UUIDCommand extends Command {
     public UUIDCommand() {

@@ -21,14 +21,15 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
-import java.nio.ByteBuffer;
-import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
 import org.lwjgl.system.MemoryStack;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.system.THMSystem;
+
+import java.nio.ByteBuffer;
+import java.util.Optional;
 
 // "Frosted glass" blur for just the window rectangle (not the whole shader background): copies
 // that region of the already-rendered framebuffer into a small offscreen texture, runs a real

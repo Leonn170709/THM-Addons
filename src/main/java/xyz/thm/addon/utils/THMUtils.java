@@ -6,6 +6,9 @@
 
 package xyz.thm.addon.utils;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import meteordevelopment.meteorclient.mixininterface.IServerboundMovePlayerPacket;
 import meteordevelopment.meteorclient.pathing.BaritoneUtils;
 import meteordevelopment.meteorclient.systems.modules.Modules;
@@ -36,8 +39,6 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.InputStream;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -46,11 +47,9 @@ import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
-
-import com.google.gson.Gson;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 import static meteordevelopment.meteorclient.utils.player.ChatUtils.error;

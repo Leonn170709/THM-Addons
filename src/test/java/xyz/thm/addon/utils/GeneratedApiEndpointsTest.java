@@ -17,7 +17,8 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.function.Supplier;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 // Messages never print the URLs: with a real secrets.properties they are secret.
 class GeneratedApiEndpointsTest {

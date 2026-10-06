@@ -21,7 +21,6 @@ import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.misc.Keybind;
 import meteordevelopment.meteorclient.utils.misc.Names;
 import meteordevelopment.meteorclient.utils.misc.input.KeyAction;
-import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.meteorclient.utils.render.NametagUtils;
 import meteordevelopment.meteorclient.utils.render.RenderUtils;
@@ -49,11 +48,11 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
-import xyz.thm.addon.settings.DescribedOption;
-import xyz.thm.addon.utils.RenderUtilsTHM;
 import xyz.thm.addon.mixin.accessor.PlayerInventoryAccessor;
+import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.utils.InventoryManager;
 import xyz.thm.addon.utils.RangeUtils;
+import xyz.thm.addon.utils.RenderUtilsTHM;
 
 import java.util.*;
 

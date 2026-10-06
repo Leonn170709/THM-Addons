@@ -35,7 +35,6 @@ import xyz.thm.addon.mixin.accessor.ClientPlayerInteractionManagerTHMAccessor;
 
 import java.util.Collection;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 
 @Mixin(value = Notebot.class, remap = false)

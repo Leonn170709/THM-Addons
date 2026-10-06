@@ -6,8 +6,9 @@
 
 package xyz.thm.addon.interfaces;
 
-import java.util.UUID;
 import net.minecraft.world.entity.player.PlayerSkin;
+
+import java.util.UUID;
 
 public interface LogoutSpotsPoseData {
     double thm$getX();

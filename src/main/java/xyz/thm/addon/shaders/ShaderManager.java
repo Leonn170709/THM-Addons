@@ -6,14 +6,14 @@
 
 package xyz.thm.addon.shaders;
 
+import net.minecraft.client.Minecraft;
+import net.minecraft.resources.Identifier;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.system.THMSystem;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
-import net.minecraft.client.Minecraft;
-import net.minecraft.resources.Identifier;
 
 // Discovers the .fsh backgrounds shipped under assets/thm-addon/shaders and picks which
 // one is currently active, per THMSystem's main-menu shader settings.
