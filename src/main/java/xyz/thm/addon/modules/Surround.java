@@ -24,6 +24,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.protocol.BundlePacket;
 import net.minecraft.network.protocol.Packet;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.protocol.game.*;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
@@ -36,6 +39,7 @@ import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LevelEvent;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.AABB;
@@ -58,263 +62,124 @@ import java.util.*;
 public class Surround extends Module {
     public static Surround INSTANCE;
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
-    private final SettingGroup sgPlace = settings.createGroup("Place Logic");
-    private final SettingGroup sgTiming = settings.createGroup("Timing");
-    private final SettingGroup sgCenter = settings.createGroup("Center Logic");
+    private final SettingGroup sgShape = settings.createGroup("Shape");
+    private final SettingGroup sgPlace = settings.createGroup("Placement");
+    private final SettingGroup sgMovement = settings.createGroup("Movement");
+    private final SettingGroup sgAdvanced = settings.createGroup("Advanced", false);
     private final SettingGroup sgRender = settings.createGroup("Render");
 
     private final Setting<List<Block>> blocks = sgGeneral.add(new BlockListSetting.Builder()
-        .name("blocks")
-        .description("Blocks to use for surrounding.")
-        .defaultValue(Blocks.OBSIDIAN, Blocks.CRYING_OBSIDIAN, Blocks.NETHERITE_BLOCK)
-        .build()
-    );
+        .name("blocks").description("Blocks to use for surrounding.")
+        .defaultValue(Blocks.OBSIDIAN, Blocks.CRYING_OBSIDIAN, Blocks.NETHERITE_BLOCK).build());
 
-    private final Setting<Boolean> packet = sgPlace.add(new BoolSetting.Builder()
-        .name("packet")
-        .description("Place without client prediction.")
-        .defaultValue(false)
-        .build()
-    );
+    private final Setting<PlacementMode> placementMode = sgGeneral.add(new EnumSetting.Builder<PlacementMode>()
+        .name("place-mode").description("How to place surround blocks.")
+        .defaultValue(PlacementMode.Normal).build());
 
-    private final Setting<Boolean> packetOnce = sgPlace.add(new BoolSetting.Builder()
-        .name("packet-place-once")
-        .description("Wait for a server answer before resending.")
-        .defaultValue(true)
-        .visible(packet::get)
-        .build()
-    );
+    private final Setting<ReplaceTrigger> replaceTrigger = sgGeneral.add(new EnumSetting.Builder<ReplaceTrigger>()
+        .name("replace-trigger").description("When to replace broken blocks.")
+        .defaultValue(ReplaceTrigger.onPacket).build());
 
-    private final Setting<Boolean> tagSwitch = sgGeneral.add(new BoolSetting.Builder()
-        .name("tag-switch")
-        .description("Disable once the surround is confirmed.")
-        .defaultValue(false)
-        .build()
-    );
+    private final Setting<Integer> blocksPerTick = sgGeneral.add(new IntSetting.Builder()
+        .name("blocks-per-tick").description("Maximum placements per tick.")
+        .defaultValue(4).min(1).sliderMax(8).build());
 
-    private final Setting<Integer> delay = sgPlace.add(new IntSetting.Builder()
-        .name("place-delay")
-        .description("Tick delay between block placements.")
-        .defaultValue(0)
-        .min(0)
-        .sliderMax(10)
-        .build()
-    );
+    private final Setting<Integer> delay = sgGeneral.add(new IntSetting.Builder()
+        .name("place-delay").description("Ticks between normal placement batches.")
+        .defaultValue(0).min(0).sliderMax(10).build());
 
-    private final Setting<Integer> blocksPerTick = sgPlace.add(new IntSetting.Builder()
-        .name("blocks-per-tick")
-        .description("Maximum blocks to place per tick.")
-        .defaultValue(4)
-        .min(1)
-        .sliderMax(8)
-        .build()
-    );
+    private final Setting<Coverage> coverage = sgShape.add(new EnumSetting.Builder<Coverage>()
+        .name("coverage").description("Which levels to surround.")
+        .defaultValue(Coverage.Feet).build());
+
+    private final Setting<Expansion> expansion = sgShape.add(new EnumSetting.Builder<Expansion>()
+        .name("expansion").description("When to extend the surround.")
+        .defaultValue(Expansion.Edges).build());
+
+    private final Setting<Boolean> support = sgShape.add(new BoolSetting.Builder()
+        .name("support").description("Add blocks below your feet.")
+        .defaultValue(true).build());
 
     private final Setting<Boolean> rotate = sgPlace.add(new BoolSetting.Builder()
-        .name("rotate")
-        .description("Rotate toward each placement.")
-        .defaultValue(false)
-        .build()
-    );
-
-    private final Setting<Boolean> extend = sgPlace.add(new BoolSetting.Builder()
-        .name("extend")
-        .description("Encases your feet even when standing on the edge of blocks.")
-        .defaultValue(true)
-        .build()
-    );
-
-    private final Setting<Boolean> strict = sgPlace.add(new BoolSetting.Builder()
-        .name("strict-directions")
-        .description("Require a visible support face.")
-        .defaultValue(false)
-        .build()
-    );
+        .name("rotate").description("Rotate toward each placement.")
+        .defaultValue(false).build());
 
     private final Setting<Boolean> airplace = sgPlace.add(new BoolSetting.Builder()
-        .name("airplace")
-        .description("Place without an adjacent block.")
-        .defaultValue(false)
-        .build()
-    );
-
-    private final Setting<Boolean> support = sgPlace.add(new BoolSetting.Builder()
-        .name("support")
-        .description("Places a block under your feet if open air.")
-        .defaultValue(true)
-        .build()
-    );
-    private final Setting<Boolean> attackCrystals = sgPlace.add(new BoolSetting.Builder()
-        .name("attack-crystals")
-        .description("Attacks crystals in the way before placing.")
-        .defaultValue(true)
-        .build()
-    );
-    private final Setting<Boolean> desyncProtection = sgPlace.add(new BoolSetting.Builder()
-        .name("desync-protection")
-        .description("Clear unconfirmed blocks intersecting new crystals.")
-        .defaultValue(true)
-        .build()
-    );
-    private final Setting<Boolean> headLevel = sgPlace.add(new BoolSetting.Builder()
-        .name("head-level")
-        .description("Add blocks at eye level.")
-        .defaultValue(false)
-        .build()
-    );
-    private final Setting<Boolean> coverHead = sgPlace.add(new BoolSetting.Builder()
-        .name("cover-head")
-        .description("Add a roof above your head.")
-        .defaultValue(false)
-        .build()
-    );
-    private final Setting<Boolean> mineExtend = sgPlace.add(new BoolSetting.Builder()
-        .name("mine-extend")
-        .description("Extends surround outward when a surround block is being mined.")
-        .defaultValue(false)
-        .build()
-    );
-    private final Setting<Boolean> multitask = sgPlace.add(new BoolSetting.Builder()
-        .name("multitask")
-        .description("Allows placing while using items.")
-        .defaultValue(false)
-        .build()
-    );
-
-    private final Setting<ReplaceTrigger> replaceTrigger = sgTiming.add(new EnumSetting.Builder<ReplaceTrigger>()
-        .name("replace-trigger")
-        .description("When to replace broken surround blocks.")
-        .defaultValue(ReplaceTrigger.onPacket)
-        .build()
-    );
-    private final Setting<Boolean> prePlaceExplosion = sgTiming.add(new BoolSetting.Builder()
-        .name("pre-place-explosion")
-        .description("Retry missing blocks on explosions.")
-        .defaultValue(true)
-        .visible(() -> replaceTrigger.get() == ReplaceTrigger.onPacket)
-        .build()
-    );
-    private final Setting<Boolean> prePlaceCrystalSpawn = sgTiming.add(new BoolSetting.Builder()
-        .name("pre-place-crystal-spawn")
-        .description("Retry missing blocks on crystal spawns.")
-        .defaultValue(true)
-        .visible(() -> replaceTrigger.get() == ReplaceTrigger.onPacket)
-        .build()
-    );
-    private final Setting<Double> shiftDelay = sgTiming.add(new DoubleSetting.Builder()
-        .name("shift-delay")
-        .description("Ticks between retries at the same position.")
-        .defaultValue(1.0)
-        .min(0.0)
-        .sliderMax(5.0)
-        .build()
-    );
-
-    private final Setting<Boolean> onlyOnGround = sgPlace.add(new BoolSetting.Builder()
-        .name("only-on-ground")
-        .description("Only place while on the ground.")
-        .defaultValue(false)
-        .build()
-    );
-
-    private final Setting<Boolean> disableOnJump = sgPlace.add(new BoolSetting.Builder()
-        .name("disable-on-jump")
-        .description("Automatically disables the module if you jump.")
-        .defaultValue(true)
-        .build()
-    );
-
-    private final Setting<Boolean> disableOnYChange = sgPlace.add(new BoolSetting.Builder()
-        .name("disable-on-y-change")
-        .description("Disables if your Y level changes.")
-        .defaultValue(true)
-        .build()
-    );
-
-    private final Setting<CenterMode> centerMode = sgCenter.add(new EnumSetting.Builder<CenterMode>()
-        .name("center-mode")
-        .description("Method used to center the player.")
-        .defaultValue(CenterMode.NCP)
-        .build()
-    );
-
-    private final Setting<Boolean> phased = sgCenter.add(new BoolSetting.Builder()
-        .name("phased")
-        .description("Skips centering while standing inside a solid client-side block.")
-        .defaultValue(false)
-        .build()
-    );
-
-    private final Setting<Boolean> render = sgRender.add(new BoolSetting.Builder()
-        .name("render")
-        .description("Renders the block placements.")
-        .defaultValue(true)
-        .build()
-    );
-
-    private final Setting<ShapeMode> shapeMode = sgRender.add(new EnumSetting.Builder<ShapeMode>()
-        .name("shape-mode")
-        .description("How the shapes are rendered.")
-        .defaultValue(ShapeMode.Both)
-        .visible(render::get)
-        .build()
-    );
-
-    private final Setting<SettingColor> sideColor = sgRender.add(new ColorSetting.Builder()
-        .name("side-color")
-        .description("The side color.")
-        .defaultValue(new SettingColor(THMAddon.THMSideColor.r, THMAddon.THMSideColor.g, THMAddon.THMSideColor.b, THMAddon.THMSideColor.a))
-        .visible(render::get)
-        .build()
-    );
-
-    private final Setting<SettingColor> lineColor = sgRender.add(new ColorSetting.Builder()
-        .name("line-color")
-        .description("The line color.")
-        .defaultValue(new SettingColor(THMAddon.THMColor.r, THMAddon.THMColor.g, THMAddon.THMColor.b, THMAddon.THMColor.a))
-        .visible(render::get)
-        .build()
-    );
-
-    private final Setting<Boolean> fade = sgRender.add(new BoolSetting.Builder()
-        .name("fade")
-        .description("Fades the rendered block over time.")
-        .defaultValue(true)
-        .visible(render::get)
-        .build()
-    );
-
-    private final Setting<Double> fadeTime = sgRender.add(new DoubleSetting.Builder()
-        .name("fade-time")
-        .description("How long the fade lasts in seconds.")
-        .defaultValue(0.5)
-        .min(0.1)
-        .sliderMax(2)
-        .visible(() -> render.get() && fade.get())
-        .build()
-    );
+        .name("airplace").description("Place without an adjacent block.")
+        .defaultValue(false).build());
 
     private final Setting<Boolean> inventorySwap = sgPlace.add(new BoolSetting.Builder()
-        .name("inventory-swap")
-        .description("Use blocks from your main inventory.")
-        .defaultValue(false)
-        .build()
-    );
-    private final Setting<Integer> confirmationTimeout = sgTiming.add(new IntSetting.Builder()
-        .name("confirmation-timeout")
-        .description("Ticks before clearing an unconfirmed placement.")
-        .defaultValue(20)
-        .min(1)
-        .max(200)
-        .sliderMax(100)
-        .build()
-    );
+        .name("inventory-swap").description("Use blocks from your main inventory.")
+        .defaultValue(false).build());
+
+    private final Setting<Boolean> multitask = sgPlace.add(new BoolSetting.Builder()
+        .name("multitask").description("Place while using items.")
+        .defaultValue(false).build());
+
+    private final Setting<Boolean> strict = sgPlace.add(new BoolSetting.Builder()
+        .name("strict-directions").description("Require a visible support face.")
+        .defaultValue(false).build());
+
+    private final Setting<CenterMode> centerMode = sgMovement.add(new EnumSetting.Builder<CenterMode>()
+        .name("center-mode").description("How to center the player.")
+        .defaultValue(CenterMode.NCP).build());
+
+    private final Setting<Boolean> phased = sgMovement.add(new BoolSetting.Builder()
+        .name("phased").description("Skip centering inside solid blocks.")
+        .defaultValue(false).visible(() -> centerMode.get() == CenterMode.NCP).build());
+
+    private final Setting<Boolean> onlyOnGround = sgMovement.add(new BoolSetting.Builder()
+        .name("only-on-ground").description("Only place while on the ground.")
+        .defaultValue(false).build());
+
+    private final Setting<DisableOn> disableOn = sgMovement.add(new EnumSetting.Builder<DisableOn>()
+        .name("disable-on").description("When movement disables Surround.")
+        .defaultValue(DisableOn.Both).build());
+
+    private final Setting<CrystalHandling> crystalHandling = sgAdvanced.add(new EnumSetting.Builder<CrystalHandling>()
+        .name("crystal-handling").description("How to handle obstructing crystals.")
+        .defaultValue(CrystalHandling.Both).build());
+
+    private final Setting<PacketEvents> packetEvents = sgAdvanced.add(new EnumSetting.Builder<PacketEvents>()
+        .name("packet-events").description("Extra packets that trigger placement checks.")
+        .defaultValue(PacketEvents.Both).visible(() -> replaceTrigger.get() == ReplaceTrigger.onPacket).build());
+
+    private final Setting<Double> shiftDelay = sgAdvanced.add(new DoubleSetting.Builder()
+        .name("shift-delay").description("Ticks between rejected placement retries.")
+        .defaultValue(1.0).min(0).sliderMax(5).build());
+
+    private final Setting<Integer> confirmationTimeout = sgAdvanced.add(new IntSetting.Builder()
+        .name("confirmation-timeout").description("Ticks before clearing an unconfirmed placement.")
+        .defaultValue(20).min(1).max(200).sliderMax(100).build());
+
+    private final Setting<Boolean> tagSwitch = sgAdvanced.add(new BoolSetting.Builder()
+        .name("auto-disable").description("Disable once the surround is confirmed.")
+        .defaultValue(false).build());
+
+    private final Setting<RenderStyle> renderStyle = sgRender.add(new EnumSetting.Builder<RenderStyle>()
+        .name("render-style").description("How to highlight placements.")
+        .defaultValue(RenderStyle.Fade).build());
+
+    private final Setting<ShapeMode> shapeMode = sgRender.add(new EnumSetting.Builder<ShapeMode>()
+        .name("shape-mode").description("Draw sides, outlines, or both.")
+        .defaultValue(ShapeMode.Both).visible(() -> renderStyle.get() != RenderStyle.Off).build());
+
+    private final Setting<SettingColor> sideColor = sgRender.add(new ColorSetting.Builder()
+        .name("side-color").description("Fill color.")
+        .defaultValue(new SettingColor(THMAddon.THMSideColor.r, THMAddon.THMSideColor.g, THMAddon.THMSideColor.b, THMAddon.THMSideColor.a)).visible(() -> renderStyle.get() != RenderStyle.Off && shapeMode.get() != ShapeMode.Lines).build());
+
+    private final Setting<SettingColor> lineColor = sgRender.add(new ColorSetting.Builder()
+        .name("line-color").description("Outline color.")
+        .defaultValue(new SettingColor(THMAddon.THMColor.r, THMAddon.THMColor.g, THMAddon.THMColor.b, THMAddon.THMColor.a)).visible(() -> renderStyle.get() != RenderStyle.Off && shapeMode.get() != ShapeMode.Sides).build());
+
+    private final Setting<Double> fadeTime = sgRender.add(new DoubleSetting.Builder()
+        .name("fade-time").description("Fade duration in seconds.")
+        .defaultValue(0.5).min(0.1).sliderMax(2).visible(() -> renderStyle.get() == RenderStyle.Fade).build());
 
     private final Map<BlockPos, Placement> pending = new HashMap<>();
     private final Map<BlockPos, Long> lastAttempt = new HashMap<>();
     private final Map<BlockPos, Long> mining = new HashMap<>();
     private final Map<BlockPos, Long> renderMap = new HashMap<>();
-    private final Set<BlockPos> serverSolid = new HashSet<>();
     private final PlacementBudget budget = new PlacementBudget();
     private Set<BlockPos> targets = Set.of();
     private ClientLevel world;
@@ -328,6 +193,89 @@ public class Surround extends Module {
     }
 
     @Override
+    public CompoundTag toTag() {
+        CompoundTag tag = super.toTag();
+        tag.putInt("surround-settings-version", 2);
+        return tag;
+    }
+
+    @Override
+    public Module fromTag(CompoundTag tag) { return super.fromTag(migrateSettings(tag)); }
+
+    static CompoundTag migrateSettings(CompoundTag source) {
+        CompoundTag migrated = source.copy();
+        Map<String, CompoundTag> values = new TreeMap<>();
+        Map<String, Boolean> expanded = new HashMap<>();
+        boolean resetLayout = source.getIntOr("surround-settings-version", 0) < 2;
+        for (Tag entry : source.getCompoundOrEmpty("settings").getListOrEmpty("groups")) {
+            if (!(entry instanceof CompoundTag group)) continue;
+            expanded.put(group.getStringOr("name", ""), group.getBooleanOr("sectionExpanded", false));
+            for (Tag value : group.getListOrEmpty("settings")) {
+                if (value instanceof CompoundTag setting) values.put(setting.getStringOr("name", ""), setting.copy());
+            }
+        }
+        putChoice(values, "place-mode", !oldFlag(values, "packet", false) ? PlacementMode.Normal
+            : oldFlag(values, "packet-place-once", true) ? PlacementMode.Packet : PlacementMode.PacketRepeat);
+        putChoice(values, "coverage", Coverage.values()[(oldFlag(values, "head-level", false) ? 1 : 0)
+            + (oldFlag(values, "cover-head", false) ? 2 : 0)]);
+        putChoice(values, "expansion", Expansion.values()[(oldFlag(values, "extend", true) ? 1 : 0)
+            + (oldFlag(values, "mine-extend", false) ? 2 : 0)]);
+        putChoice(values, "disable-on", DisableOn.values()[(oldFlag(values, "disable-on-jump", true) ? 1 : 0)
+            + (oldFlag(values, "disable-on-y-change", true) ? 2 : 0)]);
+        putChoice(values, "crystal-handling", CrystalHandling.values()[(oldFlag(values, "attack-crystals", true) ? 1 : 0)
+            + (oldFlag(values, "desync-protection", true) ? 2 : 0)]);
+        putChoice(values, "packet-events", PacketEvents.values()[(oldFlag(values, "pre-place-explosion", true) ? 1 : 0)
+            + (oldFlag(values, "pre-place-crystal-spawn", true) ? 2 : 0)]);
+        putChoice(values, "render-style", !oldFlag(values, "render", true) ? RenderStyle.Off
+            : oldFlag(values, "fade", true) ? RenderStyle.Fade : RenderStyle.Static);
+        if (!values.containsKey("auto-disable") && values.containsKey("tag-switch")) {
+            CompoundTag renamed = values.get("tag-switch").copy();
+            renamed.putString("name", "auto-disable");
+            values.put("auto-disable", renamed);
+        }
+        Map<String, ListTag> grouped = new LinkedHashMap<>();
+        for (String group : List.of("General", "Shape", "Placement", "Movement", "Advanced", "Render")) grouped.put(group, new ListTag());
+        for (var entry : values.entrySet()) {
+            String group = switch (entry.getKey()) {
+                case "blocks", "place-mode", "replace-trigger", "blocks-per-tick", "place-delay" -> "General";
+                case "coverage", "expansion", "support" -> "Shape";
+                case "rotate", "airplace", "inventory-swap", "multitask", "strict-directions" -> "Placement";
+                case "center-mode", "phased", "only-on-ground", "disable-on" -> "Movement";
+                case "crystal-handling", "packet-events", "shift-delay", "confirmation-timeout", "auto-disable" -> "Advanced";
+                case "render-style", "shape-mode", "side-color", "line-color", "fade-time" -> "Render";
+                default -> null;
+            };
+            if (group != null) grouped.get(group).add(entry.getValue());
+        }
+        ListTag groups = new ListTag();
+        grouped.forEach((name, settings) -> {
+            CompoundTag group = new CompoundTag();
+            group.putString("name", name);
+            group.putBoolean("sectionExpanded", resetLayout ? !name.equals("Advanced") : expanded.getOrDefault(name, !name.equals("Advanced")));
+            group.put("settings", settings);
+            groups.add(group);
+        });
+        CompoundTag settings = new CompoundTag();
+        settings.put("groups", groups);
+        migrated.put("settings", settings);
+        migrated.putInt("surround-settings-version", 2);
+        return migrated;
+    }
+
+    private static boolean oldFlag(Map<String, CompoundTag> values, String name, boolean fallback) {
+        CompoundTag setting = values.get(name);
+        return setting == null ? fallback : setting.getBooleanOr("value", fallback);
+    }
+
+    private static void putChoice(Map<String, CompoundTag> values, String name, Enum<?> choice) {
+        if (values.containsKey(name)) return;
+        CompoundTag setting = new CompoundTag();
+        setting.putString("name", name);
+        setting.putString("value", choice.toString());
+        values.put(name, setting);
+    }
+
+    @Override
     public void onActivate() {
         reset(false);
         world = mc.level;
@@ -335,7 +283,6 @@ public class Surround extends Module {
         initialY = mc.player.getY();
         if (centerMode.get() == CenterMode.Teleport) PlayerUtils.centerPlayer();
         rebuildTargets();
-        for (BlockPos pos : targets) if (!world.getBlockState(pos).canBeReplaced()) serverSolid.add(pos);
     }
 
     @Override
@@ -352,7 +299,6 @@ public class Surround extends Module {
         lastAttempt.clear();
         mining.clear();
         renderMap.clear();
-        serverSolid.clear();
         targets = Set.of();
         budget.reset();
         world = null;
@@ -385,8 +331,8 @@ public class Surround extends Module {
     }
 
     private boolean shouldDisable() {
-        return (disableOnJump.get() && mc.options.keyJump.isDown())
-            || (disableOnYChange.get() && Math.abs(mc.player.getY() - initialY) > 0.05);
+        return (disableOn.get().jump && mc.options.keyJump.isDown())
+            || (disableOn.get().height && Math.abs(mc.player.getY() - initialY) > 0.05);
     }
 
     private boolean canAct() {
@@ -398,9 +344,9 @@ public class Surround extends Module {
     }
 
     private void rebuildTargets() {
-        Set<BlockPos> feet = footprint(mc.player.getBoundingBox(), mc.player.blockPosition(), extend.get());
-        targets = plan(feet, headLevel.get(), coverHead.get(), airplace.get(), support.get());
-        if (mineExtend.get()) {
+        Set<BlockPos> feet = footprint(mc.player.getBoundingBox(), mc.player.blockPosition(), expansion.get().edges);
+        targets = plan(feet, coverage.get().eyes, coverage.get().roof, airplace.get(), support.get());
+        if (expansion.get().mining) {
             for (BlockPos pos : mining.keySet()) {
                 if (!targets.contains(pos)) continue;
                 for (Direction side : Direction.Plane.HORIZONTAL) {
@@ -411,7 +357,6 @@ public class Surround extends Module {
         }
         lastAttempt.keySet().removeIf(pos -> !targets.contains(pos) && !pending.containsKey(pos));
         mining.keySet().removeIf(pos -> !targets.contains(pos));
-        serverSolid.retainAll(targets);
     }
 
     static Set<BlockPos> footprint(AABB bounds, BlockPos base, boolean extend) {
@@ -450,13 +395,16 @@ public class Surround extends Module {
     }
 
     private void tryPlace(BlockPos pos) {
+        tryPlace(pos, false);
+    }
+
+    private void tryPlace(BlockPos pos, boolean immediate) {
         if (!canAct() || !targets.contains(pos) || pending.containsKey(pos)
             || !world.getBlockState(pos).canBeReplaced()) return;
-        if (replaceTrigger.get() == ReplaceTrigger.onPacket && serverSolid.contains(pos)) return;
-        if ((!packet.get() || packetOnce.get()) && !PacketPlaceTracker.canSend(pos)) return;
+        if ((!placementMode.get().packet || placementMode.get().waitForAnswer) && !PacketPlaceTracker.canSend(pos)) return;
         long now = System.nanoTime();
         Long previous = lastAttempt.get(pos);
-        if (previous != null && now - previous < shiftDelay.get() * 50_000_000L) return;
+        if (!immediate && previous != null && now - previous < shiftDelay.get() * 50_000_000L) return;
         int slot = findBlock();
         if (slot == -1) return;
         ItemStack stack = slot == 45 ? mc.player.getOffhandItem() : mc.player.getInventory().getItem(slot);
@@ -467,7 +415,7 @@ public class Surround extends Module {
             if (support.get() && targets.contains(pos.below())) tryPlace(pos.below());
             return;
         }
-        if (!budget.reserve(blocksPerTick.get(), delay.get())) return;
+        if (!budget.reserve(blocksPerTick.get(), immediate ? 0 : delay.get())) return;
         Placement placement = new Placement(world.getBlockState(pos), now);
         pending.put(pos, placement);
         int expectedGeneration = generation;
@@ -486,17 +434,22 @@ public class Surround extends Module {
                 cancel(pos, placement);
                 return;
             }
-            if (!budget.dispatch(blocksPerTick.get(), delay.get())) { pending.remove(pos); return; }
+            if (!budget.dispatch(blocksPerTick.get(), immediate ? 0 : delay.get())) { pending.remove(pos); return; }
+            if (immediate && rotate.get()) {
+                float yaw = (float) Rotations.getYaw(actualHit.getLocation()), pitch = (float) Rotations.getPitch(actualHit.getLocation());
+                mc.getConnection().send(new ServerboundMovePlayerPacket.Rot(yaw, pitch, mc.player.onGround(), mc.player.horizontalCollision));
+                Rotations.setCamRotation(yaw, pitch);
+            }
             lastAttempt.put(pos, System.nanoTime());
             placement.sent = true;
             placement.started = System.nanoTime();
             sendPlacement(actualHit, actualSlot);
             BlockState predicted = world.getBlockState(pos);
-            if (!packet.get() && !predicted.canBeReplaced()) placement.predicted = predicted;
-            if (packet.get() && packetOnce.get()) PacketPlaceTracker.markSent(pos, confirmationTimeout.get());
-            if (render.get()) renderMap.put(pos, System.nanoTime());
+            if (!placementMode.get().packet && !predicted.canBeReplaced()) placement.predicted = predicted;
+            if (placementMode.get().packet && placementMode.get().waitForAnswer) PacketPlaceTracker.markSent(pos, confirmationTimeout.get());
+            if ((renderStyle.get() != RenderStyle.Off)) renderMap.put(pos, System.nanoTime());
         };
-        if (rotate.get()) Rotations.rotate(Rotations.getYaw(hit.getLocation()), Rotations.getPitch(hit.getLocation()), 50, action);
+        if (rotate.get() && !immediate) Rotations.rotate(Rotations.getYaw(hit.getLocation()), Rotations.getPitch(hit.getLocation()), 50, action);
         else action.run();
     }
 
@@ -508,7 +461,7 @@ public class Surround extends Module {
         if (!Level.isInSpawnableBounds(pos) || !world.getWorldBorder().isWithinBounds(pos)
             || !world.getChunkSource().hasChunk(pos.getX() >> 4, pos.getZ() >> 4)
             || !world.getBlockState(pos).canBeReplaced()) return false;
-        if (attackCrystals.get()) {
+        if (crystalHandling.get().attack) {
             for (var entity : world.getEntities(null, new AABB(pos))) {
                 if (entity instanceof EndCrystal crystal && crystal.isAlive()) {
                     if (!attackedThisTick) {
@@ -568,10 +521,10 @@ public class Surround extends Module {
         }
         try {
             if (hand == InteractionHand.MAIN_HAND) {
-                if (!packet.get()) playerInventory.setSelectedSlot(slot);
+                if (!placementMode.get().packet) playerInventory.setSelectedSlot(slot);
                 if (inventory.getServerSlot() != slot) inventory.setSlotForced(slot);
             }
-            if (packet.get()) {
+            if (placementMode.get().packet) {
                 ((ClientPlayerInteractionManagerTHMAccessor) mc.gameMode).thm$sendSequencedPacket(world,
                     sequence -> new ServerboundUseItemOnPacket(hand, hit, sequence));
                 mc.player.swing(hand);
@@ -586,6 +539,16 @@ public class Surround extends Module {
     /** Called on the client thread before vanilla applies an authoritative block update. */
     public void onServerBlockUpdate(ClientLevel level, BlockPos pos, BlockState state) {
         if (!isActive() || level != world || mc.player == null) return;
+        Placement early = pending.get(pos);
+        if (early != null && early.speculative && state.canBeReplaced()) {
+            // This is the break update following the effect, not a second placement request.
+            early.speculative = false;
+            early.before = state;
+            ((ClientLevelPredictionAccessor) level).thm$getBlockStatePredictionHandler().updateKnownServerState(pos, state);
+            PacketPlaceTracker.forget(pos);
+            if (placementMode.get().packet && placementMode.get().waitForAnswer) PacketPlaceTracker.markSent(pos, confirmationTimeout.get());
+            return;
+        }
         Placement placement = pending.remove(pos);
         if (placement != null) {
             if (!placement.sent) budget.cancel();
@@ -593,11 +556,7 @@ public class Surround extends Module {
             if (placement.predicted != null && level.getBlockState(pos) == placement.predicted) level.setBlock(pos, state, 19);
         }
         PacketPlaceTracker.forget(pos);
-        if (state.canBeReplaced()) serverSolid.remove(pos);
-        else if (targets.contains(pos)) {
-            serverSolid.add(pos.immutable());
-            lastAttempt.remove(pos);
-        }
+        if (!state.canBeReplaced()) lastAttempt.remove(pos);
         if (replaceTrigger.get() != ReplaceTrigger.onPacket || !state.canBeReplaced() || !canAct()) return;
         rebuildTargets();
         if (!targets.contains(pos)) return;
@@ -605,7 +564,7 @@ public class Surround extends Module {
         prediction.updateKnownServerState(pos, state);
         // The newly sent placement retains this packet's air state for rollback.
         level.setBlock(pos, state, 19);
-        tryPlace(pos.immutable());
+        tryPlace(pos.immutable(), true);
     }
 
     public void onServerChunkUpdate(ClientLevel level, LevelChunk chunk) {
@@ -631,6 +590,14 @@ public class Surround extends Module {
         while (iterator.hasNext()) {
             var entry = iterator.next();
             Placement placement = entry.getValue();
+            if (placement.sent && placementMode.get() == PlacementMode.PacketRepeat) {
+                iterator.remove();
+                continue;
+            }
+            if (placement.predicted != null && world.getBlockState(entry.getKey()).canBeReplaced()) {
+                iterator.remove();
+                continue;
+            }
             if (now - placement.started < confirmationTimeout.get() * 50_000_000L) continue;
             if (!placement.sent) budget.cancel();
             boolean unconfirmed = placement.predicted != null && world.getBlockState(entry.getKey()) == placement.predicted;
@@ -669,17 +636,24 @@ public class Surround extends Module {
 
     private static boolean isAuxiliaryPacket(Packet<?> packet) {
         return packet instanceof ClientboundBlockDestructionPacket || packet instanceof ClientboundExplodePacket
+            || isBreakEffect(packet)
             || packet instanceof ClientboundAddEntityPacket spawn && spawn.getType() == EntityTypes.END_CRYSTAL;
     }
 
+    static boolean isBreakEffect(Packet<?> packet) {
+        return packet instanceof ClientboundLevelEventPacket effect && effect.getType() == LevelEvent.PARTICLES_DESTROY_BLOCK;
+    }
+
     private void onAuxiliaryPacket(Packet<?> received) {
-        if (received instanceof ClientboundBlockDestructionPacket crack && mineExtend.get()) {
+        if (isBreakEffect(received)) {
+            preplaceBreak((ClientboundLevelEventPacket) received);
+        } else if (received instanceof ClientboundBlockDestructionPacket crack && expansion.get().mining) {
             if (targets.contains(crack.getPos())) {
                 if (crack.getProgress() >= 0 && crack.getProgress() <= 9) mining.put(crack.getPos().immutable(), System.nanoTime());
                 else mining.remove(crack.getPos());
             }
         } else if (received instanceof ClientboundAddEntityPacket spawn && spawn.getType() == EntityTypes.END_CRYSTAL) {
-            if (desyncProtection.get()) {
+            if (crystalHandling.get().desync) {
                 AABB crystal = new AABB(spawn.getX() - 1, spawn.getY(), spawn.getZ() - 1, spawn.getX() + 1, spawn.getY() + 2, spawn.getZ() + 1);
                 for (var entry : new ArrayList<>(pending.entrySet())) {
                     if (entry.getValue().predicted != null && crystal.intersects(new AABB(entry.getKey()))) {
@@ -688,8 +662,30 @@ public class Surround extends Module {
                     }
                 }
             }
-            if (prePlaceCrystalSpawn.get() && replaceTrigger.get() == ReplaceTrigger.onPacket) fill();
-        } else if (received instanceof ClientboundExplodePacket && prePlaceExplosion.get() && replaceTrigger.get() == ReplaceTrigger.onPacket) fill();
+            if (packetEvents.get().crystals && replaceTrigger.get() == ReplaceTrigger.onPacket) fill();
+        } else if (received instanceof ClientboundExplodePacket && packetEvents.get().explosions && replaceTrigger.get() == ReplaceTrigger.onPacket) fill();
+    }
+
+    private void preplaceBreak(ClientboundLevelEventPacket effect) {
+        if (replaceTrigger.get() != ReplaceTrigger.onPacket || !canAct()) return;
+        rebuildTargets();
+        BlockPos pos = effect.getPos().immutable();
+        if (!targets.contains(pos) || pending.containsKey(pos)) return;
+        BlockState broken = Block.stateById(effect.getData()), original = world.getBlockState(pos);
+        if (broken.canBeReplaced() || (!original.canBeReplaced() && original.getBlock() != broken.getBlock())) return;
+        Placement placed = null;
+        try {
+            world.setBlock(pos, Blocks.AIR.defaultBlockState(), 19);
+            tryPlace(pos, true);
+            placed = pending.get(pos);
+            if (placed != null && placed.sent) {
+                placed.before = original.canBeReplaced() ? broken : original;
+                placed.speculative = true;
+                ((ClientLevelPredictionAccessor) world).thm$getBlockStatePredictionHandler().updateKnownServerState(pos, placed.before);
+            }
+        } finally {
+            if (placed == null || placed.predicted == null) world.setBlock(pos, original, 19);
+        }
     }
 
     private void center() {
@@ -706,19 +702,20 @@ public class Surround extends Module {
 
     @EventHandler
     private void onRender(Render3DEvent event) {
-        if (!render.get()) return;
+        if (renderStyle.get() == RenderStyle.Off) return;
         long now = System.nanoTime();
         renderMap.forEach((pos, time) -> {
-            double progress = fade.get() ? Math.clamp(1 - (now - time) / (fadeTime.get() * 1_000_000_000L), 0, 1) : 1;
+            double progress = (renderStyle.get() == RenderStyle.Fade) ? Math.clamp(1 - (now - time) / (fadeTime.get() * 1_000_000_000L), 0, 1) : 1;
             RenderUtilsTHM.renderBlockFaded(event, pos, sideColor.get(), lineColor.get(), shapeMode.get(), progress);
         });
     }
 
     private static class Placement {
-        final BlockState before;
+        BlockState before;
         long started;
         BlockState predicted;
         boolean sent;
+        boolean speculative;
         Placement(BlockState before, long started) { this.before = before; this.started = started; }
     }
 
@@ -745,10 +742,116 @@ public class Surround extends Module {
         void cancel() { reserved--; }
     }
 
+    public enum PlacementMode implements DescribedOption {
+        Normal(false, false, "Use normal placement with client prediction."),
+        Packet(true, true, "Send packets and wait for server confirmation."),
+        PacketRepeat(true, false, "Send packets without waiting for confirmation.");
+        final boolean packet;
+        final boolean waitForAnswer;
+        private final String description;
+        PlacementMode(boolean packet, boolean waitForAnswer, String description) {
+            this.packet = packet;
+            this.waitForAnswer = waitForAnswer;
+            this.description = description;
+        }
+        @Override public String description() { return description; }
+    }
+
+    public enum Coverage implements DescribedOption {
+        Feet(false, false, "Surround your feet."),
+        Eyes(true, false, "Surround your feet and eye level."),
+        Roof(false, true, "Surround your feet and add a roof."),
+        Full(true, true, "Surround your feet, eye level, and roof.");
+        final boolean eyes;
+        final boolean roof;
+        private final String description;
+        Coverage(boolean eyes, boolean roof, String description) {
+            this.eyes = eyes;
+            this.roof = roof;
+            this.description = description;
+        }
+        @Override public String description() { return description; }
+    }
+
+    public enum Expansion implements DescribedOption {
+        None(false, false, "Use a single block footprint."),
+        Edges(true, false, "Cover every block beneath your feet."),
+        Mining(false, true, "Extend beside blocks being mined."),
+        Both(true, true, "Cover edges and extend beside mined blocks.");
+        final boolean edges;
+        final boolean mining;
+        private final String description;
+        Expansion(boolean edges, boolean mining, String description) {
+            this.edges = edges;
+            this.mining = mining;
+            this.description = description;
+        }
+        @Override public String description() { return description; }
+    }
+
+    public enum DisableOn implements DescribedOption {
+        Never(false, false, "Stay enabled when you move."),
+        Jump(true, false, "Disable when you jump."),
+        HeightChange(false, true, "Disable when your height changes."),
+        Both(true, true, "Disable on jumps or height changes.");
+        final boolean jump;
+        final boolean height;
+        private final String description;
+        DisableOn(boolean jump, boolean height, String description) {
+            this.jump = jump;
+            this.height = height;
+            this.description = description;
+        }
+        @Override public String description() { return description; }
+    }
+
+    public enum CrystalHandling implements DescribedOption {
+        Off(false, false, "Skip crystal-specific handling."),
+        Attack(true, false, "Attack crystals blocking placement."),
+        Desync(false, true, "Clear unconfirmed blocks overlapping new crystals."),
+        Both(true, true, "Attack blocking crystals and clear conflicting predictions.");
+        final boolean attack;
+        final boolean desync;
+        private final String description;
+        CrystalHandling(boolean attack, boolean desync, String description) {
+            this.attack = attack;
+            this.desync = desync;
+            this.description = description;
+        }
+        @Override public String description() { return description; }
+    }
+
+    public enum PacketEvents implements DescribedOption {
+        None(false, false, "Skip extra explosion and crystal checks."),
+        Explosions(true, false, "Also check missing blocks on explosions."),
+        Crystals(false, true, "Also check missing blocks on crystal spawns."),
+        Both(true, true, "Also check on explosions and crystal spawns.");
+        final boolean explosions;
+        final boolean crystals;
+        private final String description;
+        PacketEvents(boolean explosions, boolean crystals, String description) {
+            this.explosions = explosions;
+            this.crystals = crystals;
+            this.description = description;
+        }
+        @Override public String description() { return description; }
+    }
+
+    public enum RenderStyle implements DescribedOption {
+        Off("Hide placement highlights."),
+        Static("Show highlights without fading."),
+        Fade("Fade placement highlights over time.");
+        private final String description;
+        RenderStyle(String description) {
+            this.description = description;
+        }
+        @Override public String description() { return description; }
+    }
+
     public enum ReplaceTrigger implements DescribedOption {
         onPacket, onClientWorld;
         @Override public String description() {
-            return this == onPacket ? "Replace as the server's break update arrives." : "Replace after the client world shows air.";
+            return this == onPacket ? "Preplace on break packets and repair client-world air." : "Place when the client world shows air.";
         }
     }
 

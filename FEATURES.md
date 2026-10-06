@@ -48,7 +48,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 
 ## PvP
 - `auto-trap+` — Traps a target player. Adds an optional anti-cheat friendly support placement mode.
-- `surround-plus` — Surround: server-confirmed placements, packet/client-world replacement, silent inventory swaps, extended feet, eye-level blocks, and a supported roof.
+- `surround-plus` — Surround: compact settings, client-air repair with optional break-packet preplace, confirmed predictions, silent inventory swaps, extended feet, eye-level blocks, and a supported roof.
 - `phase`: Pearl phasing with optional head-level self-web placement.
 - `anti-phase` — Places scaffolding inside players so their pearls land instead of phasing them.
 - `AutoConcrete` — Drops falling blocks above enemies' heads.

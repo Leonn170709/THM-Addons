@@ -141,8 +141,10 @@ addon-specific settings screen — don't confuse the two when adding a new modul
 replacement on the client thread before world application. Prediction retains the incoming state for rollback.
 
 **Surround:** `modules/Surround` replaces SurroundPlus, retaining the `surround-plus` registry name
-and showing as Surround. Unconfirmed predictions expire; packet replacement shares tick limits and delay
-with normal placement. Inventory swaps restore both items and the previous client/server slots.
+and showing as Surround. Both triggers repair client-world air; `onPacket` also preplaces on break effects
+and server updates, skipping batch delay and queued rotation while keeping the tick limit. Predictions expire;
+inventory swaps restore items and client/server slots. Compact dropdowns migrate previous toggle values.
+Only Advanced starts collapsed; later layout changes remain saved.
 
 **Dropdown tooltips:** Enum choices implement `settings/DescribedOption` for per-option descriptions.
 Keep descriptions to one short sentence. Use `DropdownDescriptions.configure` for string menus.
