@@ -22,7 +22,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 
 ## Mining and Building
 - `tunnel-miner` — Mines a tunnel block-by-block to target XZ coordinates at the same Y.
-- `Speedmine`: Packet mining with packet/world rebreak triggers, Off/Strict/Strong/Bypass modes, a rebreak-rate monitor, tool swap timing, TPS sync, and client prediction.
+- `Speedmine`: Packet mining with packet/world rebreak triggers, Off/Strict/Strong/Bypass modes, a rebreak-rate monitor, tool swap timing, TPS sync, client prediction, and optional multitasking while using items. Active and automatic mining continue with the inventory open.
 - `BlockCounter` — Counts the selected blocks.
 - `Better-echest-farmer` — Better echest farmer that uses instant rebreak exploit.
 - `sign-render` — Renders sign text through walls with advanced clustering.
@@ -56,7 +56,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 - `AntiConcreteDetection` — Breaks buttons and torches inside enemy hit-box.
 - `AntiFeetPlace` — Interrupts enemies FeetPlace with a chosen block (ender chest by default).
 - `armor-notify` — Notifies you when your armor pieces are low.
-- `crystal-aura-thm` — Custom crystal PvP automation with friend-safety, force-pop and id-predict logic.
+- **THMcrystal aura** (`thmcrystal-aura`) — Lambda-based crystal PvP with opportunity scoring, obsidian support, five prediction modes, and THM colors.
 - `anti-mine` — Phases or clips when your surround gets mined out.
 - `hole-jitter` — Random sub-block clips to break enemy crystal aura prediction.
 - `Loadouts` — Save and load inventory configurations.

@@ -6,6 +6,8 @@
 
 # 26.2 port gotchas
 
+- Crystal Aura uses internal name `thmcrystal-aura` and a title override because Meteor replaces existing modules with matching names. Reusing `crystal-aura` would remove the stock instance and break upstream class lookups. Minecraft 26.2 entity constants live in `EntityTypes`, and tame ownership uses `isOwnedBy`/entity references.
+
 - The 2026-10-04 live diagnostics confirmed `TitleBridgeScreen` from ForceCloseLoadingScreen, outer THM setup, 30 discovered backgrounds, and successful scaled shader drawing on Vulkan. An ImageButton sprite includes its vanilla frame; shrinking the whole sprite retains that frame, so crop its outer pixels when adding THM chrome.
 
 - Animated backgrounds reuse one offscreen texture between updates, independently of GUI FPS. Defaults are 25% resolution and 30 background FPS; 50% restores the old resolution and 0 FPS redraws every frame. Shader changes and texture resizes force an immediate update. Compiler checks and cadence tests do not measure live FPS.

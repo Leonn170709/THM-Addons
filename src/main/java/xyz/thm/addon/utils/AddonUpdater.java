@@ -21,6 +21,7 @@ import java.io.InputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.KeyFactory;
@@ -33,6 +34,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.jar.JarFile;
 
 public final class AddonUpdater {
@@ -42,6 +44,7 @@ public final class AddonUpdater {
         thread.setDaemon(true);
         return thread;
     });
+    private static final AtomicBoolean BUSY = new AtomicBoolean();
     private static volatile List<Entry> entries = List.of();
     private static volatile String status = "Not checked yet";
     private static volatile boolean restartRequired;
@@ -84,30 +87,25 @@ public final class AddonUpdater {
     }
 
     private static void refresh(boolean startup, Runnable onDone) {
-        WORKER.execute(() -> {
+        submit(() -> {
+            entries = List.of();
             if (FabricLoader.getInstance().isDevelopmentEnvironment()) {
                 status = "Updater disabled in development run";
-                finish(onDone);
                 return;
             }
             String url = GeneratedApiEndpoints.updaterUrl();
             String key = GeneratedApiEndpoints.updaterPublicKey();
             if (url == null || url.isBlank() || key.isBlank()) {
-                entries = List.of();
                 status = "Updater API is not configured in this build";
-                finish(onDone);
                 return;
             }
             if (!hasApiToken()) {
-                entries = List.of();
                 status = "Set a valid personal API token to access member updates";
-                finish(onDone);
                 return;
             }
             String branch = currentBranch();
             if (branch.isBlank()) {
                 status = "Updater disabled: this JAR has no build branch";
-                finish(onDone);
                 return;
             }
             try {
@@ -134,12 +132,11 @@ public final class AddonUpdater {
                 status = "Update check failed: " + safeMessage(e);
                 THMAddon.LOG.warn("Updater check failed: {}", safeMessage(e));
             }
-            finish(onDone);
-        });
+        }, onDone);
     }
 
     public static void install(Entry entry, Runnable onDone) {
-        WORKER.execute(() -> {
+        submit(() -> {
             if (!hasApiToken()) {
                 status = "Set a valid personal API token to access member updates";
             } else if (!entries.contains(entry)) {
@@ -147,12 +144,10 @@ public final class AddonUpdater {
             } else {
                 installNow(entry);
             }
-            finish(onDone);
-        });
+        }, onDone);
     }
 
     private static void installNow(Entry entry) {
-        Path pending = null;
         try {
             if (isInstalled(entry)) {
                 status = restartRequired ? "This build is installed. Restart Minecraft to load it."
@@ -163,34 +158,44 @@ public final class AddonUpdater {
             status = "Downloading " + entry.title() + "...";
             byte[] jar = TrustedHttp.getBytes(entry.url(), TrustedHttp.Kind.API, MAX_JAR_BYTES);
             if (jar == null) throw new IllegalStateException("Could not download JAR");
-            status = "Verifying SHA-256 for " + entry.title() + "...";
-            String actual = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(jar));
-            if (!MessageDigest.isEqual(actual.getBytes(StandardCharsets.US_ASCII), entry.sha256().getBytes(StandardCharsets.US_ASCII))) {
-                throw new IllegalStateException("JAR SHA-256 mismatch; download discarded, installed addon unchanged");
-            }
-            Path mods = FabricLoader.getInstance().getGameDir().resolve("mods").toRealPath();
+            Path mods = FabricLoader.getInstance().getGameDir().resolve("mods");
             Path current = FabricLoader.getInstance().getModContainer(THMAddon.MOD_ID).orElseThrow()
-                .getOrigin().getPaths().getFirst().toRealPath();
-            if (!current.getParent().equals(mods) || !current.getFileName().toString().endsWith(".jar")) {
-                throw new IllegalStateException("Addon JAR must be directly inside the mods folder");
-            }
-            pending = Files.createTempFile(mods, ".thm-update-", ".pending");
-            Files.write(pending, jar);
-            status = "Checking addon JAR metadata...";
-            validateJar(pending, entry);
-            status = "Replacing current addon JAR...";
-            Files.copy(current, mods.resolve("thm-addon-previous.jar.bak"), StandardCopyOption.REPLACE_EXISTING);
-            Files.move(pending, current, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                .getOrigin().getPaths().getFirst();
+            replaceJar(current, mods, jar, entry);
             installedUpdate = entry;
             restartRequired = true;
             status = "Installed " + entry.title() + ". Restart Minecraft to load it.";
         } catch (Exception e) {
             status = "Install failed: " + safeMessage(e);
             THMAddon.LOG.warn("Updater install failed: {}", safeMessage(e));
+        }
+    }
+
+    static void replaceJar(Path current, Path mods, byte[] bytes, Entry entry) throws Exception {
+        status = "Verifying downloaded JAR...";
+        byte[] expected = HexFormat.of().parseHex(entry.sha256());
+        if (bytes.length > MAX_JAR_BYTES || !MessageDigest.isEqual(
+            MessageDigest.getInstance("SHA-256").digest(bytes), expected)) {
+            throw new IllegalStateException("JAR SHA-256 mismatch; download discarded, installed addon unchanged");
+        }
+        if (Files.isSymbolicLink(current) || !Files.isRegularFile(current, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalStateException("Addon must be a regular JAR, not a symbolic link");
+        }
+        mods = mods.toRealPath();
+        current = current.toRealPath();
+        if (!current.getParent().equals(mods) || !current.getFileName().toString().endsWith(".jar")) {
+            throw new IllegalStateException("Addon JAR must be directly inside the mods folder");
+        }
+        Path pending = Files.createTempFile(mods, ".thm-update-", ".pending");
+        try {
+            Files.write(pending, bytes);
+            status = "Checking addon JAR metadata...";
+            validateJar(pending, entry);
+            status = "Replacing current addon JAR...";
+            Files.copy(current, mods.resolve("thm-addon-previous.jar.bak"), StandardCopyOption.REPLACE_EXISTING);
+            Files.move(pending, current, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         } finally {
-            if (pending != null) {
-                try { Files.deleteIfExists(pending); } catch (Exception ignored) {}
-            }
+            Files.deleteIfExists(pending);
         }
     }
 
@@ -241,9 +246,7 @@ public final class AddonUpdater {
             );
             URI jarUrl = URI.create(entry.url());
             if (!"https".equals(jarUrl.getScheme()) || jarUrl.getUserInfo() != null
-                || !feedUrl.getScheme().equalsIgnoreCase(jarUrl.getScheme())
-                || !feedUrl.getHost().equalsIgnoreCase(jarUrl.getHost())
-                || feedUrl.getPort() != jarUrl.getPort()
+                || !TrustedHttp.sameOrigin(feedUrl, jarUrl)
                 || !entry.branch().matches("[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
                 || !entry.commit().matches("[0-9a-fA-F]{40}")
                 || !entry.sha256().matches("[0-9a-fA-F]{64}")) {
@@ -273,6 +276,21 @@ public final class AddonUpdater {
     private static String currentBranch() {
         return FabricLoader.getInstance().getModContainer(THMAddon.MOD_ID).orElseThrow()
             .getMetadata().getCustomValue("github:branch").getAsString().trim();
+    }
+
+    private static void submit(Runnable action, Runnable callback) {
+        if (!BUSY.compareAndSet(false, true)) {
+            finish(callback);
+            return;
+        }
+        WORKER.execute(() -> {
+            try {
+                action.run();
+            } finally {
+                BUSY.set(false);
+                finish(callback);
+            }
+        });
     }
 
     private static void finish(Runnable callback) {

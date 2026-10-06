@@ -14,6 +14,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.URI;
 import java.net.UnknownHostException;
 import java.util.Locale;
 
@@ -79,6 +80,19 @@ class TrustedHttpTest {
     })
     void acceptsPublicUrls(String url, TrustedHttp.Kind kind) {
         assertNotNull(TrustedHttp.parseAllowedUri(url, kind), url);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "https://example.com/feed, https://example.com/a.jar, true",
+        "https://example.com/feed, https://EXAMPLE.com:443/a.jar, true",
+        "https://example.com/feed, https://example.com:8443/a.jar, false",
+        "https://example.com/feed, http://example.com/a.jar, false",
+        "https://example.com/feed, https://evil.example.com/a.jar, false",
+        "http://example.com/feed, http://example.com:80/a.jar, true"
+    })
+    void redirectsMustKeepTheSchemeHostAndPort(String from, String to, boolean allowed) {
+        assertEquals(allowed, TrustedHttp.sameOrigin(URI.create(from), URI.create(to)));
     }
 
     @Test

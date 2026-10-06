@@ -132,6 +132,8 @@ startup, so `THMHwyMonitor` and `HighwayTools` are registered without a separate
 Highway", `THMAddon.PVP` = "THM PVP") via `onRegisterCategories()`. `THMTab` is a separate,
 addon-specific settings screen — don't confuse the two when adding a new module's config surface.
 
+**Crystal Aura:** `modules/CrystalAura` ports Lambda's opportunity scoring and prediction modes. Its visible title is THMcrystal aura; `thmcrystal-aura` keeps Meteor's registry intact. Async work stays bounded and runs world operations on the client thread. Source and adaptations: `docs/crystal-aura-lambda-port.md`.
+
 **Speedmine rebreak:** `ClientLevelSpeedmineMixin` handles server block updates on the client
 thread before world application. Packet-triggered prediction retains the incoming state for rollback.
 

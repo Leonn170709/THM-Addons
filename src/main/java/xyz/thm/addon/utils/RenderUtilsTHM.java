@@ -124,6 +124,25 @@ public class RenderUtilsTHM {
         event.renderer.box(pos, sideColor, lineColor, shapeMode, 0);
     }
 
+    /** A vertical color gradient using Meteor's backend-independent primitives. */
+    public static void renderBlockGradient(Render3DEvent event, BlockPos pos,
+                                          Color bottomFill, Color topFill, Color bottomLine, Color topLine) {
+        double x = pos.getX(), y = pos.getY(), z = pos.getZ();
+        double X = x + 1, Y = y + 1, Z = z + 1;
+        event.renderer.quad(x, y, z, X, y, z, X, y, Z, x, y, Z, bottomFill);
+        event.renderer.quad(x, Y, z, x, Y, Z, X, Y, Z, X, Y, z, topFill);
+        event.renderer.quad(x, Y, z, X, Y, z, X, y, z, x, y, z, topFill, topFill, bottomFill, bottomFill);
+        event.renderer.quad(X, Y, Z, x, Y, Z, x, y, Z, X, y, Z, topFill, topFill, bottomFill, bottomFill);
+        event.renderer.quad(x, Y, Z, x, Y, z, x, y, z, x, y, Z, topFill, topFill, bottomFill, bottomFill);
+        event.renderer.quad(X, Y, z, X, Y, Z, X, y, Z, X, y, z, topFill, topFill, bottomFill, bottomFill);
+        event.renderer.boxLines(x, y, z, X, y, Z, bottomLine, 0);
+        event.renderer.boxLines(x, Y, z, X, Y, Z, topLine, 0);
+        event.renderer.line(x, y, z, x, Y, z, bottomLine, topLine);
+        event.renderer.line(X, y, z, X, Y, z, bottomLine, topLine);
+        event.renderer.line(x, y, Z, x, Y, Z, bottomLine, topLine);
+        event.renderer.line(X, y, Z, X, Y, Z, bottomLine, topLine);
+    }
+
     /** Lines only, same color for both. */
     public static void renderBlock(Render3DEvent event, @NotNull BlockPos pos, Color color) {
         event.renderer.box(pos, color, color, ShapeMode.Lines, 0);

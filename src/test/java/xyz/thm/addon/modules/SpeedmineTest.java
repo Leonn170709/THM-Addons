@@ -13,12 +13,38 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
+import xyz.thm.addon.utils.InventoryManager;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class SpeedmineTest {
+    @ParameterizedTest
+    @CsvSource({
+        "false,false,false,0,false",
+        "false,true,false,0,true",
+        "false,false,true,10,true",
+        "false,false,false,10,true",
+        "true,true,false,0,false",
+        "true,false,true,10,false",
+        "true,true,true,10,false",
+        "true,false,false,10,false"
+    })
+    void multitaskAllowsManualAndAutomaticItemUse(boolean multitask, boolean usingItem, boolean eating,
+                                                int priority, boolean expectedPause) {
+        assertEquals(expectedPause, Speedmine.shouldPauseMining(multitask, usingItem, eating, priority));
+    }
+
+    @Test
+    void multitaskStillYieldsToOtherInventoryOwners() {
+        for (int priority : new int[] {InventoryManager.Priority.TOTEM, InventoryManager.Priority.SURROUND,
+            InventoryManager.Priority.PEARL_PHASE}) {
+            assertTrue(Speedmine.shouldPauseMining(true, false, false, priority));
+            assertTrue(Speedmine.shouldPauseMining(true, true, true, priority));
+        }
+    }
+
     @ParameterizedTest
     @EnumSource(Speedmine.RebreakMode.class)
     void replacementsCannotRebreakBeforeInitialServerConfirmation(Speedmine.RebreakMode mode) {

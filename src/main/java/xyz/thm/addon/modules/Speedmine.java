@@ -238,6 +238,12 @@ public class Speedmine extends Module {
         .defaultValue(false)
         .build());
 
+    public final Setting<Boolean> multitask = sgMine.add(new BoolSetting.Builder()
+        .name("multitask")
+        .description("Continue mining while using items.")
+        .defaultValue(false)
+        .build());
+
     public final Setting<Double> range = sgMine.add(new DoubleSetting.Builder()
         .name("range")
         .description("Maximum block-breaking distance.")
@@ -435,7 +441,7 @@ public class Speedmine extends Module {
         updateRebreakMonitor();
 
         InventoryManager inventory = InventoryManager.getInstance();
-        if (mc.player.isUsingItem() || inventory.isEating() || inventory.getCurrentPriority() > InventoryManager.Priority.NORMAL) {
+        if (shouldPauseMining()) {
             releaseHeldSlot();
             if (primary != null) primary.lastProgressMs = now;
             if (secondary != null) secondary.lastProgressMs = now;
@@ -475,9 +481,7 @@ public class Speedmine extends Module {
     @EventHandler(priority = EventPriority.LOWEST)
     private void onTickPost(TickEvent.Post event) {
         if (mc.player == null || mc.level == null || heldSlot == -1) return;
-        InventoryManager inventory = InventoryManager.getInstance();
-        if (!silentSwap.get() || mc.player.isUsingItem() || inventory.isEating()
-            || inventory.getCurrentPriority() > InventoryManager.Priority.NORMAL) {
+        if (!silentSwap.get() || shouldPauseMining()) {
             releaseHeldSlot();
             return;
         }
@@ -517,9 +521,7 @@ public class Speedmine extends Module {
             || !rebreakMode.get().canRebreak(lastBreakConfirmed, rebreakPending, bypassConfirmed)
             || primary != null || secondary != null || hasPendingNormalBreak()
             || outOfRange(pos) || state.isAir() || !BlockUtils.canBreak(pos, state)) return;
-        InventoryManager inventory = InventoryManager.getInstance();
-        if (mc.player.isUsingItem() || inventory.isEating()
-            || inventory.getCurrentPriority() > InventoryManager.Priority.NORMAL) return;
+        if (shouldPauseMining()) return;
         boolean strong = rebreakMode.get().isStrong(bypassConfirmed);
         if (!strong && !canStart()) return;
 
@@ -538,8 +540,7 @@ public class Speedmine extends Module {
             if (!packet || packetReplacement != null) tryRebreak(pos, packet ? packetReplacement : state, packet);
             return;
         }
-        InventoryManager inventory = InventoryManager.getInstance();
-        if (mc.player.isUsingItem() || inventory.isEating() || inventory.getCurrentPriority() > InventoryManager.Priority.NORMAL) return;
+        if (shouldPauseMining()) return;
         if (hasPendingNormalBreak()) {
             if (queueEnabled.get()) queue.addLast(pos.immutable());
             return;
@@ -949,6 +950,16 @@ public class Speedmine extends Module {
 
     // ── Util ─────────────────────────────────────────────────────────────────
 
+    private boolean shouldPauseMining() {
+        InventoryManager inventory = InventoryManager.getInstance();
+        return shouldPauseMining(multitask.get(), mc.player.isUsingItem(), inventory.isEating(), inventory.getCurrentPriority());
+    }
+
+    static boolean shouldPauseMining(boolean multitask, boolean usingItem, boolean eating, int priority) {
+        return (!multitask && (usingItem || eating))
+            || (priority > InventoryManager.Priority.NORMAL && (!multitask || priority != InventoryManager.Priority.EATING));
+    }
+
     private void resetRebreakMonitor() {
         rebreakMonitorStartNs = System.nanoTime();
         rebreakCount = 0;
@@ -1144,8 +1155,7 @@ public class Speedmine extends Module {
         public double progress() {
             if (mc.player == null || mc.level == null || hardness < 0) return 0;
             long now = System.currentTimeMillis();
-            InventoryManager inventory = InventoryManager.getInstance();
-            if (!mc.player.isUsingItem() && !inventory.isEating() && inventory.getCurrentPriority() == InventoryManager.Priority.NORMAL) {
+            if (!shouldPauseMining()) {
                 elapsedTicks += serverTicks(now - lastProgressMs, effectiveTps());
             }
             lastProgressMs = now;

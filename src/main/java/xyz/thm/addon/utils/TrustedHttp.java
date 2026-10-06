@@ -276,6 +276,18 @@ public final class TrustedHttp {
         return true;
     }
 
+    static boolean sameOrigin(URI first, URI second) {
+        if (first.getScheme() == null || second.getScheme() == null
+            || first.getHost() == null || second.getHost() == null) return false;
+        return first.getScheme().equalsIgnoreCase(second.getScheme())
+            && first.getHost().equalsIgnoreCase(second.getHost())
+            && effectivePort(first) == effectivePort(second);
+    }
+
+    private static int effectivePort(URI uri) {
+        return uri.getPort() != -1 ? uri.getPort() : ("https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80);
+    }
+
     private static byte[] exchange(
         String method,
         URI start,
@@ -330,8 +342,8 @@ public final class TrustedHttp {
                     }
                     URI allowed = parseAllowedUri(current.resolve(location).toString(), kind);
                     if (allowed == null) return null;
-                    if (!current.getHost().equalsIgnoreCase(allowed.getHost())) {
-                        LOG.warn("Rejected cross-host {} redirect", kind);
+                    if (!sameOrigin(start, allowed)) {
+                        LOG.warn("Rejected cross-origin {} redirect", kind);
                         return null;
                     }
                     current = allowed;
