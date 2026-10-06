@@ -153,6 +153,10 @@ totem and tool swaps work with a full inventory, including `minimum-empty-slots`
 
 ### Highway Monitor Recovery
 
+**ChunkRefresh** pauses HighwayBuilder, Timer, and Speed, then walks one chunk backward. It reports a view distance of 2 while checking for a server unload of the stalled chunk. If that chunk remains tracked, it extends the retreat to four chunks, restores the latest reported options, and returns to the first backstep. It resumes only after receiving fresh chunk data and finding that chunk loaded. Baritone cannot break or place during this recovery; its settings are restored afterward. Failures stop Baritone, restore the distance, and leave HighwayBuilder paused without an automatic disconnect. This mode also works with auto-reconnect off.
+
+Vanilla 26.2 clamps the client request to a server-side minimum of 2 and retains a tracking margin. An unchanged options packet or a local chunk deletion cannot force a resend. The recovery relies on the server honoring distance changes and chunk-unload packets; servers with larger minimums or fixed view distances may reject this approach. Diagonal backsteps move one chunk along each travel axis. F3+A+S alone refreshes outer chunks and cannot guarantee nearby chunks are reloaded.
+
 | Setting | Default / Range | What to change it for |
 | --- | --- | --- |
 | `auto-recover` | `true` | Enables automatic monitor corrections while HighwayBuilder is active. |
@@ -161,7 +165,8 @@ totem and tool swaps work with a full inventory, including `minimum-empty-slots`
 | `max-correction-distance` | `10.0`, range `0.5-32.0` | Largest automatic horizontal correction allowed. |
 | `repair-misalignments` | `false` | Steps back 2 blocks first so the builder can repair possible bad paving/digging. |
 | `recover-forward-stalls` | `true`; shown when `auto-recover` is on | Escapes Forward/Center stalls with a forced backstep. |
-| `recover-rubberband-ghostblocks` | `true`; shown when `auto-recover` is on | Uses disconnect/reconnect recovery for long rubberband or ghostblock stalls. |
+| `recover-rubberband-ghostblocks` | `true`; shown when `auto-recover` is on | Enables recovery for long rubberband or ghostblock stalls. |
+| `rubberband-recovery-mode` | `Reconnect`; options `Reconnect`, `ChunkRefresh` | Reconnect reloads the world; ChunkRefresh retreats and reloads affected chunks without leaving the server. |
 
 
 
@@ -346,5 +351,6 @@ Every THM debug category also writes to `logs/thm/<start-time>/thm-debug-all.log
 | `repair-misalignments` | `false` | Always | During normal recovery, steps backward 2 blocks first to let HighwayBuilder repair possible misaligned paving or digging. |
 | `recover-forward-stalls` | `true` | `auto-recover` is on | Runs monitor recovery if HighwayBuilder remains stuck in Forward or Center, including a forced 2-block backstep. |
 | `forward-stall-timeout-seconds` | `20`, range `10-900`, slider `10-300` | `auto-recover` and `recover-forward-stalls` are on | Seconds without meaningful Forward progress or Center transition before forced stall escape begins. |
-| `recover-rubberband-ghostblocks` | `true` | `auto-recover` is on | Disconnects and uses AutoReconnect when Forward appears rubberbanded or ghostblocked for too long. |
+| `recover-rubberband-ghostblocks` | `true` | `auto-recover` is on | Uses the selected recovery mode for long Forward rubberband or ghostblock stalls. |
+| `rubberband-recovery-mode` | `Reconnect`; `Reconnect`, `ChunkRefresh` | `auto-recover` and `recover-rubberband-ghostblocks` are on | Reconnect uses AutoReconnect. ChunkRefresh uses Baritone and a temporary reported view distance of 2. |
 | `recovery-cooldown` | `10`, range `1-100`, slider `1-40` | Always | Ticks to wait before checking again after a recovery attempt. |

@@ -21,9 +21,10 @@ public abstract class ModuleMixin {
     @Shadow @Final @Mutable public String title;
 
     @Inject(method = "<init>(Lmeteordevelopment/meteorclient/systems/modules/Category;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;)V", at = @At("RETURN"))
-    private void thm$crystalAuraTitle(CallbackInfo ci) {
-        // Keep a distinct registry name so Meteor's own aura remains available.
+    private void thm$addonTitles(CallbackInfo ci) {
+        // Titles preserve the existing distinct registry names.
         if (((Module) (Object) this).name.equals("thmcrystal-aura")) title = "THMcrystal aura";
+        if (((Module) (Object) this).name.equals("surround-plus")) title = "Surround";
     }
 
     @Inject(method = "toggle", at = @At("HEAD"))

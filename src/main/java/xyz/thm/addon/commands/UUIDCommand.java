@@ -11,18 +11,12 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import meteordevelopment.meteorclient.commands.Command;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.multiplayer.ClientSuggestionProvider;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Objects;
-import java.util.UUID;
+import xyz.thm.addon.utils.AccountUtils;
 
 public class UUIDCommand extends Command {
     public UUIDCommand() {
         super("uuid", "Returns a players uuid.");
-    }
-
-    private static UUID offlineUuid(String name) {
-        return UUID.nameUUIDFromBytes(("OfflinePlayer:" + name).getBytes(StandardCharsets.UTF_8));
     }
 
     private List<String> getTabPlayerNames() {
@@ -83,7 +77,7 @@ public class UUIDCommand extends Command {
 
                 for (PlayerInfo entry : mc.getConnection().getOnlinePlayers()) {
                     String name = entry.getProfile().name();
-                    if (offlineUuid(name).equals(entry.getProfile().id())) {
+                    if (AccountUtils.isCracked(name, entry.getProfile().id())) {
                         cracked++;
                         if (crackedNames.length() > 0) crackedNames.append(", ");
                         crackedNames.append(name);
@@ -119,7 +113,7 @@ public class UUIDCommand extends Command {
                     })
                     .executes(context -> {
                         String name = StringArgumentType.getString(context, "name");
-                        info("Offline UUID for '" + name + "': " + offlineUuid(name));
+                        info("Offline UUID for '" + name + "': " + AccountUtils.offlineUuid(name));
                         info("Only matches if server runs in offline/cracked mode. Calculates it based on the servers algorithm");
                         return SINGLE_SUCCESS;
                     })
@@ -148,7 +142,7 @@ public class UUIDCommand extends Command {
                         if (entry == null) {
                             warning("Player '" + name + "' not found in player list.");
                         } else {
-                            if (Objects.equals(entry.getProfile().id().toString(), offlineUuid(name).toString())) {
+                            if (AccountUtils.isCracked(entry.getProfile().name(), entry.getProfile().id())) {
                                 info(name + "is a Cracked account and has the UUID: " + entry.getProfile().id() + "assigned by the server");
                             } else {
                                 info(name + "is a Premium account and has the UUID: " + entry.getProfile().id());

@@ -62,3 +62,5 @@
 - Vulkan retains the unused `liquid` sampler that OpenGL removes. Background shaders have no texture bindings; remove unused sampler declarations. Shader tests now reject texture resources in background SPIR-V.
 - Baritone's cache workers run indefinitely on non-daemon executor threads. Minecraft 26.2's shutdown watchdog crashes after world saving if they keep the JVM alive. `BaritoneWorkerMixin` makes workers daemon threads when the executor is created; shadow alias `a` covers the obfuscated Meteor jar.
 - Flat-all-dimensions test worlds can show an experimental backup prompt when reopened. Autonomous smoke runs create fresh worlds instead of assuming an old test world opens without a prompt.
+
+- Vanilla 26.2 `ChunkMap.getPlayerViewDistance` clamps client requests to at least 2. `updateChunkTracking` skips an unchanged center/radius and diffs tracked chunks when they change. A client chunk-cache deletion does not request fresh server data; wait for server unload and replacement packets.

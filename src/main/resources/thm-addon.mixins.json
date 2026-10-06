@@ -87,7 +87,8 @@
     "meteor.TimerMixin"
   ],
   "client": [
-    "ClientLevelSpeedmineMixin",
+    "ClientLevelBlockUpdateMixin",
+    "ClientChunkCacheSurroundMixin",
     "accessor.ClientLevelPredictionAccessor",
     "ClientConnectionChokeMixin",
     "InventoryScreenMixin",

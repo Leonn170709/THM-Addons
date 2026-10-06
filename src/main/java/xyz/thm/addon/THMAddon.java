@@ -187,7 +187,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Modules.get().add(new AutoIgnore());
         Modules.get().add(new ArmorNotify());
         Modules.get().add(new BetterEchestFarmer());
-        Modules.get().add(new SurroundPlus());
+        Modules.get().add(new Surround());
         Modules.get().add(new AntiPhase());
         Modules.get().add(new CrystalAura());
         Modules.get().add(new Phase());

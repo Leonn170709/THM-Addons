@@ -10,7 +10,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 
 ## Highway and Travel
 - `THM-HighwayBuilder` — Automatically builds highways according to THM standards.
-- `THM Highway Monitor` — Monitors alignment and recovers HighwayBuilder from drift. Requires Baritone.
+- `THM Highway Monitor` — Monitors alignment and recovers HighwayBuilder from drift, with reconnect or chunk-refresh recovery. Requires Baritone.
 - `Highway-Tools` — Highway utilities: axis walker, highway teleporter, boundary finder, and highway checker. Requires Baritone.
 - `axis-viewer` — Displays world axes.
 - `scaffold-THM` — Scaffolds blocks under you.
@@ -48,7 +48,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 
 ## PvP
 - `auto-trap+` — Traps a target player. Adds an optional anti-cheat friendly support placement mode.
-- `surround-plus` — Surrounds feet with Obsidian using strict logic.
+- `surround-plus` — Surround: server-confirmed placements, packet/client-world replacement, silent inventory swaps, extended feet, eye-level blocks, and a supported roof.
 - `phase`: Pearl phasing with optional head-level self-web placement.
 - `anti-phase` — Places scaffolding inside players so their pearls land instead of phasing them.
 - `AutoConcrete` — Drops falling blocks above enemies' heads.
@@ -77,7 +77,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 - `packets-hud` — Sent, received and total packets per second or per tick, with separate sent/received packet filters.
 
 ## Keybinds
-- `F3 + A + S` — Hold F3 and A, press S: the server re-sends all chunks (view distance briefly set to 0, then restored).
+- `F3 + A + S` — Hold F3 and A, press S: requests an outer-chunk refresh by briefly reporting view distance 2, then restoring the previous options. Nearby chunks can remain loaded.
 
 ## Commands
 - `center`
@@ -86,6 +86,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 - `uuid`
 
 ## UI
+- The THM tab shows the cracked-account password only for offline UUIDs; hiding it preserves its saved value.
 - Custom THM categories: `THM Highway` and `THM PVP`.
 - Disconnect button on the vanilla "Loading terrain" screen, which otherwise has no way out when it hangs.
 - GUI themes: `Dark`, `Snowy`, `Lambda`, `Stardust`, `Midnight`, `Monochrome`, `Nether`.

@@ -19,6 +19,7 @@ import xyz.thm.addon.modules.HighwayBuilderTHM;
 import xyz.thm.addon.settings.StringMultiSelect;
 import xyz.thm.addon.shaders.ShaderManager;
 import xyz.thm.addon.utils.APIUtils;
+import xyz.thm.addon.utils.AccountUtils;
 import xyz.thm.addon.utils.CapeManager;
 import xyz.thm.addon.utils.kitbot.KitbotChatRouter;
 import xyz.thm.addon.utils.ThmMembers;
@@ -234,6 +235,7 @@ public class THMSystem extends System<THMSystem> {
         .name("cracked-password")
         .description("Password used for cracked-account reconnect /login.")
         .defaultValue("")
+        .visible(AccountUtils::isCurrentAccountCracked)
         .build()
     );
 

@@ -125,6 +125,7 @@ startup, so `THMHwyMonitor` and `HighwayTools` are registered without a separate
   integration), `utils/webp` (WebP image decoding for capes/icons), `PacketPlaceTracker` (shared
   one-packet-per-block tracking for packet placing: re-send only after the server reports air; use it
   from any module with a packet place mode instead of re-sending every tick).
+  `AccountUtils` shares offline-UUID detection between `.uuid` and cracked-password visibility; hidden values remain saved.
 - `waveycapes/` — self-contained cape physics simulation (`sim/`, `util/`) plus its own mixins.
 - `settings/` — custom Meteor setting widget types (e.g. `StringMultiSelect`) beyond the stock ones.
 
@@ -134,8 +135,14 @@ addon-specific settings screen — don't confuse the two when adding a new modul
 
 **Crystal Aura:** `modules/CrystalAura` ports Lambda's opportunity scoring and prediction modes. Its visible title is THMcrystal aura; `thmcrystal-aura` keeps Meteor's registry intact. Async work stays bounded and runs world operations on the client thread. Source and adaptations: `docs/crystal-aura-lambda-port.md`.
 
-**Speedmine rebreak:** `ClientLevelSpeedmineMixin` handles server block updates on the client
-thread before world application. Packet-triggered prediction retains the incoming state for rollback.
+**Chunk refresh recovery:** `THMHwyMonitor` uses Baritone backsteps and `ChunkResync` to lower and restore the reported view distance. Resume requires server unload/reload evidence; never delete local chunks to force a resend. Vanilla clamps the server-side radius to 2.
+
+**Server block updates:** `ClientLevelBlockUpdateMixin` handles Speedmine rebreak and Surround
+replacement on the client thread before world application. Prediction retains the incoming state for rollback.
+
+**Surround:** `modules/Surround` replaces SurroundPlus, retaining the `surround-plus` registry name
+and showing as Surround. Unconfirmed predictions expire; packet replacement shares tick limits and delay
+with normal placement. Inventory swaps restore both items and the previous client/server slots.
 
 **Dropdown tooltips:** Enum choices implement `settings/DescribedOption` for per-option descriptions.
 Keep descriptions to one short sentence. Use `DropdownDescriptions.configure` for string menus.

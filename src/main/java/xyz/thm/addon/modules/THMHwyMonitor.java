@@ -33,8 +33,11 @@ import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
+import net.minecraft.network.protocol.game.ClientboundForgetLevelChunkPacket;
+import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import xyz.thm.addon.THMAddon;
@@ -42,6 +45,8 @@ import xyz.thm.addon.utils.server.ServerReconnectService;
 import xyz.thm.addon.utils.server.ServerStatusHandler;
 import xyz.thm.addon.utils.server.ServerStatusHandler.ServerState;
 import xyz.thm.addon.utils.ThmMembers;
+import xyz.thm.addon.utils.ChunkResync;
+import xyz.thm.addon.settings.DescribedOption;
 
 import java.lang.reflect.Field;
 import java.util.*;
@@ -182,9 +187,17 @@ public class THMHwyMonitor extends Module {
 
     private final Setting<Boolean> recoverRubberbandGhostblocks = sgGeneral.add(new BoolSetting.Builder()
         .name("recover-rubberband-ghostblocks")
-        .description("Reconnects if HighwayBuilder looks rubberbanded or ghostblocked.")
+        .description("Recover from repeated rubberbands or ghostblock stalls.")
         .defaultValue(true)
         .visible(autoRecover::get)
+        .build()
+    );
+
+    private final Setting<RubberbandRecoveryMode> rubberbandRecoveryMode = sgGeneral.add(new EnumSetting.Builder<RubberbandRecoveryMode>()
+        .name("rubberband-recovery-mode")
+        .description("How to recover from rubberbands and ghostblocks.")
+        .defaultValue(RubberbandRecoveryMode.Reconnect)
+        .visible(() -> autoRecover.get() && recoverRubberbandGhostblocks.get())
         .build()
     );
 
@@ -231,6 +244,11 @@ public class THMHwyMonitor extends Module {
     private boolean baritoneStopCommandTried;
     private RecoveryPhase recoveryPhase = RecoveryPhase.None;
     private RecoveryCause recoveryCause = RecoveryCause.None;
+    private RecoveryTarget chunkRefreshReturnTarget, chunkRefreshFarTarget;
+    private volatile ChunkPos chunkRefreshProbe;
+    private volatile boolean chunkRefreshForgotten, chunkRefreshReloaded;
+    private boolean chunkRefreshHolding, chunkRefreshExtended, chunkRefreshReturning;
+    private boolean chunkRefreshBaritoneSettingsSaved, chunkRefreshAllowBreak, chunkRefreshAllowPlace;
     private boolean recoveryModulesPaused;
     private final List<Module> recoveryPausedModules = new ArrayList<>();
     private HighwaySegment trackedSegment;
@@ -612,6 +630,7 @@ public class THMHwyMonitor extends Module {
 
     @Override
     public void onDeactivate() {
+        clearChunkRefreshRecovery();
         lastReliableRecoveryYaw = Float.NaN;
         preTickYawSnapshot = Float.NaN;
         preTickYawSnapshotAtMs = 0L;
@@ -836,6 +855,22 @@ public class THMHwyMonitor extends Module {
         if (stashMoverReconnectHandlingActive()) return;
         if (!(event.packet instanceof ClientboundPlayerPositionPacket)) return;
         queueForwardCorrectionPacket();
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    private void onChunkRefreshPacket(PacketEvent.Receive event) {
+        ChunkPos probe = chunkRefreshProbe;
+        if (probe == null || event.isCancelled()) return;
+        boolean unloaded = event.packet instanceof ClientboundForgetLevelChunkPacket packet && packet.pos().equals(probe);
+        boolean loaded = event.packet instanceof ClientboundLevelChunkWithLightPacket packet
+            && packet.getX() == probe.x() && packet.getZ() == probe.z();
+        if (unloaded || loaded) mc.execute(() -> {
+            if (chunkRefreshProbe != probe) return;
+            if (unloaded) {
+                chunkRefreshForgotten = true;
+                chunkRefreshReloaded = false;
+            } else if (chunkRefreshForgotten) chunkRefreshReloaded = true;
+        });
     }
 
     @EventHandler
@@ -2223,6 +2258,74 @@ public class THMHwyMonitor extends Module {
             || deferredRestartScreenshotAfterReconnectPending;
     }
 
+    private boolean beginChunkRefreshRecovery(HighwayBuilderTHM builder, String trigger) {
+        if (recoveryPhase != RecoveryPhase.None || !hasLiveServerConnection() || !BaritoneUtils.IS_AVAILABLE
+            || !builder.isActive() || !builder.isInForwardState() || builder.getWorkingDirection() == null) return false;
+        HorizontalDirection direction = builder.getWorkingDirection();
+        BlockPos start = mc.player.blockPosition();
+        RecoveryTarget retreat = chunkRefreshTarget(chunkBackstepGoal(start, direction.offsetX, direction.offsetZ, 1), direction);
+        if (!isSafeLocalStallEscapeTarget(retreat)) {
+            triggerMonitorSafeBuilderHardFail(builder, "Chunk refresh cannot retreat safely on the completed highway.");
+            return true;
+        }
+        if (!pauseAllActiveModulesForRecovery()) return false;
+        recoveryBuilder = builder;
+        recoveryCause = RecoveryCause.ChunkRefresh;
+        chunkRefreshReturnTarget = retreat;
+        chunkRefreshFarTarget = chunkRefreshTarget(chunkBackstepGoal(start, direction.offsetX, direction.offsetZ, 4), direction);
+        chunkRefreshProbe = ChunkPos.containing(start);
+        chunkRefreshForgotten = chunkRefreshReloaded = false;
+        chunkRefreshHolding = chunkRefreshExtended = chunkRefreshReturning = false;
+        chunkRefreshAllowBreak = BaritoneAPI.getSettings().allowBreak.value;
+        chunkRefreshAllowPlace = BaritoneAPI.getSettings().allowPlace.value;
+        chunkRefreshBaritoneSettingsSaved = true;
+        BaritoneAPI.getSettings().allowBreak.value = false;
+        BaritoneAPI.getSettings().allowPlace.value = false;
+        recoveryYawBeforeMove = direction.yaw;
+        resetForwardProgressWatch();
+        resetRubberbandGhostblockWatch();
+        resetForwardPacketDesyncEpisode("chunk-refresh:" + trigger);
+        startChunkRefreshLeg(retreat);
+        info("Forward %s recovery: retreating one chunk before refreshing server chunks.", trigger);
+        return true;
+    }
+
+    static BlockPos chunkBackstepGoal(BlockPos start, int directionX, int directionZ, int chunks) {
+        return start.offset(-directionX * 16 * chunks, 0, -directionZ * 16 * chunks);
+    }
+
+    private RecoveryTarget chunkRefreshTarget(BlockPos goal, HorizontalDirection direction) {
+        return new RecoveryTarget("Local", directionCode(direction), directionCode(direction),
+            goal.getX() + 0.5, goal.getZ() + 0.5, goal.getX(), goal.getY(), goal.getZ(), direction.yaw,
+            Math.hypot(mc.player.getX() - goal.getX() - 0.5, mc.player.getZ() - goal.getZ() - 0.5), null);
+    }
+
+    private void startChunkRefreshLeg(RecoveryTarget target) {
+        pendingCorrectionTarget = target;
+        baritoneRecoveryStartAttempts = 0;
+        baritoneStopCommandTried = false;
+        recoveryPhase = RecoveryPhase.WaitBeforeCorrection;
+        recoveryTicks = BARITONE_STOP_SETTLE_TICKS;
+    }
+
+    private boolean chunkRefreshProbeLoaded() {
+        ChunkPos probe = chunkRefreshProbe;
+        return probe != null && mc.level != null && mc.level.getChunkSource().getChunk(probe.x(), probe.z(), ChunkStatus.FULL, false) != null;
+    }
+
+    private void clearChunkRefreshRecovery() {
+        if (chunkRefreshHolding) ChunkResync.finishHeld();
+        if (chunkRefreshBaritoneSettingsSaved) {
+            stopBaritoneForRecovery(getPrimaryBaritoneForRecovery());
+            BaritoneAPI.getSettings().allowBreak.value = chunkRefreshAllowBreak;
+            BaritoneAPI.getSettings().allowPlace.value = chunkRefreshAllowPlace;
+        }
+        chunkRefreshBaritoneSettingsSaved = chunkRefreshHolding = chunkRefreshExtended = chunkRefreshReturning = false;
+        chunkRefreshProbe = null;
+        chunkRefreshForgotten = chunkRefreshReloaded = false;
+        chunkRefreshReturnTarget = chunkRefreshFarTarget = null;
+    }
+
     private boolean tryBeginRubberbandGhostblockReconnect(HighwayBuilderTHM builder, GhostblockReconnectTrigger trigger) {
         if (trigger == GhostblockReconnectTrigger.None || builder == null) return false;
         if (builder.isTpsThrottlePaused()) {
@@ -2274,8 +2377,12 @@ public class THMHwyMonitor extends Module {
             }
 
             if (probeResult != HighwayBuilderTHM.DesyncWiggleProbeResult.AlreadyUsed) {
-                warning("Forward packet-desync wiggle probe was unavailable; continuing existing reconnect recovery path.");
+                warning("Forward packet-desync wiggle probe was unavailable; continuing selected recovery mode.");
             }
+        }
+
+        if (rubberbandRecoveryMode.get() == RubberbandRecoveryMode.ChunkRefresh) {
+            return beginChunkRefreshRecovery(builder, triggerLabel);
         }
 
         if (!reconnectAutomationEnabled()) {
@@ -2594,6 +2701,46 @@ public class THMHwyMonitor extends Module {
             return;
         }
 
+        if (chunkRefreshHolding && !ChunkResync.isHeld()) {
+            failBaritoneRecovery("Chunk refresh hold expired before server confirmation");
+            return;
+        }
+
+        if (recoveryPhase == RecoveryPhase.WaitForChunkUnload) {
+            if (!chunkRefreshHolding) {
+                if (ChunkResync.beginHeld()) {
+                    chunkRefreshHolding = true;
+                    recoveryTicks = 20;
+                } else if (--recoveryTicks <= 0) failBaritoneRecovery("Another chunk refresh did not finish");
+                return;
+            }
+            if (chunkRefreshForgotten && !chunkRefreshProbeLoaded()) {
+                ChunkResync.finishHeld();
+                chunkRefreshHolding = false;
+                chunkRefreshReturning = true;
+                startChunkRefreshLeg(chunkRefreshReturnTarget);
+                info("Server unloaded the affected chunk. Restored view distance; returning to the first backstep.");
+                return;
+            }
+            if (--recoveryTicks > 0) return;
+            if (!chunkRefreshExtended) {
+                chunkRefreshExtended = true;
+                startChunkRefreshLeg(chunkRefreshFarTarget);
+                info("Nearby chunk is still tracked. Extending retreat to four chunks to clear the minimum server radius.");
+            } else failBaritoneRecovery("Server did not unload the affected chunk");
+            return;
+        }
+
+        if (recoveryPhase == RecoveryPhase.WaitForChunkReload) {
+            if (chunkRefreshForgotten && chunkRefreshReloaded && chunkRefreshProbeLoaded() && !ChunkResync.isActive()) {
+                clearChunkRefreshRecovery();
+                recoveryPhase = RecoveryPhase.WaitBeforeYaw;
+                recoveryTicks = YAW_SET_DELAY_TICKS;
+                info("Received fresh affected-chunk data from the server.");
+            } else if (--recoveryTicks <= 0) failBaritoneRecovery("Server did not resend the affected chunk");
+            return;
+        }
+
         if (recoveryPhase == RecoveryPhase.WaitBeforeCorrection) {
             if (recoveryTicks > 0) {
                 recoveryTicks--;
@@ -2714,6 +2861,12 @@ public class THMHwyMonitor extends Module {
                 return;
             }
 
+            if (recoveryCause == RecoveryCause.ChunkRefresh) {
+                recoveryPhase = chunkRefreshReturning ? RecoveryPhase.WaitForChunkReload : RecoveryPhase.WaitForChunkUnload;
+                recoveryTicks = 10 * 20;
+                return;
+            }
+
             recoveryPhase = RecoveryPhase.WaitBeforeYaw;
             recoveryTicks = YAW_SET_DELAY_TICKS;
             return;
@@ -2725,7 +2878,7 @@ public class THMHwyMonitor extends Module {
                 return;
             }
 
-            applyStrictAlignmentSnap();
+            if (recoveryCause != RecoveryCause.ChunkRefresh) applyStrictAlignmentSnap();
             applyWorkingYaw();
             info("Applied working-direction yaw. Resuming THM HighwayBuilder in 2.0s.");
             recoveryPhase = RecoveryPhase.WaitBeforeResume;
@@ -2848,6 +3001,15 @@ public class THMHwyMonitor extends Module {
     }
 
     private void failBaritoneRecovery(String reason) {
+        if (recoveryCause == RecoveryCause.ChunkRefresh) {
+            HighwayBuilderTHM builder = recoveryBuilder;
+            clearChunkRefreshRecovery();
+            preserveHighwayBuilderDisabledAcrossRecoveryResume();
+            triggerMonitorSafeBuilderHardFail(builder, "Chunk refresh recovery failed: %s. HighwayBuilder remains paused.", reason);
+            resetRecoveryState();
+            cooldownTicks = recoveryCooldown.get();
+            return;
+        }
         if (isStallRecoveryCause(recoveryCause)) {
             triggerMonitorSafeBuilderHardFail(
                 recoveryBuilder,
@@ -2864,6 +3026,7 @@ public class THMHwyMonitor extends Module {
     }
 
     private void resetRecoveryState() {
+        clearChunkRefreshRecovery();
         recoveryBuilder = null;
         pendingCorrectionTarget = null;
         pendingLocalStallEscapeTarget = null;
@@ -4099,6 +4262,8 @@ public class THMHwyMonitor extends Module {
         WaitBeforeCorrection,
         BaritoneStopping,
         BaritoneWalking,
+        WaitForChunkUnload,
+        WaitForChunkReload,
         WaitBeforeYaw,
         WaitBeforeResume
     }
@@ -4107,7 +4272,15 @@ public class THMHwyMonitor extends Module {
         None,
         Misalignment,
         ForwardStall,
-        CenterStall
+        CenterStall,
+        ChunkRefresh
+    }
+
+    public enum RubberbandRecoveryMode implements DescribedOption {
+        Reconnect, ChunkRefresh;
+        @Override public String description() {
+            return this == Reconnect ? "Disconnect and rejoin to reload the world." : "Walk back and refresh chunks without disconnecting.";
+        }
     }
 
     private enum StallWatchMode {
