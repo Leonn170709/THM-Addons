@@ -201,7 +201,7 @@ public class Speedmine extends Module {
 
     public final Setting<RebreakTrigger> rebreakTrigger = sgMine.add(new EnumSetting.Builder<RebreakTrigger>()
         .name("rebreak-trigger")
-        .description("Detect replacements from server packets or the client world.")
+        .description("Use client-world checks, optionally with early packet triggers.")
         .defaultValue(RebreakTrigger.onPacket)
         .visible(autoRebreak::get)
         .build());
@@ -459,11 +459,7 @@ public class Speedmine extends Module {
 
         tickAutoMine();
 
-        if (lastBrokenPos != null) {
-            boolean packet = rebreakTrigger.get() == RebreakTrigger.onPacket;
-            BlockState replacement = packet ? packetReplacement : mc.level.getBlockState(lastBrokenPos);
-            if (replacement != null) tryRebreak(lastBrokenPos, replacement, packet);
-        }
+        rebreakReplacement();
 
         pruneCompletedOrInvalid();
 
@@ -475,13 +471,17 @@ public class Speedmine extends Module {
 
     @EventHandler(priority = EventPriority.LOWEST)
     private void onTickPost(TickEvent.Post event) {
-        if (mc.player == null || mc.level == null || heldSlot == -1) return;
+        if (mc.player == null || mc.level == null) return;
+        // Placers can refill predicted air after our Pre handler.
+        rebreakReplacement();
+        if (heldSlot == -1) return;
         if (!silentSwap.get() || shouldPauseMining()) {
             releaseHeldSlot();
             return;
         }
         boolean mining = primary != null || secondary != null || !queue.isEmpty();
-        boolean replacement = autoRebreak.get() && rebreakMode.get() != RebreakMode.Off && lastBreakConfirmed && lastBrokenPos != null
+        boolean replacement = autoRebreak.get() && rebreakMode.get() != RebreakMode.Off && rebreakMode.get().isPrimed(lastBreakConfirmed) && lastBrokenPos != null
+            && lastBrokenPos.equals(lastStartedPos)
             && !outOfRange(lastBrokenPos) && BlockUtils.canBreak(lastBrokenPos, mc.level.getBlockState(lastBrokenPos));
         boolean pending = !pendingBreaks.isEmpty();
         idleTicks = mining || pending ? 0 : Math.min(IDLE_RELEASE_TICKS, idleTicks + 1);
@@ -511,13 +511,19 @@ public class Speedmine extends Module {
 
     // ── Core break logic ──────────────────────────────────────────────────────
 
+    private void rebreakReplacement() {
+        if (lastBrokenPos == null) return;
+        boolean packet = rebreakTrigger.get() == RebreakTrigger.onPacket && packetReplacement != null;
+        tryRebreak(lastBrokenPos, packet ? packetReplacement : mc.level.getBlockState(lastBrokenPos), packet);
+    }
+
     private void tryRebreak(BlockPos pos, BlockState state, boolean packet) {
-        if (mc.gameMode == null || !autoRebreak.get() || !pos.equals(lastBrokenPos)
+        boolean strong = rebreakMode.get().isStrong(bypassConfirmed);
+        if (mc.gameMode == null || !autoRebreak.get() || !pos.equals(lastBrokenPos) || !pos.equals(lastStartedPos)
             || !rebreakMode.get().canRebreak(lastBreakConfirmed, rebreakPending, bypassConfirmed)
-            || primary != null || secondary != null || hasPendingNormalBreak()
+            || primary != null || secondary != null || hasPendingNormalBreak(pendingBreaks, strong ? pos : null)
             || outOfRange(pos) || state.isAir() || !BlockUtils.canBreak(pos, state)) return;
         if (shouldPauseMining()) return;
-        boolean strong = rebreakMode.get().isStrong(bypassConfirmed);
         if (!strong && !canStart()) return;
 
         MineContext ctx = new MineContext(pos, state, false);
@@ -530,9 +536,11 @@ public class Speedmine extends Module {
 
     private void handleBlockClick(BlockPos pos, BlockState state) {
         if (isMining(pos)) return;
-        if (autoRebreak.get() && rebreakMode.get() != RebreakMode.Off && lastBreakConfirmed && pos.equals(lastBrokenPos)) {
+        if (autoRebreak.get() && rebreakMode.get() != RebreakMode.Off && rebreakMode.get().isPrimed(lastBreakConfirmed)
+            && pos.equals(lastBrokenPos) && pos.equals(lastStartedPos)) {
             boolean packet = rebreakTrigger.get() == RebreakTrigger.onPacket;
-            if (!packet || packetReplacement != null) tryRebreak(pos, packet ? packetReplacement : state, packet);
+            if (packet && packetReplacement != null) tryRebreak(pos, packetReplacement, true);
+            else tryRebreak(pos, state, false);
             return;
         }
         if (shouldPauseMining()) return;
@@ -877,7 +885,11 @@ public class Speedmine extends Module {
     }
 
     private boolean hasPendingNormalBreak() {
-        return pendingBreaks.stream().anyMatch(PendingBreak::normal);
+        return hasPendingNormalBreak(pendingBreaks, null);
+    }
+
+    static boolean hasPendingNormalBreak(List<PendingBreak> pendingBreaks, BlockPos completedTarget) {
+        return pendingBreaks.stream().anyMatch(pending -> pending.normal() && !pending.pos().equals(completedTarget));
     }
 
     record PendingBreak(BlockPos pos, int toolSlot, boolean normal, boolean secondary, long deadlineMs) {}
@@ -1034,7 +1046,7 @@ public class Speedmine extends Module {
     }
 
     public enum RebreakTrigger implements DescribedOption {
-        onPacket("Rebreak before server updates change the client world."),
+        onPacket("Rebreak on server updates and client-world replacements."),
         onClientWorld("Check for replacement blocks each client tick.");
 
         private final String description;
@@ -1070,8 +1082,13 @@ public class Speedmine extends Module {
             return this == Strong || (this == Bypass && confirmedRebreak);
         }
 
+        boolean isPrimed(boolean confirmedBreak) {
+            // A break and replacement in one server tick can omit the air update.
+            return confirmedBreak || this == Strong;
+        }
+
         boolean canRebreak(boolean primed, boolean waiting, boolean confirmedRebreak) {
-            return this != Off && primed && (!waiting || isStrong(confirmedRebreak));
+            return this != Off && isPrimed(primed) && (!waiting || isStrong(confirmedRebreak));
         }
     }
 

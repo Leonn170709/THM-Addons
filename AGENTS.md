@@ -139,6 +139,8 @@ addon-specific settings screen — don't confuse the two when adding a new modul
 
 **Server block updates:** `ClientLevelBlockUpdateMixin` handles Speedmine rebreak and Surround
 replacement on the client thread before world application. Prediction retains the incoming state for rollback.
+Speedmine also checks client replacements before and after placement ticks. Strong can retry its completed
+target without an air confirmation; other pending normal breaks still keep validation priority.
 
 **Surround:** `modules/Surround` replaces SurroundPlus, retaining the `surround-plus` registry name
 and showing as Surround. Both triggers repair client-world air; `onPacket` also preplaces on break effects

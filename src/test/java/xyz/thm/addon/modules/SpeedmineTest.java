@@ -46,7 +46,7 @@ class SpeedmineTest {
     }
 
     @ParameterizedTest
-    @EnumSource(Speedmine.RebreakMode.class)
+    @EnumSource(value = Speedmine.RebreakMode.class, names = {"Off", "Strict", "Bypass"})
     void replacementsCannotRebreakBeforeInitialServerConfirmation(Speedmine.RebreakMode mode) {
         assertFalse(mode.canRebreak(false, false, false));
         assertFalse(mode.canRebreak(false, true, true));
@@ -67,6 +67,29 @@ class SpeedmineTest {
         assertTrue(mode.canRebreak(true, false, false));
         assertTrue(mode.canRebreak(true, true, false));
         assertTrue(mode.isStrong(false), "Strong must skip the TPS start delay immediately.");
+    }
+
+    @Test
+    void strongRecoversWhenBreakAndPlacementOmitTheInitialAirUpdate() {
+        var mode = Speedmine.RebreakMode.Strong;
+        assertTrue(mode.canRebreak(false, false, false), "A completed STOP must arm Strong without an air update.");
+        assertTrue(mode.canRebreak(false, true, false), "Another replacement must not wait for the prior response.");
+        assertTrue(mode.canRebreak(true, true, false));
+        assertFalse(Speedmine.RebreakMode.Strict.canRebreak(false, false, false));
+        assertFalse(Speedmine.RebreakMode.Bypass.canRebreak(false, false, false));
+    }
+
+    @Test
+    void strongRetriesCompletedTargetWithoutBypassingAnotherBlocksValidation() {
+        BlockPos target = new BlockPos(1, 64, 0), other = target.east();
+        var completed = new Speedmine.PendingBreak(target, 2, true, false, 10000);
+        var secondary = new Speedmine.PendingBreak(other, 5, true, true, 10000);
+        var instant = new Speedmine.PendingBreak(other, 7, false, false, 10000);
+        assertTrue(Speedmine.hasPendingNormalBreak(List.of(completed), null), "Strict keeps its confirmation wait.");
+        assertFalse(Speedmine.hasPendingNormalBreak(List.of(completed, instant), target));
+        assertTrue(Speedmine.hasPendingNormalBreak(List.of(completed, secondary), target));
+        assertTrue(Speedmine.hasPendingNormalBreak(List.of(secondary), target));
+        assertEquals(5, Speedmine.validationToolSlot(-1, List.of(completed, secondary), -1));
     }
 
     @Test
