@@ -136,6 +136,12 @@ startup, so `THMHwyMonitor` and `HighwayTools` are registered without a separate
 Highway", `THMAddon.PVP` = "THM PVP") via `onRegisterCategories()`. `THMTab` is a separate,
 addon-specific settings screen — don't confuse the two when adding a new module's config surface.
 
+**Server diagnostics:** `.serverinfo` passively samples keepalives and world-time packets.
+`utils/server/ServerTelemetry` keeps bounded clock/TPS samples. Uptime is a host-clock estimate,
+not proof of OS/process uptime; epoch/random IDs remain unavailable. World age is separate.
+`plugins`, `commands`, and `channels` read exposed metadata with pagination; namespaces are hints,
+not a complete installed-plugin list. Do not send discovery commands or payload probes.
+
 **Crystal Aura:** `modules/CrystalAura` ports Lambda's opportunity scoring and prediction modes. Its visible title is THMcrystal aura; `thmcrystal-aura` keeps Meteor's registry intact. Async work stays bounded and runs world operations on the client thread. Source and adaptations: `docs/crystal-aura-lambda-port.md`.
 
 **Chunk refresh recovery:** `THMHwyMonitor` uses Baritone backsteps and `ChunkResync` to lower and restore the reported view distance. Resume requires server unload/reload evidence; never delete local chunks to force a resend. Vanilla clamps the server-side radius to 2.

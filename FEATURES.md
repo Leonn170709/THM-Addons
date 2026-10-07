@@ -84,6 +84,7 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 - `eclip`
 - `desync`
 - `uuid`
+- `serverinfo` — Passive diagnostics: estimated uptime, TPS, host, brand/version, ping, players, world age, distances, traffic, session duration, plugin namespace hints, exposed commands, and server-advertised channels. Lists accept a page number.
 
 ## UI
 - The THM tab shows the cracked-account password only for offline UUIDs; hiding it preserves its saved value.

@@ -220,6 +220,7 @@ public class THMAddon extends MeteorAddon implements ClientModInitializer {
         Commands.add(new EclipCommand());
         Commands.add(new DesyncCommand());
         Commands.add(new UUIDCommand());
+        Commands.add(new ServerInfoCommand());
         Commands.add(new THMStashMoverCommand());
         Commands.add(new Loadout());
 
