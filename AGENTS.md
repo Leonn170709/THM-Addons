@@ -62,6 +62,9 @@ endpoint. `APIUtils` calls `GeneratedApiEndpoints.xxxUrl()` to decrypt one on de
 URL and public signing key come from the same `secrets.properties`; feed and JAR GETs use the
 existing Bearer API token, with membership enforced by the server.
 
+`TrustedHttp` skips API traffic before DNS or connection setup unless the current token is a full UUID.
+Queued requests use the current configured token; the server still validates ownership and membership.
+
 Every outbound request — API calls and player-configured webhooks alike — goes through
 `TrustedHttp`, not raw `HttpURLConnection`: it rejects non-http(s) schemes, resolves the hostname
 and blocks loopback/RFC1918/link-local/CGNAT/metadata targets (SSRF), only follows same-host

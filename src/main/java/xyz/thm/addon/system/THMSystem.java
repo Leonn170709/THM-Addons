@@ -22,6 +22,7 @@ import xyz.thm.addon.utils.APIUtils;
 import xyz.thm.addon.utils.AccountUtils;
 import xyz.thm.addon.utils.CapeManager;
 import xyz.thm.addon.utils.ThmMembers;
+import xyz.thm.addon.utils.TrustedHttp;
 import xyz.thm.addon.utils.kitbot.KitbotChatRouter;
 import xyz.thm.addon.waveycapes.CapeStyle;
 import xyz.thm.addon.waveycapes.WaveyCapesConfig;
@@ -30,7 +31,6 @@ import xyz.thm.addon.waveycapes.WindMode;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
-import java.util.UUID;
 
 public class THMSystem extends System<THMSystem> {
     private static final String HIGHWAY_PROFILE_SNAPSHOTS_TAG = "highwayProfileSnapshots";
@@ -424,12 +424,7 @@ public class THMSystem extends System<THMSystem> {
 
     /** The API only accepts UUID tokens, so blank/malformed values count as "no token set". */
     public boolean hasApiToken() {
-        try {
-            UUID.fromString(getApiToken());
-            return true;
-        } catch (IllegalArgumentException e) {
-            return false;
-        }
+        return TrustedHttp.isValidApiToken(getApiToken());
     }
 
     public String getCrackedPassword() {

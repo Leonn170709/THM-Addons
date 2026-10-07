@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
@@ -103,6 +104,7 @@ public final class TrustedHttp {
     }
 
     private static byte[] send(String method, String url, Kind kind, String contentType, byte[] body, int maxResponseBytes, String bearerToken) {
+        if (kind == Kind.API && (bearerToken = validatedApiToken(bearerToken)) == null) return null;
         URI uri = parseUri(url, kind);
         if (uri == null) return null;
         boolean canFallback = kind != Kind.USER_WEBHOOK;
@@ -299,10 +301,7 @@ public final class TrustedHttp {
                 cn.setUseCaches(false);
                 if (contentType != null) cn.setRequestProperty("Content-Type", contentType);
                 if (kind == Kind.API) {
-                    // Every API request needs this, GET included - the backend requires a valid
-                    // token on every route now, not just writes.
-                    String token = bearerToken != null && !bearerToken.isEmpty() ? bearerToken : apiToken();
-                    if (!token.isEmpty()) cn.setRequestProperty("Authorization", "Bearer " + token);
+                    cn.setRequestProperty("Authorization", "Bearer " + bearerToken);
                 }
                 if (requestBody != null) {
                     cn.setDoOutput(true);
@@ -364,6 +363,7 @@ public final class TrustedHttp {
 
     // ponytail: HTTP/1.1 over a raw TLS socket, no redirects - add them if the API ever redirects.
     static byte[] exchangeDirect(InetAddress ip, String method, URI uri, Kind kind, String contentType, byte[] body, int maxResponseBytes, String bearerToken) throws Exception {
+        if (kind == Kind.API && (bearerToken = validatedApiToken(bearerToken)) == null) return null;
         String host = uri.getHost();
         int port = uri.getPort() == -1 ? 443 : uri.getPort();
         try (Socket tcp = new Socket(Proxy.NO_PROXY)) {
@@ -383,9 +383,7 @@ public final class TrustedHttp {
                 .append("User-Agent: Java/").append(System.getProperty("java.version")).append("\r\n")
                 .append("Connection: close\r\n");
             if (kind == Kind.API) {
-                String token = bearerToken != null && !bearerToken.isEmpty() ? bearerToken : apiToken();
-                if (token.indexOf('\r') >= 0 || token.indexOf('\n') >= 0) throw new IOException("API token contains a line break");
-                if (!token.isEmpty()) head.append("Authorization: Bearer ").append(token).append("\r\n");
+                head.append("Authorization: Bearer ").append(bearerToken).append("\r\n");
             }
             if (body != null) {
                 head.append("Content-Type: ").append(contentType).append("\r\n")
@@ -551,6 +549,23 @@ public final class TrustedHttp {
             out.write(buf, 0, n);
         }
         return out.toByteArray();
+    }
+
+    public static boolean isValidApiToken(String token) {
+        if (token == null || token.length() != 36) return false;
+        try {
+            return UUID.fromString(token).toString().equalsIgnoreCase(token);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    private static String validatedApiToken(String suppliedToken) {
+        String configuredToken = apiToken();
+        if (!isValidApiToken(configuredToken)
+            || (suppliedToken != null && !suppliedToken.isEmpty() && !isValidApiToken(suppliedToken))) return null;
+        // Queued work must use the current setting, never a captured credential.
+        return configuredToken;
     }
 
     private static String apiToken() {

@@ -7,6 +7,7 @@
 package xyz.thm.addon.utils;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
@@ -14,14 +15,60 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.Proxy;
+import java.net.ProxySelector;
+import java.net.SocketAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.util.Locale;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 // No network needed: every address is a literal and every rejected hostname is refused before DNS.
 class TrustedHttpTest {
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {
+        " ", "not-a-token", "1-1-1-1-1", "00112233445566778899aabbccddeeff",
+        "00112233-4455-6677-8899-aabbccddeefg", "00112233-4455-6677-8899-aabbccddeeff\r\n",
+        " 00112233-4455-6677-8899-aabbccddeeff"
+    })
+    void rejectsTokensWithoutTheFullUuidFormat(String token) {
+        assertFalse(TrustedHttp.isValidApiToken(token));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "00112233-4455-6677-8899-aabbccddeeff", "00112233-4455-6677-8899-AABBCCDDEEFF",
+        "00000000-0000-0000-0000-000000000000"
+    })
+    void acceptsFullUuidFormatWithoutClaimingServerAuthorization(String token) {
+        assertTrue(TrustedHttp.isValidApiToken(token));
+    }
+
+    @Test
+    @ResourceLock("java.net.ProxySelector")
+    void missingConfiguredTokenStopsApiTrafficBeforeConnecting() throws Exception {
+        ProxySelector previous = ProxySelector.getDefault();
+        ProxySelector.setDefault(new ProxySelector() {
+            @Override public List<Proxy> select(URI uri) { throw new AssertionError("Unexpected HTTP connection"); }
+            @Override public void connectFailed(URI uri, SocketAddress address, IOException error) { fail("Unexpected HTTP connection"); }
+        });
+        try {
+            String url = "https://1.1.1.1/test";
+            String capturedToken = "00112233-4455-6677-8899-aabbccddeeff";
+            assertNull(TrustedHttp.getBytes(url, TrustedHttp.Kind.API, 100));
+            assertNull(TrustedHttp.getString(url, TrustedHttp.Kind.API, 100));
+            assertFalse(TrustedHttp.postJson(url, "{}", TrustedHttp.Kind.API, capturedToken));
+            assertFalse(TrustedHttp.postJson(url, "{}", TrustedHttp.Kind.API, "invalid"));
+            assertFalse(TrustedHttp.postBytes(url, new byte[]{1}, "application/octet-stream", TrustedHttp.Kind.API, 100));
+            assertNull(TrustedHttp.exchangeDirect(null, "GET", null, TrustedHttp.Kind.API, null, null, 100, capturedToken));
+        } finally {
+            ProxySelector.setDefault(previous);
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
         "127.0.0.1", "127.1.2.3", "0.0.0.0", "10.0.0.1", "172.16.0.1", "172.31.255.255", "192.168.1.1",
