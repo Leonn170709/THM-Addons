@@ -129,7 +129,6 @@ startup, so `THMHwyMonitor` and `HighwayTools` are registered without a separate
   one-packet-per-block tracking for packet placing: re-send only after the server reports air; use it
   from any module with a packet place mode instead of re-sending every tick).
   `AccountUtils` shares offline-UUID detection between `.uuid` and cracked-password visibility; hidden values remain saved.
-- `waveycapes/` — self-contained cape physics simulation (`sim/`, `util/`) plus its own mixins.
 - `settings/` — custom Meteor setting widget types (e.g. `StringMultiSelect`) beyond the stock ones.
 
 **Categories vs. tabs:** Modules register under Meteor `Category`s (`THMAddon.MAIN` = "THM

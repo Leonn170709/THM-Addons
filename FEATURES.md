@@ -87,6 +87,8 @@ This document lists the modules, HUD widgets, and utilities shipped with THM Add
 - `serverinfo` — Passive diagnostics: estimated uptime, TPS, host, brand/version, ping, players, world age, distances, traffic, session duration, plugin namespace hints, exposed commands, and server-advertised channels. Lists accept a page number.
 
 ## UI
+
+- THM capes use Minecraft's normal cape renderer.
 - The THM tab shows the cracked-account password only for offline UUIDs; hiding it preserves its saved value.
 - Custom THM categories: `THM Highway` and `THM PVP`.
 - Disconnect button on the vanilla "Loading terrain" screen, which otherwise has no way out when it hangs.

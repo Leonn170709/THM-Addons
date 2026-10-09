@@ -24,9 +24,6 @@ import xyz.thm.addon.utils.CapeManager;
 import xyz.thm.addon.utils.ThmMembers;
 import xyz.thm.addon.utils.TrustedHttp;
 import xyz.thm.addon.utils.kitbot.KitbotChatRouter;
-import xyz.thm.addon.waveycapes.CapeStyle;
-import xyz.thm.addon.waveycapes.WaveyCapesConfig;
-import xyz.thm.addon.waveycapes.WindMode;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -52,10 +49,6 @@ public class THMSystem extends System<THMSystem> {
 
     public final Settings updaterSettings = new Settings();
     private final SettingGroup sgUpdater = updaterSettings.createGroup("Updater");
-
-    // Separate settings object for the Wavy Capes screen (not shown in the main THM tab)
-    public final Settings wavyCapesSettings = new Settings();
-    private final SettingGroup sgWavyCapes = wavyCapesSettings.createGroup("Wavy Capes");
 
     // Separate settings object for the Main Menu screen, opened from a button on the title screen
     public final Settings mainMenuSettings = new Settings();
@@ -239,101 +232,6 @@ public class THMSystem extends System<THMSystem> {
         .build()
     );
 
-    public final Setting<Boolean> wavyCapes = sgWavyCapes.add(new BoolSetting.Builder()
-        .name("wavy-capes")
-        .description("Replaces the vanilla stiff cape with rope physics. Off = vanilla behavior.")
-        .defaultValue(false)
-        .onChanged(v -> WaveyCapesConfig.syncFromSystem())
-        .build()
-    );
-
-    public final Setting<CapeStyle> wavyCapeStyle = sgWavyCapes.add(new EnumSetting.Builder<CapeStyle>()
-        .name("rendering")
-        .description("Blocky: 16 rigid segments. Smooth: interpolated quads between segments.")
-        .defaultValue(CapeStyle.SMOOTH)
-        .visible(wavyCapes::get)
-        .onChanged(v -> WaveyCapesConfig.syncFromSystem())
-        .build()
-    );
-
-    public final Setting<WindMode> wavyWindMode = sgWavyCapes.add(new EnumSetting.Builder<WindMode>()
-        .name("wind")
-        .description("None: cape only moves from player motion. Waves: adds a gentle idle sway.")
-        .defaultValue(WindMode.NONE)
-        .visible(wavyCapes::get)
-        .onChanged(v -> WaveyCapesConfig.syncFromSystem())
-        .build()
-    );
-
-    public final Setting<Double> wavyGravity = sgWavyCapes.add(new DoubleSetting.Builder()
-        .name("gravity")
-        .description("How hard gravity pulls the cape down. Higher = heavier cape.")
-        .defaultValue(25)
-        .min(0).max(100).sliderRange(0, 100)
-        .visible(wavyCapes::get)
-        .onChanged(v -> WaveyCapesConfig.syncFromSystem())
-        .build()
-    );
-
-    public final Setting<Double> wavyHeightMultiplier = sgWavyCapes.add(new DoubleSetting.Builder()
-        .name("vertical-response")
-        .description("How much jumping or falling tosses the cape upward.")
-        .defaultValue(6)
-        .min(0).max(20).sliderRange(0, 20)
-        .visible(wavyCapes::get)
-        .onChanged(v -> WaveyCapesConfig.syncFromSystem())
-        .build()
-    );
-
-    public final Setting<Double> wavyStraveMultiplier = sgWavyCapes.add(new DoubleSetting.Builder()
-        .name("strafe-response")
-        .description("How much strafing flares the cape sideways.")
-        .defaultValue(2)
-        .min(0).max(10).sliderRange(0, 10)
-        .visible(wavyCapes::get)
-        .onChanged(v -> WaveyCapesConfig.syncFromSystem())
-        .build()
-    );
-
-    public final Setting<Double> wavyDamping = sgWavyCapes.add(new DoubleSetting.Builder()
-        .name("damping")
-        .description("Velocity damping per tick — lower = more floaty.")
-        .defaultValue(0.85)
-        .min(0).max(1).sliderRange(0, 1)
-        .visible(wavyCapes::get)
-        .onChanged(v -> WaveyCapesConfig.syncFromSystem())
-        .build()
-    );
-
-    public final Setting<Integer> wavyStiffness = sgWavyCapes.add(new IntSetting.Builder()
-        .name("stiffness")
-        .description("Constraint solver iterations — higher = stiffer cape.")
-        .defaultValue(3)
-        .min(1).max(10).sliderRange(1, 10)
-        .visible(wavyCapes::get)
-        .onChanged(v -> WaveyCapesConfig.syncFromSystem())
-        .build()
-    );
-
-    public final Setting<Boolean> wavyComputeGravityVector = sgWavyCapes.add(new BoolSetting.Builder()
-        .name("compute-gravity-vector")
-        .description("Hangs the cape along the model's real down direction instead of the swim-pose hack.")
-        .defaultValue(false)
-        .visible(wavyCapes::get)
-        .onChanged(v -> WaveyCapesConfig.syncFromSystem())
-        .build()
-    );
-
-    public final Setting<Double> wavyMaxBend = sgWavyCapes.add(new DoubleSetting.Builder()
-        .name("max-bend")
-        .description("Maximum bend angle between cape segments (degrees).")
-        .defaultValue(20)
-        .min(1).max(90).sliderRange(1, 90)
-        .visible(wavyCapes::get)
-        .onChanged(v -> WaveyCapesConfig.syncFromSystem())
-        .build()
-    );
-
     public final Setting<Boolean> mainMenuWindow = sgMainMenu.add(new BoolSetting.Builder()
         .name("styled-window")
         .description("Shows the BleachHack-styled window frame on the title screen.")
@@ -407,7 +305,6 @@ public class THMSystem extends System<THMSystem> {
     public THMSystem() {
         super("THM-Addon");
         KitbotChatRouter.setEnabled(kitbotChatRouterEnabled.get());
-        WaveyCapesConfig.syncFromSystem();
     }
 
     public Mode getMode() {
@@ -475,7 +372,6 @@ public class THMSystem extends System<THMSystem> {
         tag.putString("version", THMAddon.VERSION);
         tag.put("settings", settings.toTag());
         tag.put("updaterSettings", updaterSettings.toTag());
-        tag.put("wavyCapesSettings", wavyCapesSettings.toTag());
         tag.put("mainMenuSettings", mainMenuSettings.toTag());
         tag.putString(ACTIVE_HIGHWAY_PROFILE_TAG, (activeHighwayProfile == null ? Mode.None : activeHighwayProfile).name());
         tag.put(HIGHWAY_PROFILE_SNAPSHOTS_TAG, highwayProfileSnapshotsToTag());
@@ -490,9 +386,6 @@ public class THMSystem extends System<THMSystem> {
         // Older configs stored the Updater group in the main tab settings.
         updaterSettings.fromTag(tag.getCompound(tag.contains("updaterSettings") ? "updaterSettings" : "settings")
             .orElse(new CompoundTag()));
-        if (tag.contains("wavyCapesSettings")) {
-            wavyCapesSettings.fromTag(tag.getCompound("wavyCapesSettings").orElse(new CompoundTag()));
-        }
         if (tag.contains("mainMenuSettings")) {
             mainMenuSettings.fromTag(tag.getCompound("mainMenuSettings").orElse(new CompoundTag()));
         }
@@ -507,7 +400,6 @@ public class THMSystem extends System<THMSystem> {
             }
         }
         KitbotChatRouter.setEnabled(kitbotChatRouterEnabled.get());
-        WaveyCapesConfig.syncFromSystem();
         return this;
     }
 
