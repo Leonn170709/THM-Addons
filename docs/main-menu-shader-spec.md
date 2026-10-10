@@ -84,7 +84,8 @@ Install `glslangValidator` on PATH (`glslang` on Arch, `glslang-tools` on Ubuntu
 ```
 
 `tools/scripts/check-shaders.sh` runs the same task. These JUnit tests also run with `test` and
-`build`; CI installs the compiler before building.
+`build` when the compiler is available. Local builds skip these checks without the compiler;
+`checkShaders` and CI require it. CI installs the compiler before building.
 
 `ShaderCompatibilityTest` discovers every background `.fsh` and pairs it with the actual
 `minecraft:core/screenquad` vertex resource from the Minecraft dependency. It reads the compiled
@@ -95,7 +96,8 @@ The [glslang reference compiler](https://github.com/KhronosGroup/glslang) checks
 
 Negative cases verify that invalid GLSL and incompatible vertex/fragment types fail on both
 backends. Background SPIR-V is checked for unbound texture resources, including unused samplers
-that OpenGL may remove. Missing compiler or shader sources fail the tests instead of skipping them.
+that OpenGL may remove. Missing shader sources and compiler errors fail the checks.
+An unavailable compiler fails `checkShaders` and CI; local `test`/`build` skips the shader tests.
 Results: `build/reports/tests/checkShaders/index.html`, or `build/reports/tests/test/index.html`
 after `test`/`build`.
 

@@ -16,9 +16,9 @@ import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.utils.server.OnlinePlayers;
 import xyz.thm.addon.utils.ThmMembers;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
@@ -90,9 +90,7 @@ public class KosHud extends HudElement {
     public void render(HudRenderer renderer) {
         if (mc.player == null) return;
 
-        // Get all online players from tab list
-        List<String> onlinePlayers = new ArrayList<>(mc.player.connection.getOnlinePlayers().stream()
-            .map(playerInfo -> playerInfo.getProfile().name()).toList());
+        List<String> onlinePlayers = OnlinePlayers.getNames();
 
         List<String> kosPlayers = onlinePlayers.stream()
             .filter(player -> {

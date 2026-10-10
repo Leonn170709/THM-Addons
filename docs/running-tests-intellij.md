@@ -21,7 +21,8 @@ for each test.
    `GeneratedApiEndpointsTest` needs that. With "IntelliJ IDEA" selected it only works after one
    normal build.
 4. Install `glslangValidator` on PATH (`glslang` on Arch, `glslang-tools` on Ubuntu) for the shader
-   tests. Restart IntelliJ if you changed its PATH.
+   tests. Local runs skip shader checks when the compiler is unavailable. Restart IntelliJ if you
+   changed its PATH.
 
 ## Run tests
 
@@ -59,7 +60,7 @@ Outside the IDE, the same results are in `build/reports/tests/test/index.html` a
 | `KitbotChatCommandParserTest` | `$goto`/`$update`/`$kit`/`$send`/`$token`/`$claim` parsing, errors, and tab-completion. |
 | `AdaptiveRateTest` | Fractional per-tick rates (1.5 → 1-2-1-2 = 30/s, no float drift) and adaptive-placements step up/down. |
 | `GhostBlockProbeTest` | Ghost-block check: packet pairing, verify, ghost and timeout handling. |
-| `ShaderCompatibilityTest` | OpenGL/Vulkan compilation and linking for all backgrounds and inline effects; rejects invalid GLSL and stage type mismatches. Requires `glslangValidator`, no GPU context. |
+| `ShaderCompatibilityTest` | OpenGL/Vulkan compilation and linking for all backgrounds and inline effects; rejects invalid GLSL and stage type mismatches. Skipped locally without `glslangValidator`; required in CI and `checkShaders`. No GPU context. |
 
 Tests run without a game, so they can't cover anything that needs a live world or Minecraft's
 registries. Test that in the client.

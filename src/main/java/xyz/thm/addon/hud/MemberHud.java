@@ -14,6 +14,7 @@ import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.utils.server.OnlinePlayers;
 import xyz.thm.addon.settings.StringMultiSelect;
 import xyz.thm.addon.system.THMSystem;
 import xyz.thm.addon.utils.ThmMembers;
@@ -141,9 +142,7 @@ public class MemberHud extends HudElement {
         if (mc.player == null) return;
         double textScale = scale.get();
 
-        // Get all online players from tab list
-        List<String> onlinePlayers = new ArrayList<>(mc.player.connection.getOnlinePlayers().stream()
-            .map(playerInfo -> playerInfo.getProfile().name()).toList());
+        List<String> onlinePlayers = OnlinePlayers.getNames();
 
         // Group online usernames by their underlying member (multiple alts share the same Member instance)
         Map<ThmMembers.Member, List<String>> usernamesByMember = new LinkedHashMap<>();

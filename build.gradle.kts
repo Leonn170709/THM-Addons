@@ -197,6 +197,7 @@ val generateApiEndpoints = tasks.register("generateApiEndpoints") {
 
 tasks.test {
     useJUnitPlatform()
+    systemProperty("thm.requireShaderCompiler", providers.environmentVariable("CI").orElse("false").get().equals("true", ignoreCase = true))
 }
 
 tasks.register<Test>("checkShaders") {
@@ -205,6 +206,7 @@ tasks.register<Test>("checkShaders") {
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
     useJUnitPlatform()
+    systemProperty("thm.requireShaderCompiler", true)
     filter { includeTestsMatching("xyz.thm.addon.shaders.ShaderCompatibilityTest") }
 }
 

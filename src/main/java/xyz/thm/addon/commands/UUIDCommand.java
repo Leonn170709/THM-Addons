@@ -12,20 +12,11 @@ import meteordevelopment.meteorclient.commands.Command;
 import net.minecraft.client.multiplayer.ClientSuggestionProvider;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import xyz.thm.addon.utils.AccountUtils;
-
-import java.util.List;
+import xyz.thm.addon.utils.server.OnlinePlayers;
 
 public class UUIDCommand extends Command {
     public UUIDCommand() {
         super("uuid", "Returns a players uuid.");
-    }
-
-    private List<String> getTabPlayerNames() {
-        if (mc.getConnection() == null) return List.of();
-        return mc.getConnection().getOnlinePlayers()
-            .stream()
-            .map(e -> e.getProfile().name())
-            .toList();
     }
 
     @Override
@@ -43,7 +34,7 @@ public class UUIDCommand extends Command {
                 argument("name", StringArgumentType.string())
                     .suggests((context, suggestionsBuilder) -> {
                         String remaining = suggestionsBuilder.getRemaining().toLowerCase();
-                        getTabPlayerNames().stream()
+                        OnlinePlayers.getNames().stream()
                             .filter(name -> name.toLowerCase().startsWith(remaining))
                             .forEach(suggestionsBuilder::suggest);
                         return suggestionsBuilder.buildFuture();
@@ -59,7 +50,7 @@ public class UUIDCommand extends Command {
                             .orElse(null);
 
                         if (entry == null) {
-                            warning("Player '" + name + "' not found in player list.");
+                            warning("No player profile available for '" + name + "'.");
                         } else {
                             info(entry.getProfile().name() + "'s UUID is " + entry.getProfile().id().toString());
                         }
@@ -107,7 +98,7 @@ public class UUIDCommand extends Command {
                 argument("name", StringArgumentType.string())
                     .suggests((context, suggestionsBuilder) -> {
                         String remaining = suggestionsBuilder.getRemaining().toLowerCase();
-                        getTabPlayerNames().stream()
+                        OnlinePlayers.getNames().stream()
                             .filter(name -> name.toLowerCase().startsWith(remaining))
                             .forEach(suggestionsBuilder::suggest);
                         return suggestionsBuilder.buildFuture();
@@ -125,7 +116,7 @@ public class UUIDCommand extends Command {
                 argument("name", StringArgumentType.string())
                     .suggests((context, suggestionsBuilder) -> {
                         String remaining = suggestionsBuilder.getRemaining().toLowerCase();
-                        getTabPlayerNames().stream()
+                        OnlinePlayers.getNames().stream()
                             .filter(name -> name.toLowerCase().startsWith(remaining))
                             .forEach(suggestionsBuilder::suggest);
                         return suggestionsBuilder.buildFuture();
@@ -141,7 +132,7 @@ public class UUIDCommand extends Command {
                             .orElse(null);
 
                         if (entry == null) {
-                            warning("Player '" + name + "' not found in player list.");
+                            warning("No player profile available for '" + name + "'.");
                         } else {
                             if (AccountUtils.isCracked(entry.getProfile().name(), entry.getProfile().id())) {
                                 info(name + "is a Cracked account and has the UUID: " + entry.getProfile().id() + "assigned by the server");

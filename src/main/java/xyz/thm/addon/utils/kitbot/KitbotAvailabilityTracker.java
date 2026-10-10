@@ -10,12 +10,11 @@ import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.multiplayer.PlayerInfo;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.utils.server.OnlinePlayers;
 import xyz.thm.addon.utils.server.ServerStatusHandler;
 import xyz.thm.addon.utils.server.ServerStatusHandler.ServerState;
 
-import java.util.Collection;
 import java.util.concurrent.CopyOnWriteArraySet;
 
 public final class KitbotAvailabilityTracker {
@@ -109,16 +108,7 @@ public final class KitbotAvailabilityTracker {
 
     private Boolean sampleKitbotOnline() {
         try {
-            Collection<PlayerInfo> playerList = MeteorClient.mc.getConnection().getOnlinePlayers();
-            if (playerList == null) return null;
-
-            for (PlayerInfo entry : playerList) {
-                if (entry == null || entry.getProfile() == null) continue;
-                String name = entry.getProfile().name();
-                if (KITBOT_NAME.equalsIgnoreCase(name)) return true;
-            }
-
-            return false;
+            return OnlinePlayers.isOnline(KITBOT_NAME);
         } catch (RuntimeException e) {
             THMAddon.LOG.warn("KitBot availability sample failed: {}", e.getMessage());
             return null;

@@ -18,12 +18,12 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.gui.screens.ChatScreen;
-import net.minecraft.client.multiplayer.PlayerInfo;
 import xyz.thm.addon.THMAddon;
 import xyz.thm.addon.settings.DescribedOption;
 import xyz.thm.addon.settings.StringMultiSelect;
 import xyz.thm.addon.utils.FriendClients;
 import xyz.thm.addon.utils.ThmMembers;
+import xyz.thm.addon.utils.server.OnlinePlayers;
 
 import java.util.*;
 
@@ -124,8 +124,7 @@ public class FriendsSyncModule extends Module {
         }
 
         if (mc.getConnection() != null) {
-            for (PlayerInfo entry : mc.getConnection().getOnlinePlayers()) {
-                String name = entry.getProfile().name();
+            for (String name : OnlinePlayers.getNames()) {
                 knownPlayers.add(name);
                 handlePlayerJoin(name);
             }
@@ -145,10 +144,7 @@ public class FriendsSyncModule extends Module {
         if (syncMode.get() == SyncMode.File) return;
         if (mc.player == null || mc.getConnection() == null) return;
 
-        Set<String> currentPlayers = new HashSet<>();
-        for (PlayerInfo entry : mc.getConnection().getOnlinePlayers()) {
-            currentPlayers.add(entry.getProfile().name());
-        }
+        Set<String> currentPlayers = new HashSet<>(OnlinePlayers.getNames());
 
         for (String name : currentPlayers) {
             if (!knownPlayers.contains(name)) {

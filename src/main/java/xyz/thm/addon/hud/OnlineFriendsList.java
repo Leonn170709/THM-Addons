@@ -15,8 +15,8 @@ import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
-import net.minecraft.client.multiplayer.PlayerInfo;
 import xyz.thm.addon.THMAddon;
+import xyz.thm.addon.utils.server.OnlinePlayers;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -134,11 +134,10 @@ public class OnlineFriendsList extends HudElement {
         // Get our own player name to exclude it
         String ourPlayerName = mc.player.getName().getString();
 
-        for (PlayerInfo player : mc.getConnection().getOnlinePlayers()) {
-            String playerName = player.getProfile().name();
+        for (String playerName : OnlinePlayers.getNames()) {
 
             // Skip ourselves and only include friends
-            if (!playerName.equals(ourPlayerName) && Friends.get().isFriend(player)) {
+            if (!playerName.equals(ourPlayerName) && Friends.get().get(playerName) != null) {
                 onlineFriends.add(playerName);
             }
         }

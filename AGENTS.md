@@ -31,8 +31,9 @@ why, or which other settings it interacts with. If it needs more than one senten
 
 - `./gradlew build` — full build, jar lands in `build/libs`.
 - `./gradlew checkShaders` — OpenGL/Vulkan compiler and linker tests for backgrounds, blur, and
-  trip shaders. Included in `test`/`build`; requires `glslangValidator` on PATH (`glslang` on Arch,
-  `glslang-tools` on Ubuntu). No GPU or client is started.
+  trip shaders. Requires `glslangValidator` on PATH (`glslang` on Arch, `glslang-tools` on Ubuntu).
+  Local `test`/`build` skips shader checks if the compiler is unavailable; CI requires it.
+  No GPU or client is started.
 - `./gradlew runClient` — launch a dev client with the addon loaded (via Fabric Loom). Autonomous
   client tests, including creating and joining local test worlds, are allowed for this repository.
 - `./gradlew test` — JUnit 5 unit tests in `src/test/java` (also run by `build`). They run without
@@ -134,6 +135,12 @@ startup, so `THMHwyMonitor` and `HighwayTools` are registered without a separate
 **Categories vs. tabs:** Modules register under Meteor `Category`s (`THMAddon.MAIN` = "THM
 Highway", `THMAddon.PVP` = "THM PVP") via `onRegisterCategories()`. `THMTab` is a separate,
 addon-specific settings screen — don't confuse the two when adding a new module's config surface.
+
+**Online player names:** `utils/server/OnlinePlayers.getNames()` merges known profiles with fresh
+`/msg ` completion names for HUDs, friend sync, and KitBot. Requests are shared and demand-driven
+(every 10 seconds); names expire after 30 seconds and clear on disconnect or connection changes.
+Use real profiles/entities for UUIDs, skins, ping, and world operations. `isOnline()` returns null
+when an absent player cannot be checked against fresh completion.
 
 **Server diagnostics:** `.serverinfo` passively samples keepalives and world-time packets.
 `utils/server/ServerTelemetry` keeps bounded clock/TPS samples. Uptime is a host-clock estimate,

@@ -8,9 +8,8 @@ package xyz.thm.addon.utils.kitbot;
 
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
-import meteordevelopment.meteorclient.MeteorClient;
-import net.minecraft.client.multiplayer.PlayerInfo;
 import xyz.thm.addon.modules.KitbotFrontend;
+import xyz.thm.addon.utils.server.OnlinePlayers;
 
 import java.util.*;
 
@@ -122,12 +121,7 @@ public final class KitbotChatCommandParser {
     }
 
     public static List<String> getOnlinePlayerNames() {
-        if (MeteorClient.mc == null || MeteorClient.mc.getConnection() == null) return List.of();
-        List<String> names = new ArrayList<>();
-        for (PlayerInfo entry : MeteorClient.mc.getConnection().getOnlinePlayers()) {
-            names.add(entry.getProfile().name());
-        }
-        return names;
+        return OnlinePlayers.getNames();
     }
 
     private static ParseResult parseDirectional(CommandType type, KitbotFrontend.Mode mode, String[] tokens, String usage) {
@@ -155,7 +149,7 @@ public final class KitbotChatCommandParser {
         if (tokens.length < 3 || tokens.length > 4) return new ParseResult(ParseStatus.INVALID, null, SEND_USAGE);
 
         if (!containsExact(onlinePlayers, tokens[1])) {
-            return new ParseResult(ParseStatus.INVALID, null, "Player must match an online tab-list name exactly.");
+            return new ParseResult(ParseStatus.INVALID, null, "Player must match an online name exactly.");
         }
 
         KitbotFrontend.KitName kit = KitbotFrontend.KitName.fromString(tokens[2]);
